@@ -1,0 +1,41 @@
+{
+  "id": "ps_001",
+  "songId": "song_001",
+  "arrangementId": null,
+  "role": "KEYS",
+  "title": "Keys \u2014 Sunday AM",
+  "createdAt": "2026-01-03T00:00:00Z",
+  "updatedAt": "2026-01-03T00:00:00Z",
+  "assignedMusicianId": "mus_123",
+  "visibility": "ASSIGNED_ONLY",
+  "header": {
+    "songTitle": "Gratitude",
+    "artistOrBand": "Brandon Lake",
+    "bpm": 72,
+    "timeSignature": "4/4",
+    "keyConcert": "A",
+    "capo": null,
+    "feel": "Worship"
+  },
+  "notesMarkdown": "- MainStage: Warm Pad + Piano\\n- Build on Bridge, drop pad on Chorus 2",
+  "sections": [
+    {
+      "id": "v1",
+      "label": "Verse 1",
+      "bars": 16,
+      "cues": "Keep low register",
+      "patterns": null,
+      "patches": "Piano only",
+      "riffs": "Pentatonic run into chorus"
+    },
+    {
+      "id": "c1",
+      "label": "Chorus",
+      "bars": 16,
+      "cues": "Add pad layer",
+      "patterns": null,
+      "patches": "Piano + Pad",
+      "riffs": null
+    }
+  ]
+}

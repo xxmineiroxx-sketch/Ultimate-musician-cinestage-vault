@@ -1,0 +1,1 @@
+{"extends": "universe/native", "env": {"browser": true, "node": true, "es2021": true}, "globals": {"TextDecoder": "readonly", "TextEncoder": "readonly"}}
