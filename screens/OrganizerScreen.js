@@ -5,7 +5,10 @@ import { armState, getLastArmMeta } from "../services/stickySync";
 
 // NOTE:
 // - On real iPad/iPhone, replace localhost with your Mac's LAN IP:
-//   ws://10.x.x.x:8000/ws
+//   ws://10.0.0.34:8000/ws   (multi-device sync)
+// - CineStage AI WebSocket (AI assistant terminal):
+//   ws://10.0.0.34:8787/ws
+// - Start the backend first: run start_cinestage.sh from ~/Desktop
 
 export default function OrganizerScreen({ navigation }) {
   const [status, setStatus] = useState(getSyncStatus());

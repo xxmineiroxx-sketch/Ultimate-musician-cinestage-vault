@@ -10,7 +10,7 @@ import {
   ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from './config';
 
 const ROLE_CYCLE = [null, 'md', 'admin']; // null = no grant
 const ROLE_LABEL = { md: 'Music Director', admin: 'Admin' };

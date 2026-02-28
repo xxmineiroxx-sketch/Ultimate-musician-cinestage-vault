@@ -9,7 +9,7 @@ import {
   FlatList, TextInput, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from './config';
 const DEFAULT_ADMIN_NAME = 'Admin';
 
 async function fetchJson(url, opts = {}) {

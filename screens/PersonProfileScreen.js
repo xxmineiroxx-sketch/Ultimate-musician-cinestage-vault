@@ -16,7 +16,7 @@ import {
 import { ROLE_OPTIONS } from '../data/models';
 import Chip from '../components/Chip';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from './config';
 const ROLE_CYCLE = [null, 'md', 'admin'];
 const ROLE_LABEL = { md: 'Music Director', admin: 'Admin' };
 const ROLE_COLOR = { md: '#8B5CF6', admin: '#F59E0B' };

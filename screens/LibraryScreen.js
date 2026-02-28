@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getSongs, getSettings, addOrUpdateSong, findSongDuplicate } from '../data/storage';
+import { ensureCifrasSeeded, removeCifrasSongs, getCifrasCount } from '../data/cifrasSeed';
 import { makeId } from '../data/models';
 import CineStageProcessingOverlay from '../components/CineStageProcessingOverlay';
 
@@ -59,9 +60,11 @@ function StemBadges({ song }) {
 }
 
 export default function LibraryScreen({ navigation }) {
-  const [songs, setSongs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState('');
+  const [songs, setSongs]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [query, setQuery]         = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importDone, setImportDone] = useState(false);
 
   // API settings
   const [apiBase, setApiBase] = useState('http://localhost:8000');
@@ -107,6 +110,22 @@ export default function LibraryScreen({ navigation }) {
           (s.artist || '').toLowerCase().includes(query.toLowerCase())
       )
     : songs;
+
+  // ── Import INCC Cifras library ──
+  const handleImportCifras = async () => {
+    setImporting(true);
+    const result = await ensureCifrasSeeded();
+    setImporting(false);
+    if (result.status === 'already_seeded') {
+      Alert.alert('Already Imported', `The INCC church library (${getCifrasCount()} songs) is already in your library.`);
+    } else if (result.status === 'seeded') {
+      setImportDone(true);
+      await loadSongs();
+      Alert.alert('Library Imported! 🎉', `Added ${result.count} songs from the INCC Cifras collection to your library.`);
+    } else {
+      Alert.alert('Error', result.error || 'Could not import library.');
+    }
+  };
 
   // ── Open URL input modal ──
   function openCineStageModal(song) {
@@ -253,6 +272,24 @@ export default function LibraryScreen({ navigation }) {
       <Text style={styles.subtitle}>
         Tap a song to view. Run CineStage™ to separate stems.
       </Text>
+
+      {/* INCC Church Library Import Banner */}
+      {!importDone && (
+        <TouchableOpacity
+          style={styles.importBanner}
+          onPress={handleImportCifras}
+          disabled={importing}
+          activeOpacity={0.8}
+        >
+          {importing ? (
+            <ActivityIndicator size="small" color="#FFF" />
+          ) : (
+            <Text style={styles.importBannerText}>
+              ⛪ Import INCC Church Library — {getCifrasCount()} songs
+            </Text>
+          )}
+        </TouchableOpacity>
+      )}
 
       {/* Search */}
       <TextInput
@@ -446,6 +483,22 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 16,
     marginBottom: 12,
+  },
+  importBanner: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    backgroundColor: '#1E3A5F',
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  importBannerText: {
+    color: '#93C5FD',
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   searchInput: {

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { getSongs, addOrUpdateSong } from '../data/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from './config';
 
 const INSTR_ICON = {
   Vocals: '🎤', Keys: '🎹', 'Acoustic Guitar': '🎸',

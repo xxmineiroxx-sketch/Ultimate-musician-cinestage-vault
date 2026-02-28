@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { makeDefaultSettings, makeEmptyServicePlan } from './models';
 import { demoSongs, demoRoles, demoSettings, demoServicePlan } from './demoSeed';
+import { ensureCifrasSeeded } from './cifrasSeed';
 
 const SONGS_KEY = 'um.songs.v2';
 const SERVICES_KEY = 'um.services.v1';
@@ -176,12 +177,18 @@ export const toggleServiceLock = async (locked) => {
 // SEEDING
 export const ensureSeeded = async () => {
   const seeded = await AsyncStorage.getItem(SEEDED_KEY);
-  if (seeded === 'true') return;
+  if (seeded === 'true') {
+    // Still seed Cifras in background on every cold start (no-op if already done)
+    ensureCifrasSeeded().catch(() => {});
+    return;
+  }
   await saveSongs(demoSongs());
   await saveRoles(demoRoles());
   await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(demoSettings() || makeDefaultSettings()));
   await saveServicePlan(demoServicePlan() || makeEmptyServicePlan());
   await AsyncStorage.setItem(SEEDED_KEY, 'true');
+  // Seed Cifras church library in background after demo seed completes
+  ensureCifrasSeeded().catch(() => {});
 };
 
 export const resetAll = async () => {
