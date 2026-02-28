@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ultimate Playback</title>
+  <style>
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+    }
+    
+    body {
+      overflow-y: scroll;
+      -webkit-overflow-scrolling: touch;
+      background-color: #020617;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #020617;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #4F46E5;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #6366F1;
+    }
+
+    /* Loading indicator */
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #E5E7EB;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="loading">Loading Ultimate Playback...</div>
+  </div>
+</body>
+</html>

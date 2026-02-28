@@ -1,0 +1,30 @@
+/* Fix scrolling on web */
+html, body, #root {
+  height: 100%;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Custom scrollbar for better appearance */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4F46E5;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6366F1;
+}
