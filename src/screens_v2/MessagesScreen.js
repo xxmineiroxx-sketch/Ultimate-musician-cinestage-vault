@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();
@@ -33,13 +33,11 @@ export default function MessagesScreen({ navigation }) {
   const [selected, setSelected]   = useState(null);
   const [loading, setLoading]     = useState(false);
   const [sending, setSending]     = useState(false);
+  const [deleting, setDeleting]   = useState(false);
   const [showCompose, setShowCompose] = useState(false);
-  const [isAdminMode, setIsAdminMode] = useState(false); // MD/Admin sees all messages
 
   const [subject, setSubject]   = useState('');
   const [body, setBody]         = useState('');
-  const [replyText, setReplyText] = useState('');
-  const [to, setTo]             = useState('admin'); // 'admin' | 'all_team'
 
   useEffect(() => {
     loadProfile();
@@ -48,35 +46,18 @@ export default function MessagesScreen({ navigation }) {
   const loadProfile = async () => {
     const p = await getUserProfile();
     setProfile(p);
-    // Check for admin role grant
-    const granted = p?.grantedRole;
-    if (granted === 'md' || granted === 'admin') {
-      setIsAdminMode(true);
-      refreshInboxAdmin();
-    } else if (p?.email) {
+    if (p?.email) {
       refreshInbox(p.email);
     }
   };
-
-  // Admin inbox: all team messages
-  const refreshInboxAdmin = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchJson(`${SYNC_URL}/sync/messages/admin`);
-      setThreads(Array.isArray(data) ? data : []);
-    } catch (_) {
-      // server unreachable
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const refreshInbox = useCallback(async (email) => {
     if (!email) return;
     setLoading(true);
     try {
       const data = await fetchJson(
-        `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(email)}`
+        `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(email)}`,
+        { headers: syncHeaders() }
       );
       setThreads(data);
     } catch (_) {
@@ -103,25 +84,19 @@ export default function MessagesScreen({ navigation }) {
     try {
       await fetchJson(`${SYNC_URL}/sync/message`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: syncHeaders(),
         body: JSON.stringify({
-          from_email: profile.email,
-          from_name: `${profile.name || ''} ${profile.lastName || ''}`.trim() || profile.email,
+          fromEmail: profile.email,
+          fromName: `${profile.name || ''} ${profile.lastName || ''}`.trim() || profile.email,
           subject: subject.trim(),
           message: body.trim(),
-          to,
+          to: 'admin',
         }),
       });
       setSubject('');
       setBody('');
-      setTo('admin');
       setShowCompose(false);
-      Alert.alert(
-        'Sent ✓',
-        to === 'all_team'
-          ? 'Your message was broadcast to all team members.'
-          : 'Your message was delivered to the admin.'
-      );
+      Alert.alert('Sent ✓', 'Your message was delivered to the admin.');
       refreshInbox(profile.email);
     } catch (e) {
       Alert.alert('Error', `Could not send: ${e.message}`);
@@ -129,11 +104,45 @@ export default function MessagesScreen({ navigation }) {
       setSending(false);
     }
   };
+  const hasAdminGrant = profile?.grantedRole === 'md' || profile?.grantedRole === 'admin';
 
-  // ── Reply to admin reply (future: team chat) ────────────────────────────
-  // For now just show the thread — replying goes back to compose
+  const hideSelectedThread = useCallback(async () => {
+    if (!selected?.id || !profile?.email) return;
+    setDeleting(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(selected.id)}&scope=viewer&email=${encodeURIComponent(profile.email)}`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      setSelected(null);
+      await refreshInbox(profile.email);
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [profile?.email, refreshInbox, selected]);
 
-  const unreadReplies = threads.reduce((n, t) => n + (t.replies?.length > 0 ? 1 : 0), 0);
+  const confirmHideSelectedThread = useCallback(() => {
+    if (!selected?.id) return;
+    Alert.alert(
+      'Delete from your inbox?',
+      'This removes the thread only from this Playback inbox. Admin records stay intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void hideSelectedThread();
+          },
+        },
+      ]
+    );
+  }, [hideSelectedThread, selected?.id]);
 
   // ── Compose view ─────────────────────────────────────────────────────────
 
@@ -155,23 +164,14 @@ export default function MessagesScreen({ navigation }) {
         <ScrollView style={s.composeBody} keyboardShouldPersistTaps="handled">
           <View style={s.toRow}>
             <Text style={s.toLabel}>To:</Text>
-            <TouchableOpacity
-              style={[s.toChip, to === 'admin' && s.toChipActive]}
-              onPress={() => setTo('admin')}
-            >
-              <Text style={[s.toChipText, to === 'admin' && s.toChipTextActive]}>
-                👤 Admin / Manager
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.toChip, to === 'all_team' && s.toChipAllActive]}
-              onPress={() => setTo('all_team')}
-            >
-              <Text style={[s.toChipText, to === 'all_team' && s.toChipAllTextActive]}>
-                👥 All Team
-              </Text>
-            </TouchableOpacity>
+            <View style={s.staticToChip}>
+              <Text style={s.staticToChipText}>👤 Admin / Manager</Text>
+            </View>
           </View>
+
+          <Text style={s.helperText}>
+            Playback Messages is your personal inbox. Team-wide broadcasts and the shared admin inbox stay in Admin Dashboard.
+          </Text>
 
           {profile?.email ? (
             <View style={s.fromRow}>
@@ -216,7 +216,11 @@ export default function MessagesScreen({ navigation }) {
             <Text style={s.cancelText}>← Back</Text>
           </TouchableOpacity>
           <Text style={s.topBarTitle} numberOfLines={1}>{selected.subject}</Text>
-          <View style={{ width: 60 }} />
+          <TouchableOpacity onPress={confirmHideSelectedThread} disabled={deleting}>
+            {deleting
+              ? <ActivityIndicator size="small" color="#EF4444" />
+              : <Text style={s.deleteText}>Delete</Text>}
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={s.threadBody}>
@@ -248,57 +252,16 @@ export default function MessagesScreen({ navigation }) {
         </ScrollView>
 
         <View style={s.threadFooter}>
-          {isAdminMode ? (
-            // Admin: reply directly in thread
-            <View>
-              <TextInput
-                style={s.inlineReplyInput}
-                value={replyText}
-                onChangeText={setReplyText}
-                placeholder="Type reply..."
-                placeholderTextColor="#6B7280"
-                multiline
-              />
-              <TouchableOpacity
-                style={[s.replyBtn, sending && { opacity: 0.6 }]}
-                onPress={async () => {
-                  if (!replyText.trim()) return;
-                  setSending(true);
-                  try {
-                    await fetchJson(
-                      `${SYNC_URL}/sync/message/reply?messageId=${encodeURIComponent(selected.id)}`,
-                      {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ reply_text: replyText.trim(), admin_name: profile?.name || 'Admin' }),
-                      }
-                    );
-                    setReplyText('');
-                    Alert.alert('Sent ✓', 'Reply delivered.');
-                    setSelected(null);
-                    refreshInboxAdmin();
-                  } catch (e) { Alert.alert('Error', e.message); }
-                  finally { setSending(false); }
-                }}
-                disabled={sending}
-              >
-                {sending
-                  ? <ActivityIndicator size="small" color="#FFF" />
-                  : <Text style={s.replyBtnText}>↩ Send Reply</Text>}
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={s.replyBtn}
-              onPress={() => {
-                setSelected(null);
-                setSubject(`Re: ${selected.subject}`);
-                setShowCompose(true);
-              }}
-            >
-              <Text style={s.replyBtnText}>↩ Send Follow-up</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={s.replyBtn}
+            onPress={() => {
+              setSelected(null);
+              setSubject(`Re: ${selected.subject}`);
+              setShowCompose(true);
+            }}
+          >
+            <Text style={s.replyBtnText}>↩ Send Follow-up</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -311,9 +274,9 @@ export default function MessagesScreen({ navigation }) {
       <View style={[s.header, { paddingTop: insets.top + 24 }]}>
         <Text style={s.headerIcon}>💬</Text>
         <Text style={s.title}>Messages</Text>
-        {isAdminMode && (
-          <View style={s.adminModeBadge}>
-            <Text style={s.adminModeBadgeText}>🎛 Admin Inbox — All Team Messages</Text>
+        {hasAdminGrant && (
+          <View style={s.personalModeBadge}>
+            <Text style={s.personalModeBadgeText}>Admin dashboard inbox stays separate.</Text>
           </View>
         )}
         <Text style={s.subtitle}>
@@ -324,7 +287,7 @@ export default function MessagesScreen({ navigation }) {
       </View>
 
       <TouchableOpacity style={s.composeBtn} onPress={() => setShowCompose(true)}>
-        <Text style={s.composeBtnText}>✉️  New Message to Admin</Text>
+        <Text style={s.composeBtnText}>✉️  New Message</Text>
       </TouchableOpacity>
 
       <FlatList
@@ -333,7 +296,7 @@ export default function MessagesScreen({ navigation }) {
         refreshControl={
           <RefreshControl
             refreshing={loading}
-            onRefresh={() => isAdminMode ? refreshInboxAdmin() : refreshInbox(profile?.email)}
+            onRefresh={() => refreshInbox(profile?.email)}
             tintColor="#8B5CF6"
           />
         }
@@ -405,9 +368,8 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617' },
 
   // Header
-  adminModeBadge: { paddingHorizontal: 12, paddingVertical: 4, backgroundColor: '#7C3AED20', borderRadius: 12, borderWidth: 1, borderColor: '#7C3AED', marginBottom: 6 },
-  adminModeBadgeText: { fontSize: 12, fontWeight: '700', color: '#A78BFA' },
-  inlineReplyInput: { backgroundColor: '#0B1120', borderWidth: 1, borderColor: '#374151', borderRadius: 8, padding: 12, fontSize: 14, color: '#F9FAFB', minHeight: 70, textAlignVertical: 'top', marginBottom: 8 },
+  personalModeBadge: { paddingHorizontal: 12, paddingVertical: 4, backgroundColor: '#1E1B4B', borderRadius: 12, borderWidth: 1, borderColor: '#4F46E5', marginBottom: 6 },
+  personalModeBadgeText: { fontSize: 12, fontWeight: '700', color: '#A5B4FC' },
   header: { alignItems: 'center', paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
   headerIcon: { fontSize: 48, marginBottom: 10 },
   title: { fontSize: 24, fontWeight: '700', color: '#F9FAFB', marginBottom: 4 },
@@ -456,17 +418,15 @@ const s = StyleSheet.create({
   topBarTitle: { fontSize: 16, fontWeight: '700', color: '#F9FAFB', flex: 1, textAlign: 'center' },
   cancelText: { fontSize: 15, color: '#8B5CF6', fontWeight: '600', minWidth: 60 },
   sendText: { fontSize: 15, color: '#8B5CF6', fontWeight: '700', minWidth: 60, textAlign: 'right' },
+  deleteText: { fontSize: 15, color: '#F87171', fontWeight: '700', minWidth: 60, textAlign: 'right' },
 
   // Compose body
   composeBody: { flex: 1, padding: 16 },
   toRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   toLabel: { fontSize: 14, color: '#9CA3AF', fontWeight: '600', width: 40 },
-  toChip: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1F2937', borderRadius: 20, borderWidth: 1, borderColor: '#374151' },
-  toChipActive: { backgroundColor: '#1E1B4B', borderColor: '#4F46E5' },
-  toChipAllActive: { backgroundColor: '#064E3B', borderColor: '#10B981' },
-  toChipText: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
-  toChipTextActive: { color: '#818CF8' },
-  toChipAllTextActive: { color: '#34D399' },
+  staticToChip: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1E1B4B', borderRadius: 20, borderWidth: 1, borderColor: '#4F46E5' },
+  staticToChipText: { fontSize: 14, fontWeight: '600', color: '#A5B4FC' },
+  helperText: { fontSize: 12, color: '#9CA3AF', lineHeight: 18, marginBottom: 14 },
   fromRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   fromLabel: { fontSize: 14, color: '#9CA3AF', fontWeight: '600', width: 40 },
   fromValue: { fontSize: 14, color: '#6B7280' },

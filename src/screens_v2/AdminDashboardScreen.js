@@ -9,11 +9,107 @@ import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
 } from 'react-native';
+
+// ── Inline Calendar (pure RN, no external package) ──────────────────────────
+const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+
+function InlineCalendar({ selectedDate, onSelect }) {
+  const initial = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
+  const [viewYear,  setViewYear]  = useState(initial.getFullYear());
+  const [viewMonth, setViewMonth] = useState(initial.getMonth());
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  }
+
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const todayStr = (() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+  })();
+
+  function cellKey(day) {
+    return `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+
+  return (
+    <View style={cal.wrapper}>
+      {/* Header */}
+      <View style={cal.header}>
+        <TouchableOpacity style={cal.navBtn} onPress={prevMonth}>
+          <Text style={cal.navTxt}>‹</Text>
+        </TouchableOpacity>
+        <Text style={cal.monthLabel}>{MONTH_NAMES[viewMonth]} {viewYear}</Text>
+        <TouchableOpacity style={cal.navBtn} onPress={nextMonth}>
+          <Text style={cal.navTxt}>›</Text>
+        </TouchableOpacity>
+      </View>
+      {/* Day names */}
+      <View style={cal.row}>
+        {DAY_NAMES.map(d => (
+          <Text key={d} style={cal.dayName}>{d}</Text>
+        ))}
+      </View>
+      {/* Day cells */}
+      {Array.from({ length: cells.length / 7 }).map((_, ri) => (
+        <View key={ri} style={cal.row}>
+          {cells.slice(ri * 7, ri * 7 + 7).map((day, ci) => {
+            if (!day) return <View key={ci} style={cal.cell} />;
+            const key = cellKey(day);
+            const isSelected = key === selectedDate;
+            const isToday    = key === todayStr;
+            return (
+              <TouchableOpacity
+                key={ci}
+                style={[cal.cell, isSelected && cal.cellSelected, isToday && !isSelected && cal.cellToday]}
+                onPress={() => onSelect(key)}
+                activeOpacity={0.7}
+              >
+                <Text style={[cal.cellTxt, isSelected && cal.cellTxtSelected, isToday && !isSelected && cal.cellTxtToday]}>
+                  {day}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const cal = StyleSheet.create({
+  wrapper:         { backgroundColor: '#0B1120', borderRadius: 14, borderWidth: 1, borderColor: '#1E2A40', padding: 10, marginBottom: 12 },
+  header:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  navBtn:          { padding: 6 },
+  navTxt:          { color: '#818CF8', fontSize: 22, fontWeight: '700', lineHeight: 24 },
+  monthLabel:      { color: '#E0E7FF', fontSize: 14, fontWeight: '800' },
+  row:             { flexDirection: 'row' },
+  dayName:         { flex: 1, textAlign: 'center', color: '#4B5563', fontSize: 11, fontWeight: '700', paddingVertical: 4 },
+  cell:            { flex: 1, alignItems: 'center', justifyContent: 'center', aspectRatio: 1, borderRadius: 8, margin: 1 },
+  cellSelected:    { backgroundColor: '#4F46E5' },
+  cellToday:       { borderWidth: 1, borderColor: '#6366F1' },
+  cellTxt:         { color: '#9CA3AF', fontSize: 13 },
+  cellTxtSelected: { color: '#FFFFFF', fontWeight: '800' },
+  cellTxtToday:    { color: '#818CF8', fontWeight: '700' },
+});
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
-const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library'];
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
   'Worship Leader', 'Music Director', 'Vocal Lead', 'Vocal BGV',
@@ -72,6 +168,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [selectedMsg, setSelectedMsg]   = useState(null);
   const [replyText, setReplyText]       = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [deletingMessage, setDeletingMessage] = useState(false);
 
   // Services — create form
   const [showNewService, setShowNewService] = useState(false);
@@ -79,6 +176,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [newSvcDate, setNewSvcDate]         = useState('');
   const [newSvcTime, setNewSvcTime]         = useState('');
   const [savingSvc, setSavingSvc]           = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Expanded service plan (both Calendar + Services tabs share this)
   const [expandedSvc, setExpandedSvc] = useState(null);
@@ -107,6 +205,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // Library search
   const [libQuery, setLibQuery] = useState('');
+  const [songs, setSongs] = useState([]); // full song library from KV
+
+  // Proposals
+  const [proposals, setProposals] = useState([]);
+  const [approvingId, setApprovingId] = useState(null);
+  const [rejectingId, setRejectingId] = useState(null);
 
   React.useEffect(() => { loadAll(); }, []);
 
@@ -114,32 +218,66 @@ export default function AdminDashboardScreen({ navigation, route }) {
     setLoading(true);
     setError(null);
     try {
-      const [prof, msgs, debug, blockoutsRaw, responsesRaw] = await Promise.all([
+      const hdrs = syncHeaders();
+      const [prof, msgs, lib, props] = await Promise.all([
         getUserProfile(),
-        fetchJson(`${SYNC_URL}/sync/messages/admin`),
-        fetchJson(`${SYNC_URL}/sync/debug`),
-        fetchJson(`${SYNC_URL}/sync/blockouts`),
-        fetchJson(`${SYNC_URL}/sync/assignment/responses`),
+        fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }),
+        fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }),
+        fetchJson(`${SYNC_URL}/sync/proposals`,       { headers: hdrs }).catch(() => []),
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
-      setServices(debug.services || []);
-      setPeople(debug.people   || []);
-      setPlans(debug.plans     || {});
+      setServices(lib.services || []);
+      setPeople(lib.people   || []);
+      setPlans(lib.plans     || {});
+      setSongs(lib.songs     || []);
+      setProposals(Array.isArray(props) ? props : []);
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
-      for (const b of (blockoutsRaw || [])) {
+      for (const b of (lib.blockouts || [])) {
         if (!bDict[b.date]) bDict[b.date] = [];
         bDict[b.date].push((b.email || '').toLowerCase());
       }
       setAllBlockouts(bDict);
 
-      // Build responses dict: { assignmentId: { email, status } }
+      // Build assignment responses — merge plan team statuses + server responses endpoint
       const rDict = {};
-      for (const r of (responsesRaw || [])) {
-        rDict[r.assignmentId] = r;
-      }
+
+      // Source 1: plan.team[].status — stored by UUID and email (if present)
+      Object.entries(lib.plans || {}).forEach(([svcId, plan]) => {
+        (plan.team || []).forEach(tm => {
+          if (tm.status && tm.status !== 'pending') {
+            const obj = { status: tm.status, declineReason: tm.declineReason || '' };
+            if (tm.personId) rDict[`${svcId}_${tm.personId}`] = obj;
+            if (tm.email) rDict[`${svcId}_${tm.email.toLowerCase()}`] = obj;
+          }
+        });
+      });
+
+      // Source 2: /sync/assignment/responses — server-authoritative, stored by BOTH UUID and email
+      // so the render can find it regardless of which key (personId vs email) the team entry uses.
+      try {
+        const hdrs = syncHeaders();
+        const emailToPid = {};
+        (lib.people || []).forEach(p => {
+          if (p.email) emailToPid[p.email.toLowerCase()] = p.id;
+        });
+        const svcIds = Object.keys(lib.plans || {});
+        await Promise.all(svcIds.map(async svcId => {
+          const res = await fetchJson(`${SYNC_URL}/sync/assignment/responses?serviceId=${svcId}`, { headers: hdrs }).catch(() => null);
+          if (!res || typeof res !== 'object') return;
+          // Server returns { email: { status, declineReason } }
+          const entries = Array.isArray(res) ? res.map(r => [r.email || '', r]) : Object.entries(res);
+          entries.forEach(([emailKey, val]) => {
+            const statusObj = { status: val.status || val.response || 'pending', declineReason: val.declineReason || '' };
+            const pid = emailToPid[emailKey.toLowerCase()];
+            if (pid) rDict[`${svcId}_${pid}`] = statusObj;         // match by UUID (tm.personId)
+            rDict[`${svcId}_${emailKey.toLowerCase()}`] = statusObj; // match by email (tm.email)
+          });
+        }));
+      } catch (_) {}
+
       setAssignmentResponses(rDict);
     } catch (e) {
       setError(e.message || 'Server unreachable');
@@ -150,14 +288,16 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // ── Publish helper ──────────────────────────────────────────────────────
   const publishUpdate = async (updatedPlans, updatedServices, updatedPeople) => {
-    const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-    await fetchJson(`${SYNC_URL}/sync/publish`, {
+    const hdrs = syncHeaders();
+    const lib = await fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: hdrs });
+    await fetchJson(`${SYNC_URL}/sync/library-push`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: hdrs,
       body: JSON.stringify({
-        services: updatedServices || debug.services,
-        people:   updatedPeople   || debug.people,
-        plans:    updatedPlans    || debug.plans,
+        services: updatedServices || lib.services,
+        people:   updatedPeople   || lib.people,
+        plans:    updatedPlans    || lib.plans,
+        songs:    lib.songs       || [],
       }),
     });
   };
@@ -169,7 +309,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
     try {
       await fetchJson(
         `${SYNC_URL}/sync/message/reply?messageId=${encodeURIComponent(selectedMsg.id)}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        { method: 'POST', headers: syncHeaders(),
           body: JSON.stringify({ reply_text: replyText.trim(), admin_name: profile?.name || 'Admin' }) }
       );
       setReplyText('');
@@ -179,18 +319,55 @@ export default function AdminDashboardScreen({ navigation, route }) {
     finally { setSendingReply(false); }
   };
 
+  const deleteSelectedMessage = useCallback(async () => {
+    if (!selectedMsg?.id) return;
+    setDeletingMessage(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(selectedMsg.id)}&scope=global`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      setSelectedMsg(null);
+      await loadAll();
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeletingMessage(false);
+    }
+  }, [loadAll, selectedMsg]);
+
+  const confirmDeleteSelectedMessage = useCallback(() => {
+    if (!selectedMsg?.id) return;
+    Alert.alert(
+      'Delete message thread?',
+      'This removes the thread from the shared admin inbox in Ultimate Playback and Ultimate Musician.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void deleteSelectedMessage();
+          },
+        },
+      ]
+    );
+  }, [deleteSelectedMessage, selectedMsg]);
+
   // ── Create service ──────────────────────────────────────────────────────
   const handleCreateService = async () => {
     if (!newSvcName.trim()) { Alert.alert('Required', 'Service name is required.'); return; }
     if (!newSvcDate.trim()) { Alert.alert('Required', 'Date is required (YYYY-MM-DD).'); return; }
     setSavingSvc(true);
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
       const newSvc = {
         id: `svc_${Date.now()}`, name: newSvcName.trim(), title: newSvcName.trim(),
         date: newSvcDate.trim(), time: newSvcTime.trim(), serviceType: 'standard', status: 'draft',
       };
-      await publishUpdate(debug.plans, [...(debug.services || []), newSvc], null);
+      await publishUpdate(plans, [...services, newSvc], null);
       setNewSvcName(''); setNewSvcDate(''); setNewSvcTime('');
       setShowNewService(false);
       Alert.alert('Created ✓', `Service "${newSvc.name}" added.`);
@@ -204,14 +381,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
     const target = svcForSong || expandedSvc;
     if (!target) return;
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-      const plan  = debug.plans[target.id] || { songs: [], team: [], notes: '' };
+      const plan = { ...(plans[target.id] || { songs: [], team: [], notes: '' }) };
       if ((plan.songs || []).some(s => s.id === song.id || (s.title === song.title && s.artist === song.artist))) {
         Alert.alert('Already added', `"${song.title}" is already in this setlist.`); return;
       }
       plan.songs = [...(plan.songs || []), { ...song, id: song.id || `song_${Date.now()}` }];
-      debug.plans[target.id] = plan;
-      await publishUpdate(debug.plans, null, null);
+      await publishUpdate({ ...plans, [target.id]: plan }, null, null);
       setShowSongPicker(false); setSongQuery(''); setSvcForSong(null);
       Alert.alert('Added ✓', `"${song.title}" added.`);
       loadAll();
@@ -221,11 +396,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Remove song ─────────────────────────────────────────────────────────
   const handleRemoveSong = async (svcId, songId) => {
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-      const plan = debug.plans[svcId] || { songs: [], team: [], notes: '' };
+      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
       plan.songs = (plan.songs || []).filter(s => s.id !== songId);
-      debug.plans[svcId] = plan;
-      await publishUpdate(debug.plans, null, null); loadAll();
+      await publishUpdate({ ...plans, [svcId]: plan }, null, null); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
   };
 
@@ -234,13 +407,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
     if (!chipRole.trim()) { Alert.alert('Select Role', 'Tap a role chip first.'); return; }
     setSaving(true);
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
       const svcId = assignTarget.id;
-      const plan  = debug.plans[svcId] || { songs: [], team: [], notes: '' };
+      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
       plan.team = (plan.team || []).filter(t => !(t.personId === person.id && t.role === chipRole));
-      plan.team.push({ id: `ta_${Date.now()}`, personId: person.id, name: person.name, role: chipRole });
-      debug.plans[svcId] = plan;
-      await publishUpdate(debug.plans, null, null);
+      plan.team = [...plan.team, { id: `ta_${Date.now()}`, personId: person.id, email: (person.email || '').toLowerCase(), name: person.name, role: chipRole }];
+      await publishUpdate({ ...plans, [svcId]: plan }, null, null);
       setShowAssignModal(false); setChipRole('');
       Alert.alert('Assigned ✓', `${person.name} → ${chipRole}`); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
@@ -250,11 +421,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Remove team member from service ────────────────────────────────────
   const handleRemoveFromService = async (svcId, personId, role) => {
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-      const plan = debug.plans[svcId] || { songs: [], team: [], notes: '' };
+      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
       plan.team = (plan.team || []).filter(t => !(t.personId === personId && t.role === role));
-      debug.plans[svcId] = plan;
-      await publishUpdate(debug.plans, null, null); loadAll();
+      await publishUpdate({ ...plans, [svcId]: plan }, null, null); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
   };
 
@@ -263,17 +432,42 @@ export default function AdminDashboardScreen({ navigation, route }) {
     if (!newMemberName.trim()) { Alert.alert('Required', 'Name is required.'); return; }
     setSavingMember(true);
     try {
-      const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
       const newPerson = {
         id: `person_${Date.now()}`, name: newMemberName.trim(),
         email: newMemberEmail.trim(), roles: newMemberRole ? [newMemberRole] : [],
       };
-      await publishUpdate(debug.plans, debug.services, [...(debug.people || []), newPerson]);
+      await publishUpdate(plans, services, [...people, newPerson]);
       setNewMemberName(''); setNewMemberEmail(''); setNewMemberRole('');
       setShowAddMember(false); loadAll();
       Alert.alert('Added ✓', `${newPerson.name} added to team.`);
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingMember(false); }
+  };
+
+  // ── Publish service to team ─────────────────────────────────────────────
+  const [publishingId, setPublishingId] = useState(null);
+
+  const handlePublish = async (svc) => {
+    const plan = plans[svc.id] || {};
+    const team = plan.team || [];
+    if (team.length === 0) {
+      Alert.alert('No Team', 'Assign at least one team member before publishing.');
+      return;
+    }
+    setPublishingId(svc.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/publish`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({ serviceId: svc.id, plan }),
+      });
+      Alert.alert(
+        '📤 Published ✓',
+        `"${svc.name || svc.title}" sent to ${team.length} team member${team.length > 1 ? 's' : ''}.\nThey'll see it in their Assignments.`
+      );
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setPublishingId(null); }
   };
 
   // ── Delete member (Admin only) ──────────────────────────────────────────
@@ -282,26 +476,55 @@ export default function AdminDashboardScreen({ navigation, route }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         try {
-          const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-          await publishUpdate(debug.plans, debug.services,
-            (debug.people || []).filter(p => p.id !== person.id));
+          await publishUpdate(plans, services, people.filter(p => p.id !== person.id));
           loadAll();
         } catch (e) { Alert.alert('Error', e.message); }
       }},
     ]);
   };
 
-  // ── Library: de-dup songs across all plans ──────────────────────────────
-  const libraryMap = {};
-  Object.entries(plans).forEach(([svcId, plan]) => {
-    (plan.songs || []).forEach(song => {
-      const key = `${song.title}|||${song.artist || ''}`;
-      if (!libraryMap[key]) libraryMap[key] = { ...song, _services: [] };
-      const svc = services.find(sv => sv.id === svcId);
-      libraryMap[key]._services.push(svc?.name || svc?.title || svcId);
+  // ── Approve proposal ──────────────────────────────────────────────────
+  const handleApproveProposal = async (proposal) => {
+    setApprovingId(proposal.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/proposal/approve?id=${encodeURIComponent(proposal.id)}`, {
+        method: 'POST', headers: syncHeaders(),
+      });
+      Alert.alert('Approved ✓', `"${proposal.songTitle}" ${proposal.instrument || proposal.type} chart is now live.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setApprovingId(null); }
+  };
+
+  // ── Reject proposal ────────────────────────────────────────────────────
+  const handleRejectProposal = async (proposal) => {
+    Alert.alert('Reject proposal?', `Remove this ${proposal.instrument || proposal.type} submission from ${proposal.from_name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        setRejectingId(proposal.id);
+        try {
+          await fetchJson(`${SYNC_URL}/sync/proposal/reject?id=${encodeURIComponent(proposal.id)}`, {
+            method: 'POST', headers: syncHeaders(),
+          });
+          setProposals(prev => prev.filter(p => p.id !== proposal.id));
+        } catch (e) { Alert.alert('Error', e.message); }
+        finally { setRejectingId(null); }
+      }},
+    ]);
+  };
+
+  // ── Library: full song library from KV ──────────────────────────────────
+  // Enrich each song with which services it appears in
+  const libraryAll = songs.map(song => {
+    const inServices = [];
+    Object.entries(plans).forEach(([svcId, plan]) => {
+      if ((plan.songs || []).some(ps => ps.id === song.id || ps.title === song.title)) {
+        const svc = services.find(sv => sv.id === svcId);
+        inServices.push(svc?.name || svc?.title || svcId);
+      }
     });
+    return { ...song, _services: inServices };
   });
-  const libraryAll      = Object.values(libraryMap);
   const libraryFiltered = libQuery.trim()
     ? libraryAll.filter(s =>
         s.title?.toLowerCase().includes(libQuery.toLowerCase()) ||
@@ -314,9 +537,23 @@ export default function AdminDashboardScreen({ navigation, route }) {
       <Text style={s.formLabel}>Service Name</Text>
       <TextInput style={s.formInput} value={newSvcName} onChangeText={setNewSvcName}
         placeholder="Sunday Morning Service" placeholderTextColor="#6B7280" />
-      <Text style={s.formLabel}>Date (YYYY-MM-DD)</Text>
-      <TextInput style={s.formInput} value={newSvcDate} onChangeText={setNewSvcDate}
-        placeholder="2026-03-15" placeholderTextColor="#6B7280" keyboardType="numbers-and-punctuation" />
+      <Text style={s.formLabel}>Date</Text>
+      <TouchableOpacity
+        style={[s.formInput, s.datePickerBtn]}
+        onPress={() => setShowDatePicker(v => !v)}
+        activeOpacity={0.7}
+      >
+        <Text style={newSvcDate ? s.datePickerVal : s.datePickerPlaceholder}>
+          {newSvcDate || 'Tap to pick a date'}
+        </Text>
+        <Text style={s.datePickerIcon}>{showDatePicker ? '▲' : '📅'}</Text>
+      </TouchableOpacity>
+      {showDatePicker && (
+        <InlineCalendar
+          selectedDate={newSvcDate}
+          onSelect={(dateStr) => { setNewSvcDate(dateStr); setShowDatePicker(false); }}
+        />
+      )}
       <Text style={s.formLabel}>Time (optional)</Text>
       <TextInput style={s.formInput} value={newSvcTime} onChangeText={setNewSvcTime}
         placeholder="09:00 AM" placeholderTextColor="#6B7280" />
@@ -372,8 +609,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
           ? <Text style={s.planEmpty}>No team assigned yet</Text>
           : team.map((tm, i) => {
             const assignId = `${svc.id}_${tm.personId}`;
-            const resp     = assignmentResponses[assignId];
-            const respStatus = resp?.status || 'pending';
+            const assignIdEmail = tm.email ? `${svc.id}_${tm.email}` : null;
+            const resp     = assignmentResponses[assignId] || (assignIdEmail ? assignmentResponses[assignIdEmail] : null);
+            const respStatus = tm.status || resp?.status || 'pending';
             return (
               <View key={`${tm.personId}_${i}`} style={s.planTeamRow}>
                 <View style={[s.planTeamAvatar, respStatus === 'accepted' && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
@@ -403,19 +641,46 @@ export default function AdminDashboardScreen({ navigation, route }) {
               </View>
             );
           })}
+
+        {/* ── Publish to Team ─────────────────────────────────────── */}
+        <TouchableOpacity
+          style={[s.publishBtn, publishingId === svc.id && s.publishBtnDisabled]}
+          onPress={() => handlePublish(svc)}
+          disabled={publishingId === svc.id}
+          activeOpacity={0.8}
+        >
+          {publishingId === svc.id
+            ? <ActivityIndicator size="small" color="#FFF" />
+            : <>
+                <Text style={s.publishBtnText}>📤 Publish to Team</Text>
+                {svc.publishedAt && (
+                  <Text style={s.publishedAt}>
+                    Last: {new Date(svc.publishedAt).toLocaleDateString()}
+                  </Text>
+                )}
+              </>
+          }
+        </TouchableOpacity>
       </View>
     );
   };
 
   // ── Render: Calendar ────────────────────────────────────────────────────
   const renderCalendar = () => {
-    // Group services by month, sorted chronologically
-    const sorted = [...services].sort((a, b) => {
-      if (!a.date && !b.date) return 0;
-      if (!a.date) return 1;
-      if (!b.date) return -1;
-      return new Date(a.date) - new Date(b.date);
-    });
+    // Show only upcoming/today services, sorted chronologically
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const sorted = [...services]
+      .filter(svc => {
+        if (!svc.date) return true;
+        const d = new Date(svc.date.includes('T') ? svc.date : svc.date + 'T00:00:00');
+        return d >= today;
+      })
+      .sort((a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
+        return new Date(a.date) - new Date(b.date);
+      });
     const byMonth = {};
     for (const svc of sorted) {
       const mk = monthLabel(svc.date);
@@ -433,10 +698,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
         </TouchableOpacity>
         {renderNewServiceForm()}
 
-        {services.length === 0 && !loading && (
+        {sorted.length === 0 && !loading && (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>📅</Text>
-            <Text style={s.emptyText}>No services yet{'\n'}Tap "+ New Service" to create one</Text>
+            <Text style={s.emptyText}>No upcoming services{'\n'}Tap "+ New Service" to create one</Text>
           </View>
         )}
 
@@ -486,11 +751,19 @@ export default function AdminDashboardScreen({ navigation, route }) {
       </TouchableOpacity>
       {renderNewServiceForm()}
 
-      {services.length === 0 && !loading && (
-        <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No services yet</Text></View>
-      )}
+      {(() => {
+        const today2 = new Date(); today2.setHours(0, 0, 0, 0);
+        const upcomingSvcs = services.filter(svc => {
+          if (!svc.date) return true;
+          const d = new Date(svc.date.includes('T') ? svc.date : svc.date + 'T00:00:00');
+          return d >= today2;
+        }).sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
 
-      {services.map(svc => {
+        if (upcomingSvcs.length === 0 && !loading) return (
+          <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No upcoming services</Text></View>
+        );
+
+        return upcomingSvcs.map(svc => {
         const plan   = plans[svc.id] || {};
         const isOpen = expandedSvc?.id === svc.id;
         return (
@@ -508,7 +781,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
             {isOpen && renderPlanSection(svc)}
           </View>
         );
-      })}
+        });
+      })()}
     </ScrollView>
   );
 
@@ -643,6 +917,85 @@ export default function AdminDashboardScreen({ navigation, route }) {
     </View>
   );
 
+  // ── Render: Proposals ───────────────────────────────────────────────────
+  const renderProposals = () => {
+    const pending  = proposals.filter(p => p.status === 'pending');
+    const reviewed = proposals.filter(p => p.status !== 'pending');
+    return (
+      <ScrollView
+        contentContainerStyle={s.tabContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
+      >
+        {pending.length === 0 && reviewed.length === 0 && (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>📬</Text>
+            <Text style={s.emptyText}>No proposals yet</Text>
+            <Text style={s.emptyCaption}>
+              When team members submit chord charts or lyrics for approval, they'll appear here.
+            </Text>
+          </View>
+        )}
+
+        {pending.length > 0 && (
+          <>
+            <Text style={s.sectionHeader}>⏳ Pending Approval ({pending.length})</Text>
+            {pending.map(p => (
+              <View key={p.id} style={s.proposalCard}>
+                <View style={s.proposalHeader}>
+                  <Text style={s.proposalSong} numberOfLines={1}>{p.songTitle || 'Unknown Song'}</Text>
+                  <View style={s.proposalTypeBadge}>
+                    <Text style={s.proposalTypeBadgeText}>
+                      {p.instrument || (p.type === 'lyrics' ? '🎤 Lyrics' : '🎸 Chords')}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.proposalFrom}>From: {p.from_name || p.from_email}</Text>
+                <Text style={s.proposalPreview} numberOfLines={4}>{p.content}</Text>
+                <View style={s.proposalActions}>
+                  <TouchableOpacity
+                    style={[s.proposalApproveBtn, approvingId === p.id && { opacity: 0.5 }]}
+                    onPress={() => handleApproveProposal(p)}
+                    disabled={approvingId === p.id || rejectingId === p.id}
+                  >
+                    {approvingId === p.id
+                      ? <ActivityIndicator size="small" color="#FFF" />
+                      : <Text style={s.proposalApproveBtnText}>✓ Approve & Apply</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.proposalRejectBtn, rejectingId === p.id && { opacity: 0.5 }]}
+                    onPress={() => handleRejectProposal(p)}
+                    disabled={approvingId === p.id || rejectingId === p.id}
+                  >
+                    <Text style={s.proposalRejectBtnText}>✕ Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {reviewed.length > 0 && (
+          <>
+            <Text style={[s.sectionHeader, { marginTop: 24 }]}>✓ Reviewed</Text>
+            {reviewed.slice(0, 10).map(p => (
+              <View key={p.id} style={[s.proposalCard, { opacity: 0.6 }]}>
+                <View style={s.proposalHeader}>
+                  <Text style={s.proposalSong} numberOfLines={1}>{p.songTitle || 'Unknown Song'}</Text>
+                  <View style={[s.proposalTypeBadge, p.status === 'approved' ? { backgroundColor: '#05291A', borderColor: '#059669' } : { backgroundColor: '#1F1005', borderColor: '#B45309' }]}>
+                    <Text style={[s.proposalTypeBadgeText, { color: p.status === 'approved' ? '#34D399' : '#F59E0B' }]}>
+                      {p.status === 'approved' ? '✓ Approved' : '✕ Rejected'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={s.proposalFrom}>{p.instrument || p.type} · {p.from_name}</Text>
+              </View>
+            ))}
+          </>
+        )}
+      </ScrollView>
+    );
+  };
+
   // ── Render: Messages ────────────────────────────────────────────────────
   const renderMessages = () => (
     <FlatList
@@ -657,7 +1010,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         >
           <View style={s.msgHeader}>
             {!item.read && <View style={s.unreadDot} />}
-            <Text style={s.msgFrom}>{item.from_name || item.from_email}</Text>
+            <Text style={s.msgFrom}>{item.fromName || item.from_name || item.fromEmail || item.from_email}</Text>
             <Text style={s.msgTime}>{timeAgo(item.timestamp)}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
@@ -690,10 +1043,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={s.backText}>← Back</Text>
           </TouchableOpacity>
           <Text style={s.topBarTitleFull} numberOfLines={1}>{selectedMsg.subject}</Text>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity onPress={confirmDeleteSelectedMessage} disabled={deletingMessage}>
+            {deletingMessage
+              ? <ActivityIndicator size="small" color="#EF4444" />
+              : <Text style={s.deleteThreadText}>Delete</Text>}
+          </TouchableOpacity>
         </View>
         <ScrollView style={{ flex: 1, padding: 16 }} keyboardShouldPersistTaps="handled">
-          <Text style={s.threadFrom}>{selectedMsg.from_name} · {timeAgo(selectedMsg.timestamp)}</Text>
+          <Text style={s.threadFrom}>{selectedMsg.fromName || selectedMsg.from_name || selectedMsg.fromEmail || selectedMsg.from_email} · {timeAgo(selectedMsg.timestamp)}</Text>
           <View style={s.threadBubble}><Text style={s.threadText}>{selectedMsg.message}</Text></View>
           {(selectedMsg.replies || []).map(r => (
             <View key={r.id} style={s.adminBubble}>
@@ -742,21 +1099,32 @@ export default function AdminDashboardScreen({ navigation, route }) {
       {/* Tab bar */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={s.tabBar} contentContainerStyle={s.tabBarContent}>
-        {TABS.map(t => (
-          <TouchableOpacity key={t}
-            style={[s.tabBtn, tab === t && s.tabBtnActive]}
-            onPress={() => setTab(t)}>
-            <Text style={[s.tabBtnText, tab === t && s.tabBtnTextActive]}>{t}</Text>
-          </TouchableOpacity>
-        ))}
+        {TABS.map(t => {
+          const pendingCount = t === 'Proposals' ? proposals.filter(p => p.status === 'pending').length : 0;
+          return (
+            <TouchableOpacity key={t}
+              style={[s.tabBtn, tab === t && s.tabBtnActive]}
+              onPress={() => setTab(t)}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Text style={[s.tabBtnText, tab === t && s.tabBtnTextActive]}>{t}</Text>
+                {pendingCount > 0 && (
+                  <View style={s.tabBadge}>
+                    <Text style={s.tabBadgeText}>{pendingCount}</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       <View style={{ flex: 1 }}>
-        {tab === 'Messages' && renderMessages()}
-        {tab === 'Calendar' && renderCalendar()}
-        {tab === 'Services' && renderServices()}
-        {tab === 'Team'     && renderTeam()}
-        {tab === 'Library'  && renderLibrary()}
+        {tab === 'Messages'   && renderMessages()}
+        {tab === 'Calendar'   && renderCalendar()}
+        {tab === 'Services'   && renderServices()}
+        {tab === 'Team'       && renderTeam()}
+        {tab === 'Library'    && renderLibrary()}
+        {tab === 'Proposals'  && renderProposals()}
       </View>
 
       {/* ── Song Picker Modal ─────────────────────────────────────── */}
@@ -895,6 +1263,7 @@ const s = StyleSheet.create({
   topBarTitleFull: { fontSize: 16, fontWeight: '700', color: '#F9FAFB', flex: 1, textAlign: 'center' },
   backText: { fontSize: 15, color: '#8B5CF6', fontWeight: '600', minWidth: 40 },
   refreshText: { fontSize: 20, color: '#8B5CF6', minWidth: 30, textAlign: 'right' },
+  deleteThreadText: { fontSize: 14, color: '#F87171', fontWeight: '700', minWidth: 52, textAlign: 'right' },
   errorBanner: { flexDirection: 'row', alignItems: 'center', margin: 12, padding: 10, backgroundColor: '#7C2D1220', borderRadius: 8, borderWidth: 1, borderColor: '#F97316' },
   errorText: { fontSize: 12, color: '#F97316', flex: 1 },
   retryText: { fontSize: 12, color: '#F97316', fontWeight: '700' },
@@ -906,6 +1275,8 @@ const s = StyleSheet.create({
   tabBtnActive: { backgroundColor: '#8B5CF6', borderColor: '#8B5CF6' },
   tabBtnText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
   tabBtnTextActive: { color: '#FFF' },
+  tabBadge: { backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  tabBadgeText: { fontSize: 10, fontWeight: '800', color: '#FFF' },
   tabContent: { padding: 16, paddingBottom: 40 },
 
   // Calendar
@@ -935,6 +1306,10 @@ const s = StyleSheet.create({
   planAddBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#8B5CF6' },
   planAddBtnText: { fontSize: 12, fontWeight: '700', color: '#8B5CF6' },
   planEmpty: { fontSize: 12, color: '#4B5563', fontStyle: 'italic', marginBottom: 8, paddingLeft: 4 },
+  publishBtn: { marginTop: 16, backgroundColor: '#7C3AED', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  publishBtnDisabled: { opacity: 0.5 },
+  publishBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
+  publishedAt: { fontSize: 11, color: '#C4B5FD', marginTop: 2 },
   planSongRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
   planSongNum: { fontSize: 11, color: '#6B7280', width: 18, textAlign: 'center' },
   planSongTitle: { fontSize: 13, fontWeight: '700', color: '#F9FAFB' },
@@ -977,6 +1352,11 @@ const s = StyleSheet.create({
   formCard: { backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#374151', padding: 16, marginBottom: 16 },
   formLabel: { fontSize: 11, fontWeight: '700', color: '#6B7280', marginBottom: 6, textTransform: 'uppercase' },
   formInput: { backgroundColor: '#020617', borderWidth: 1, borderColor: '#374151', borderRadius: 8, padding: 12, fontSize: 15, color: '#F9FAFB', marginBottom: 12 },
+  datePickerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  datePickerVal: { fontSize: 15, color: '#F9FAFB', flex: 1 },
+  datePickerPlaceholder: { fontSize: 15, color: '#6B7280', flex: 1 },
+  datePickerIcon: { fontSize: 18 },
+  calendarInline: { marginBottom: 12, borderRadius: 12, overflow: 'hidden' },
   saveBtn: { backgroundColor: '#4F46E5', padding: 14, borderRadius: 10, alignItems: 'center' },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { fontSize: 14, fontWeight: '700', color: '#FFF' },
@@ -1051,4 +1431,21 @@ const s = StyleSheet.create({
   empty: { alignItems: 'center', paddingVertical: 40 },
   emptyIcon: { fontSize: 40, marginBottom: 10 },
   emptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 20 },
+  emptyCaption: { fontSize: 12, color: '#4B5563', textAlign: 'center', marginTop: 6, lineHeight: 18, paddingHorizontal: 24 },
+
+  sectionHeader: { fontSize: 11, fontWeight: '800', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+
+  // Proposals
+  proposalCard: { backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#1E3A2F', padding: 14, marginBottom: 10 },
+  proposalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  proposalSong: { fontSize: 15, fontWeight: '700', color: '#F9FAFB', flex: 1 },
+  proposalTypeBadge: { paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#1E293B', borderRadius: 8, borderWidth: 1, borderColor: '#374151', marginLeft: 8 },
+  proposalTypeBadgeText: { fontSize: 11, fontWeight: '600', color: '#9CA3AF' },
+  proposalFrom: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  proposalPreview: { fontSize: 13, color: '#D1D5DB', fontFamily: 'Courier', backgroundColor: '#060F1E', borderRadius: 8, padding: 10, marginBottom: 12, lineHeight: 20 },
+  proposalActions: { flexDirection: 'row', gap: 10 },
+  proposalApproveBtn: { flex: 1, backgroundColor: '#059669', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  proposalApproveBtnText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
+  proposalRejectBtn: { paddingHorizontal: 20, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: '#374151', alignItems: 'center' },
+  proposalRejectBtnText: { fontSize: 13, fontWeight: '600', color: '#EF4444' },
 });

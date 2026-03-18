@@ -17,13 +17,85 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
 
+// ── Chord / Lyric Renderer ──────────────────────────────────────────────────
+// Matches common chord tokens: C, Cm, C7, Cmaj7, C/E, C#m, Db7sus4, etc.
+const CHORD_TOKEN_RE = /^[A-G][#b]?(m|M|maj|min|dim|aug|sus|add|no)?[2-9]?(\/[A-G][#b]?)?$/;
+const isChordToken = (tok) => CHORD_TOKEN_RE.test(tok.replace(/[|()\-]/g, ''));
+
+function classifyLine(line) {
+  const t = line.trim();
+  if (!t) return 'empty';
+  if (
+    (t.startsWith('[') && t.endsWith(']')) ||
+    /^(intro|verse|pre-?chorus|chorus|bridge|outro|solo|final|tag|vamp|turnaround|instrumental)\s*[\d:.]*\s*:?$/i.test(t)
+  ) return 'section';
+  if (/@\[/.test(t)) return 'rig';
+  // ≥55% of non-space tokens look like chords → chord line
+  const tokens = t.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 1) {
+    const chordCount = tokens.filter(isChordToken).length;
+    if (chordCount / tokens.length >= 0.55) return 'chord';
+  }
+  return 'lyric';
+}
+
+// Inline rig color map (matches ContentEditorScreen defaults)
+const RIG_COLORS = {
+  Nord: '#EF4444', MODX: '#3B82F6', VS: '#10B981',
+  Vintage: '#F59E0B', Synth: '#8B5CF6', Pad: '#EC4899',
+};
+
+function renderRigLine(line, fontSize) {
+  // Split on @[RigName] tags
+  const parts = line.split(/(@\[[^\]]+\])/g);
+  return parts.map((part, i) => {
+    const m = part.match(/^@\[([^\]]+)\]$/);
+    if (m) {
+      const color = RIG_COLORS[m[1]] || '#A78BFA';
+      return (
+        <Text key={i} style={{ color, fontWeight: '700' }}>{m[1]}</Text>
+      );
+    }
+    return <Text key={i} style={{ color: '#D1D5DB' }}>{part}</Text>;
+  });
+}
+
+function renderChartLines(text, fontSize, isVocal) {
+  if (!text) return null;
+  return text.split('\n').map((line, i) => {
+    const type = isVocal ? 'lyric' : classifyLine(line);
+    if (type === 'empty') return <View key={i} style={{ height: Math.round(fontSize * 0.5) }} />;
+    if (type === 'section') {
+      return (
+        <Text key={i} style={[styles.sectionLine, { fontSize: Math.round(fontSize * 0.8) }]}>
+          {line.trim().replace(/^\[|\]$/g, '').toUpperCase()}
+        </Text>
+      );
+    }
+    if (type === 'chord') {
+      return (
+        <Text key={i} style={[styles.chordLine, { fontSize }]}>{line}</Text>
+      );
+    }
+    if (type === 'rig') {
+      return (
+        <Text key={i} style={{ fontSize, lineHeight: fontSize * 1.6 }}>
+          {renderRigLine(line, fontSize)}
+        </Text>
+      );
+    }
+    // lyric
+    return <Text key={i} style={[styles.lyricLine, { fontSize }]}>{line}</Text>;
+  });
+}
+
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const AUTO_SCROLL_INTERVAL = 80; // ms between scroll steps
 const AUTO_SCROLL_STEP = 1;      // px per step
 
 export default function LyricsViewScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { song, userRole } = route.params || {};
+  const { song, userRole, capo = 0, concertKey } = route.params || {};
   const [autoScroll, setAutoScroll] = useState(false);
   const [fontSize, setFontSize] = useState(20);
   const scrollRef = useRef(null);
@@ -58,6 +130,7 @@ export default function LyricsViewScreen({ navigation, route }) {
 
   const lyrics = song.lyrics || '';
   const isInstrumentChart = !ROLE_LABELS[userRole] && !!userRole;
+  const isVocal = !isInstrumentChart;
   const roleLabel = ROLE_LABELS[userRole] || userRole || 'Vocalist';
   const rolePillIcon = isInstrumentChart ? '🎼' : '🎤';
 
@@ -79,7 +152,12 @@ export default function LyricsViewScreen({ navigation, route }) {
         </View>
 
         <View style={styles.topRight}>
-          {song.key ? (
+          {capo > 0 ? (
+            <View style={[styles.keyBadge, styles.capoBadge]}>
+              <Text style={styles.capoBadgeText}>Capo {capo}</Text>
+              {song.key ? <Text style={styles.capoShapesText}>{song.key} shapes</Text> : null}
+            </View>
+          ) : song.key ? (
             <View style={styles.keyBadge}>
               <Text style={styles.keyBadgeText}>{song.key}</Text>
             </View>
@@ -131,7 +209,7 @@ export default function LyricsViewScreen({ navigation, route }) {
         }}
         scrollEventThrottle={16}
       >
-        <Text style={[styles.lyricsText, { fontSize }]}>{lyrics}</Text>
+        {renderChartLines(lyrics, fontSize, isVocal)}
         {/* Extra space at bottom so last lines can scroll to center */}
         <View style={{ height: SCREEN_HEIGHT * 0.5 }} />
       </ScrollView>
@@ -206,6 +284,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
+  capoBadge: {
+    backgroundColor: '#16A34A',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  capoBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  capoShapesText: {
+    fontSize: 10,
+    color: '#BBF7D0',
+    fontWeight: '600',
+    marginTop: 1,
+  },
   controlsBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -278,6 +373,25 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     fontWeight: '400',
     letterSpacing: 0.3,
+  },
+  sectionLine: {
+    color: '#6B7280',
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  chordLine: {
+    color: '#FBBF24',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    fontVariant: ['tabular-nums'],
+  },
+  lyricLine: {
+    color: '#F9FAFB',
+    fontWeight: '400',
+    letterSpacing: 0.3,
+    lineHeight: 28,
   },
   footer: {
     paddingHorizontal: 20,

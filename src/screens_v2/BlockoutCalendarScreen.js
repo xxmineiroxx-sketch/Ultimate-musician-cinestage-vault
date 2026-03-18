@@ -3,11 +3,11 @@
  * Mark dates when unavailable for service
  */
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native';
 import { getUserProfile, saveUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 async function serverBlockout(method, params = {}, body = null) {
   try {
@@ -29,9 +29,16 @@ export default function BlockoutCalendarScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [reason, setReason] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadProfile();
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProfile();
+    setRefreshing(false);
   }, []);
 
   const loadProfile = async () => {
@@ -208,6 +215,7 @@ export default function BlockoutCalendarScreen({ navigation }) {
       style={styles.container}
       contentContainerStyle={styles.content}
       nestedScrollEnabled={true}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
     >
       <View style={styles.header}>
         <Text style={styles.headerIcon}>📅</Text>

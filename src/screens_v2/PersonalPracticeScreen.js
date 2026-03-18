@@ -1,0 +1,935 @@
+/**
+ * Personal Practice Screen - Ultimate Playback
+ * Each member gets their own personalized practice experience based on role:
+ *   - Vocalists   → Lead Vocals track + their harmony part
+ *   - Instruments → Full Mix track    + their isolated stem
+ *   - Non-performers (sound/media/tech) → single playback reference track
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  RefreshControl,
+} from 'react-native';
+import audioEngine from '../services/audioEngine';
+import { getUserProfile, getAssignments } from '../services/storage';
+import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
+import WaveformBar from '../components_v2/WaveformBar';
+
+const { width } = Dimensions.get('window');
+
+// ─── Role classification ────────────────────────────────────────────────────
+
+const VOCAL_ROLES = new Set([
+  'worship_leader', 'lead_vocal', 'bgv_1', 'bgv_2', 'bgv_3', 'music_director',
+]);
+
+const SOUND_TECH_ROLES = new Set([
+  'sound_tech', 'foh_engineer', 'monitor_engineer', 'stream_engineer',
+]);
+
+const PLAYBACK_ONLY_ROLES = new Set([
+  ...SOUND_TECH_ROLES,
+  'media_tech', 'propresenter', 'lighting', 'stage_manager',
+]);
+
+const INSTRUMENT_STEM_MAP = {
+  keyboard: 'keys', piano: 'keys', synth: 'keys',
+  electric_guitar: 'guitar', acoustic_guitar: 'guitar', rhythm_guitar: 'guitar',
+  bass: 'bass',
+  drums: 'drums', percussion: 'drums',
+  strings: 'other', brass: 'other',
+};
+
+// Preferred harmony key candidates for each vocal role (try in order)
+const HARMONY_CANDIDATES = {
+  bgv_1:          ['voice1', 'soprano', 'bgv1'],
+  bgv_2:          ['voice2', 'alto',    'bgv2'],
+  bgv_3:          ['voice3', 'tenor',   'bgv3'],
+  worship_leader: ['lead_vocal', 'voice1', 'soprano'],
+  lead_vocal:     ['lead_vocal', 'voice1', 'soprano'],
+  music_director: ['voice1', 'soprano'],
+};
+
+const ROLE_DISPLAY = {
+  worship_leader: 'Worship Leader', lead_vocal: 'Lead Vocal',
+  bgv_1: 'BG Vocal 1', bgv_2: 'BG Vocal 2', bgv_3: 'BG Vocal 3',
+  music_director: 'Music Director',
+  keyboard: 'Keys', piano: 'Piano', synth: 'Synth',
+  electric_guitar: 'Electric Guitar', acoustic_guitar: 'Acoustic Guitar', rhythm_guitar: 'Rhythm Guitar',
+  bass: 'Bass', drums: 'Drums', percussion: 'Percussion',
+  strings: 'Strings', brass: 'Brass',
+  sound_tech: 'Sound Tech',
+  foh_engineer: 'FOH Engineer',
+  monitor_engineer: 'Monitor Engineer',
+  stream_engineer: 'Stream Engineer',
+  media_tech: 'Media',
+  propresenter: 'Media',
+  lighting: 'Lighting',
+  stage_manager: 'Stage Manager',
+};
+
+// Maps UM title-case role strings → internal snake_case keys
+const ROLE_NORMALIZE_MAP = {
+  leader: 'worship_leader',
+  'worship leader': 'worship_leader',
+  'music director': 'music_director',
+  'vocal lead': 'lead_vocal',
+  'lead vocal': 'lead_vocal',
+  'vocal bgv': 'bgv_1',
+  drums: 'drums',
+  bass: 'bass',
+  'electric guitar': 'electric_guitar',
+  'acoustic guitar': 'acoustic_guitar',
+  keys: 'keyboard',
+  'synth/pad': 'synth',
+  tracks: 'music_director',
+  sound: 'sound_tech',
+  'sound tech': 'sound_tech',
+  'sound technician': 'sound_tech',
+  'sound engineer': 'sound_tech',
+  'foh engineer': 'foh_engineer',
+  'front of house': 'foh_engineer',
+  'monitor engineer': 'monitor_engineer',
+  'stream engineer': 'stream_engineer',
+  media: 'media_tech',
+  'media tech': 'media_tech',
+  'media technician': 'media_tech',
+  propresenter: 'media_tech',
+  'pro presenter': 'media_tech',
+  slides: 'media_tech',
+  lighting: 'lighting',
+  lights: 'lighting',
+  'stage manager': 'stage_manager',
+  // INSTRUMENT_ROLES variants
+  keyboardist: 'keyboard',
+  guitarist: 'electric_guitar',
+  bassist: 'bass',
+  'acoustic guitarist': 'acoustic_guitar',
+  drummer: 'drums',
+  vocalist: 'lead_vocal',
+};
+
+function normalizeRole(role) {
+  if (!role) return role;
+  const trimmed = String(role).trim();
+  const lower = trimmed.toLowerCase();
+  return ROLE_NORMALIZE_MAP[lower] || trimmed;
+}
+
+const INSTRUMENT_ROLES = new Set(Object.keys(INSTRUMENT_STEM_MAP));
+
+function isPlaybackOnlyRole(role) {
+  if (!role) return false;
+  return PLAYBACK_ONLY_ROLES.has(role) || (!VOCAL_ROLES.has(role) && !INSTRUMENT_ROLES.has(role));
+}
+
+function resolvePlaybackUri(song, stems = {}, harmonies = {}) {
+  return (
+    song?.assets?.guide_track ||
+    stems.mix ||
+    stems.full_mix ||
+    stems.other ||
+    stems.vocals ||
+    harmonies.lead_vocal ||
+    harmonies.lead ||
+    harmonies.voice1 ||
+    harmonies.soprano ||
+    null
+  );
+}
+
+function detectPrimaryRole(roles = []) {
+  const normalizedRoles = roles.map(normalizeRole).filter(Boolean);
+  // Return first musical role found
+  const order = [
+    'lead_vocal', 'worship_leader', 'bgv_1', 'bgv_2', 'bgv_3', 'music_director',
+    'keyboard', 'piano', 'synth', 'electric_guitar', 'acoustic_guitar', 'rhythm_guitar',
+    'bass', 'drums', 'percussion', 'strings', 'brass',
+  ];
+  for (const r of order) {
+    if (normalizedRoles.includes(r)) return r;
+  }
+  return normalizedRoles[0] || 'lead_vocal';
+}
+
+function buildPersonalTracks(role, song) {
+  const stems = song?.stems || {};
+  const harmonies = song?.harmonies || {};
+
+  if (isPlaybackOnlyRole(role)) {
+    const roleLabel = ROLE_DISPLAY[role] || 'Playback';
+    const trackA = {
+      id: 'playback',
+      label: 'Playback',
+      sublabel: `${roleLabel} reference mix`,
+      uri: resolvePlaybackUri(song, stems, harmonies),
+      color: '#3B82F6',
+      icon: '🎧',
+    };
+    return [trackA, null];
+  }
+
+  if (VOCAL_ROLES.has(role)) {
+    // Track A: lead vocals stem
+    const trackA = {
+      id: 'vocals',
+      label: 'Lead Vocals',
+      sublabel: 'Full vocal track',
+      uri: stems.vocals || null,
+      color: '#8B5CF6',
+      icon: '🎤',
+    };
+    // Track B: their specific harmony
+    let harmonyUri = null;
+    let harmonyLabel = 'Your Harmony';
+    for (const key of (HARMONY_CANDIDATES[role] || ['voice1'])) {
+      if (harmonies[key]) {
+        harmonyUri = harmonies[key];
+        harmonyLabel = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+        break;
+      }
+    }
+    const trackB = {
+      id: 'my_harmony',
+      label: harmonyLabel,
+      sublabel: 'Your part',
+      uri: harmonyUri,
+      color: '#10B981',
+      icon: '🎵',
+    };
+    return [trackA, trackB];
+  }
+
+  // Instrument
+  const stemKey = INSTRUMENT_STEM_MAP[role] || 'other';
+  const stemLabel = stemKey.charAt(0).toUpperCase() + stemKey.slice(1);
+
+  const trackA = {
+    id: 'full_mix',
+    label: 'Full Mix',
+    sublabel: 'Everyone playing',
+    uri: song?.assets?.guide_track || stems.mix || stems.other || null,
+    color: '#3B82F6',
+    icon: '🎸',
+  };
+  const trackB = {
+    id: 'my_stem',
+    label: stemLabel,
+    sublabel: 'Your isolated track',
+    uri: stems[stemKey] || null,
+    color: '#F59E0B',
+    icon: stemKey === 'bass' ? '🎸' : stemKey === 'drums' ? '🥁' : stemKey === 'keys' ? '🎹' : '🎵',
+  };
+  return [trackA, trackB];
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export default function PersonalPracticeScreen({ route, navigation }) {
+  // Read params fresh on every render (focus re-navigation updates them)
+  const paramsRef = useRef(route?.params || {});
+  paramsRef.current = route?.params || {};
+
+  const [profile, setProfile] = useState(null);
+  const [role, setRole] = useState(null);
+  const [songs, setSongs] = useState([]);
+  const [selectedSong, setSelectedSong] = useState(null);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await initScreen();
+    setRefreshing(false);
+  }, []);
+  const [loadingStems, setLoadingStems] = useState(false);
+  const [stemsReady, setStemsReady] = useState(false);
+
+  // Playback state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Per-track mute state
+  const [muteA, setMuteA] = useState(false);
+  const [muteB, setMuteB] = useState(false);
+
+  // Derived tracks definition for the selected song + role
+  const [trackDefs, setTrackDefs] = useState([null, null]);
+
+  const roleRef = useRef(null);
+
+  // ── Audio engine init (once) ──────────────────────────────────────────────
+
+  useEffect(() => {
+    audioEngine.initialize().catch(() => {});
+    audioEngine.onProgressUpdate = ({ position: pos, duration: dur }) => {
+      setPosition(pos || 0);
+      if (dur) setDuration(dur);
+    };
+    audioEngine.onPlaybackStatusChange = ({ isPlaying: p }) => setIsPlaying(!!p);
+    return () => {
+      audioEngine.stop().catch(() => {});
+      audioEngine.unloadAll().catch(() => {});
+      audioEngine.onProgressUpdate = null;
+      audioEngine.onPlaybackStatusChange = null;
+    };
+  }, []);
+
+  // ── Reload on focus (handles tab tap + navigate-with-new-params) ──────────
+
+  useEffect(() => {
+    const unsub = navigation.addListener('focus', () => {
+      initScreen();
+    });
+    return unsub;
+  }, [navigation]);
+
+  async function initScreen() {
+    setPageLoading(true);
+    try {
+      const p = await getUserProfile();
+      setProfile(p);
+      // Prefer the server-assigned role for this service over the profile's stored roles
+      const paramRole = normalizeRole(paramsRef.current.userRole);
+      const r = paramRole || detectPrimaryRole(p?.roles || []);
+      setRole(r);
+      roleRef.current = r;
+
+      // Resolve serviceId + role: use params, else fall back to nearest accepted assignment
+      let resolvedServiceId = paramsRef.current.serviceId;
+      let resolvedAssignmentRole = paramRole;
+      if (!resolvedServiceId) {
+        const assignments = await getAssignments();
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const accepted = assignments.filter((a) => {
+          if (a.status !== 'accepted') return false;
+          const d = new Date(String(a.service_date || a.date || '').includes('T')
+            ? (a.service_date || a.date) : (a.service_date || a.date || '') + 'T00:00:00');
+          return d >= today; // only upcoming/today
+        });
+        if (accepted.length > 0) {
+          accepted.sort((a, b) => {
+            const da = new Date(a.service_date || a.date || 0).getTime();
+            const db = new Date(b.service_date || b.date || 0).getTime();
+            return da - db; // nearest first
+          });
+          resolvedServiceId = accepted[0].service_id;
+          // Use the assignment's role if no explicit role was passed
+          if (!paramRole && accepted[0].role) {
+            resolvedAssignmentRole = normalizeRole(accepted[0].role);
+          }
+        }
+      }
+      const r2 = resolvedAssignmentRole || detectPrimaryRole(p?.roles || []);
+      setRole(r2);
+      roleRef.current = r2;
+
+      const fetchedSongs = await fetchSetlist(resolvedServiceId);
+      setSongs(fetchedSongs);
+
+      // Auto-select: prefer initSongId param, else first song
+      const initSongId = paramsRef.current.songId;
+      const init = initSongId
+        ? fetchedSongs.find((s) => s.id === initSongId || s.songId === initSongId) || fetchedSongs[0]
+        : fetchedSongs[0];
+      if (init) await selectSong(init, r2);
+    } catch (e) {
+      console.warn('PersonalPractice init error:', e);
+    } finally {
+      setPageLoading(false);
+    }
+  }
+
+  async function fetchSetlist(svcId) {
+    try {
+      const headers = { 'x-org-id': SYNC_ORG_ID, 'x-secret-key': SYNC_SECRET_KEY };
+
+      // Get library songs (basic metadata)
+      const res = await fetch(`${SYNC_URL}/sync/library-pull`, { headers });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const library = data?.songs || data?.library || [];
+
+      let songList = library;
+
+      if (svcId) {
+        // Get the service-specific setlist order
+        const sres = await fetch(`${SYNC_URL}/sync/setlist?serviceId=${svcId}`, { headers });
+        if (sres.ok) {
+          const sdata = await sres.json();
+          // Endpoint returns plain array (not {songs:[...]})
+          const setlistSongs = Array.isArray(sdata) ? sdata : (sdata?.songs || []);
+          if (setlistSongs.length > 0) {
+            // Merge setlist order with full library metadata
+            songList = setlistSongs.map((ss) => {
+              const full = library.find((l) => l.id === ss.id || l.id === ss.songId);
+              return full ? { ...full, ...ss } : ss;
+            });
+          } else {
+            // No setlist found for this service — show nothing, not the whole library
+            songList = [];
+          }
+        }
+      } else {
+        songList = []; // No serviceId = no songs to show
+      }
+
+      return songList;
+    } catch (e) {
+      console.warn('fetchSetlist error:', e);
+      return [];
+    }
+  }
+
+  // Fetch stems separately — library-pull doesn't include them
+  async function fetchSongStems(songId) {
+    if (!songId) return {};
+    try {
+      const headers = { 'x-org-id': SYNC_ORG_ID, 'x-secret-key': SYNC_SECRET_KEY };
+      const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${songId}`, { headers });
+      if (!res.ok) return {};
+      const data = await res.json();
+      return {
+        stems: data?.stems || {},
+        harmonies: data?.harmonies || {},
+      };
+    } catch (e) {
+      return {};
+    }
+  }
+
+  // ── song selection ────────────────────────────────────────────────────────
+
+  async function selectSong(song, currentRole) {
+    setStemsReady(false);
+    setIsPlaying(false);
+    setPosition(0);
+    setDuration(0);
+    setMuteA(false);
+    setMuteB(false);
+    audioEngine.stop().catch(() => {});
+    audioEngine.unloadAll().catch(() => {});
+
+    const r = currentRole || roleRef.current || role;
+
+    // First pass — use whatever metadata the song already has
+    let enriched = song;
+    setSelectedSong(enriched);
+    setTrackDefs(buildPersonalTracks(r, enriched));
+
+    // Second pass — fetch stems from KV (library-pull doesn't include them)
+    const songId = song.id || song.songId;
+    if (songId) {
+      const { stems, harmonies } = await fetchSongStems(songId);
+      if (Object.keys(stems).length > 0 || Object.keys(harmonies).length > 0) {
+        enriched = { ...song, stems, harmonies };
+        setSelectedSong(enriched);
+        setTrackDefs(buildPersonalTracks(r, enriched));
+      }
+    }
+  }
+
+  // ── stem loading ──────────────────────────────────────────────────────────
+
+  async function handleLoadStems() {
+    if (!selectedSong) return;
+    const [defA, defB] = trackDefs;
+    const playbackOnlyMode = isPlaybackOnlyRole(roleRef.current || role);
+
+    if (!defA?.uri && !defB?.uri) {
+      Alert.alert(
+        playbackOnlyMode ? 'No Playback Available' : 'No Stems Available',
+        playbackOnlyMode
+          ? 'This song does not have playback audio available yet. Ask your admin to upload or publish the song audio.'
+          : 'This song hasn\'t been processed by CineStage yet. Ask your admin to run stem separation.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setLoadingStems(true);
+    try {
+      await audioEngine.unloadAll();
+      let loaded = 0;
+      if (defA?.uri) {
+        await audioEngine.loadStem(defA.id, defA.uri);
+        loaded++;
+      }
+      if (defB?.uri) {
+        await audioEngine.loadStem(defB.id, defB.uri);
+        loaded++;
+      }
+      setStemsReady(true);
+      setMuteA(false);
+      setMuteB(false);
+    } catch (e) {
+      Alert.alert('Load Error', 'Could not load audio tracks. Check your connection.');
+      console.error('loadStems error:', e);
+    } finally {
+      setLoadingStems(false);
+    }
+  }
+
+  // ── playback ──────────────────────────────────────────────────────────────
+
+  async function handlePlayPause() {
+    if (!stemsReady) {
+      await handleLoadStems();
+      return;
+    }
+    try {
+      if (isPlaying) {
+        await audioEngine.pause();
+      } else {
+        await audioEngine.play();
+      }
+    } catch (e) {
+      console.error('playPause error:', e);
+    }
+  }
+
+  async function handleRestart() {
+    try {
+      await audioEngine.seek(0);
+      setPosition(0);
+    } catch (e) {}
+  }
+
+  async function handleSkip(deltaMs) {
+    try {
+      const newPos = Math.max(0, Math.min(position + deltaMs, duration));
+      await audioEngine.seek(newPos);
+    } catch (e) {}
+  }
+
+  async function handleSeekBar(pct) {
+    if (!duration) return;
+    const ms = pct * duration;
+    try {
+      await audioEngine.seek(ms);
+      setPosition(ms);
+    } catch (e) {}
+  }
+
+  async function toggleMuteA() {
+    const next = !muteA;
+    setMuteA(next);
+    if (stemsReady && trackDefs[0]?.id) {
+      await audioEngine.setTrackMute(trackDefs[0].id, next);
+    }
+  }
+
+  async function toggleMuteB() {
+    const next = !muteB;
+    setMuteB(next);
+    if (stemsReady && trackDefs[1]?.id) {
+      await audioEngine.setTrackMute(trackDefs[1].id, next);
+    }
+  }
+
+  // ── helpers ───────────────────────────────────────────────────────────────
+
+  const formatTime = (ms) => {
+    const s = Math.floor((ms || 0) / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  const progressPct = duration > 0 ? (position / duration) * 100 : 0;
+  const [defA, defB] = trackDefs;
+  const playbackOnlyMode = isPlaybackOnlyRole(role);
+
+  // ── render ────────────────────────────────────────────────────────────────
+
+  if (pageLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color="#8B5CF6" size="large" />
+        <Text style={styles.loadingText}>Loading your practice session…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* ── Top bar ── */}
+      <View style={styles.topBar}>
+        <View>
+          <Text style={styles.screenTitle}>My Practice</Text>
+          {role ? (
+            <View style={styles.roleRow}>
+              <View style={styles.roleBadge}>
+                <Text style={styles.roleBadgeText}>{ROLE_DISPLAY[role] || role}</Text>
+              </View>
+              {selectedSong?.key ? (
+                <Text style={styles.metaChip}>Key: {selectedSong.key}</Text>
+              ) : null}
+              {selectedSong?.bpm ? (
+                <Text style={styles.metaChip}>{selectedSong.bpm} BPM</Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* ── Song picker ── */}
+      {songs.length > 0 && (
+        <View style={styles.songPickerWrap}>
+          <Text style={styles.sectionLabel}>SONGS</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.songPickerRow}
+          >
+            {songs.map((song, i) => {
+              const active = selectedSong?.id === song.id || selectedSong?.songId === song.id;
+              return (
+                <TouchableOpacity
+                  key={song.id || i}
+                  style={[styles.songPill, active && styles.songPillActive]}
+                  onPress={() => selectSong(song, role)}
+                >
+                  <Text style={[styles.songPillText, active && styles.songPillTextActive]} numberOfLines={1}>
+                    {song.title || 'Untitled'}
+                  </Text>
+                  {song.key ? (
+                    <Text style={[styles.songPillKey, active && styles.songPillKeyActive]}>
+                      {song.key}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── Main body ── */}
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+      >
+
+        {/* Song title */}
+        {selectedSong ? (
+          <Text style={styles.songTitle}>{selectedSong.title || 'Untitled'}</Text>
+        ) : (
+          <Text style={styles.emptyText}>No songs found for this service.</Text>
+        )}
+
+        {/* ── Always-visible waveform pipeline ── */}
+        {selectedSong && (
+          <>
+            {/* Waveform — always shown so the song structure is visible */}
+            <WaveformBar
+              song={selectedSong}
+              userRole={role}
+              positionMs={position}
+              durationMs={duration || undefined}
+              onSeek={(ms) => {
+                if (!stemsReady) return;
+                audioEngine.seek(ms).catch(() => {});
+                setPosition(ms);
+              }}
+              onSectionPress={(startMs) => {
+                if (!stemsReady) return;
+                audioEngine.seek(startMs).catch(() => {});
+                setPosition(startMs);
+              }}
+            />
+
+            {/* 2-Track Mixer — always shown; mute buttons disabled until loaded */}
+            <View style={styles.mixerCard}>
+              <Text style={styles.mixerTitle}>{playbackOnlyMode ? 'PLAYBACK' : 'YOUR PERSONAL MIX'}</Text>
+
+              <TrackStrip
+                def={defA}
+                muted={muteA}
+                onMuteToggle={toggleMuteA}
+                isLoaded={stemsReady}
+                isPlaying={isPlaying && !muteA}
+              />
+
+              {defB ? (
+                <TrackStrip
+                  def={defB}
+                  muted={muteB}
+                  onMuteToggle={toggleMuteB}
+                  isLoaded={stemsReady}
+                  isPlaying={isPlaying && !muteB}
+                  isMine
+                />
+              ) : null}
+
+              {/* Stems status inline */}
+              {!defA?.uri && !defB?.uri ? (
+                <View style={styles.noStemsInline}>
+                  <Text style={styles.noStemsInlineText}>
+                    {playbackOnlyMode
+                      ? '🎧 Playback audio is not available for this song yet — ask your admin to upload or publish the song audio.'
+                      : '🔬 Stems not processed yet — ask your admin to run CineStage on this song.'}
+                  </Text>
+                </View>
+              ) : !stemsReady ? (
+                <TouchableOpacity style={styles.loadBigBtn} onPress={handleLoadStems} disabled={loadingStems}>
+                  {loadingStems
+                    ? <ActivityIndicator color="#FFF" />
+                    : <Text style={styles.loadBigBtnText}>{playbackOnlyMode ? '📥 Load Playback' : '📥 Load My Tracks'}</Text>}
+                </TouchableOpacity>
+              ) : null}
+
+              {playbackOnlyMode ? (
+                <View style={styles.tipBox}>
+                  <Text style={styles.tipText}>
+                    🎧 Playback-only mode for non-performing roles.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.tipBox}>
+                  <Text style={styles.tipText}>
+                    💡 Mute <Text style={styles.tipBold}>your track</Text> to practice along with the rest of the band.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Transport */}
+            <View style={styles.transport}>
+              <TouchableOpacity style={styles.transpBtn} onPress={handleRestart} disabled={!stemsReady}>
+                <Text style={[styles.transpBtnText, !stemsReady && styles.transpDisabled]}>⏮</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transpBtn} onPress={() => handleSkip(-15000)} disabled={!stemsReady}>
+                <Text style={[styles.transpSkipText, !stemsReady && styles.transpDisabled]}>-15</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.playBtn, isPlaying && styles.playBtnActive, !stemsReady && !loadingStems && styles.playBtnLoad]}
+                onPress={handlePlayPause}
+              >
+                {loadingStems
+                  ? <ActivityIndicator color="#FFF" size="small" />
+                  : <Text style={styles.playBtnText}>{isPlaying ? '⏸' : '▶'}</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transpBtn} onPress={() => handleSkip(15000)} disabled={!stemsReady}>
+                <Text style={[styles.transpSkipText, !stemsReady && styles.transpDisabled]}>+15</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.transpBtn, stemsReady && styles.transpBtnDone]}
+                onPress={handleLoadStems}
+                disabled={loadingStems || !defA?.uri && !defB?.uri}
+              >
+                {loadingStems
+                  ? <ActivityIndicator color="#8B5CF6" size="small" />
+                  : <Text style={styles.transpBtnText}>{stemsReady ? '✓' : '📥'}</Text>}
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Sub-components ────────────────────────────────────────────────────────
+
+function TrackStrip({ def, muted, onMuteToggle, isLoaded, isPlaying, isMine }) {
+  if (!def) return null;
+  const hasUri = !!def.uri;
+
+  return (
+    <View style={[styles.trackStrip, isMine && styles.trackStripMine]}>
+      {/* Color bar */}
+      <View style={[styles.trackColorBar, { backgroundColor: def.color }]} />
+
+      {/* Icon + labels */}
+      <View style={styles.trackInfo}>
+        <Text style={styles.trackIcon}>{def.icon}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.trackLabel}>{def.label}</Text>
+          <Text style={styles.trackSublabel}>
+            {!hasUri ? 'Not available' : isLoaded ? (isPlaying ? '▶ Playing' : '⏸ Paused') : def.sublabel}
+          </Text>
+        </View>
+        {isMine && (
+          <View style={styles.myBadge}><Text style={styles.myBadgeText}>MINE</Text></View>
+        )}
+      </View>
+
+      {/* Mute button */}
+      <TouchableOpacity
+        style={[styles.muteBtn, muted && styles.muteBtnActive, !hasUri && styles.muteBtnDisabled]}
+        onPress={hasUri ? onMuteToggle : undefined}
+        activeOpacity={hasUri ? 0.7 : 1}
+      >
+        <Text style={styles.muteBtnText}>{muted ? '🔇' : '🔊'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+
+// ─── Styles ────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  container:     { flex: 1, backgroundColor: '#020617' },
+  center:        { flex: 1, backgroundColor: '#020617', justifyContent: 'center', alignItems: 'center' },
+  loadingText:   { color: '#9CA3AF', marginTop: 12, fontSize: 14 },
+
+  // Top bar
+  topBar: {
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: '#1E293B',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  screenTitle: { fontSize: 22, fontWeight: '700', color: '#F1F5F9', marginBottom: 6 },
+  roleRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  roleBadge: {
+    backgroundColor: '#4F46E5', borderRadius: 12,
+    paddingHorizontal: 10, paddingVertical: 3,
+  },
+  roleBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  metaChip: {
+    color: '#94A3B8', fontSize: 12, fontWeight: '500',
+    backgroundColor: '#0F172A', borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
+
+  // Song picker
+  songPickerWrap: {
+    paddingTop: 12, paddingBottom: 4,
+    borderBottomWidth: 1, borderBottomColor: '#1E293B',
+  },
+  sectionLabel: {
+    color: '#64748B', fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.2, marginLeft: 20, marginBottom: 8,
+  },
+  songPickerRow:  { paddingHorizontal: 16, gap: 8, paddingBottom: 4 },
+  songPill: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: '#0F172A', borderRadius: 20,
+    borderWidth: 1, borderColor: '#334155',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    maxWidth: 180,
+  },
+  songPillActive: { backgroundColor: '#4F46E5', borderColor: '#6366F1' },
+  songPillText: { color: '#94A3B8', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  songPillTextActive: { color: '#FFF' },
+  songPillKey: { color: '#64748B', fontSize: 11 },
+  songPillKeyActive: { color: '#C4B5FD' },
+
+  // Body
+  body:        { flex: 1 },
+  bodyContent: { padding: 20, gap: 16, paddingBottom: 40 },
+
+  songTitle: {
+    fontSize: 26, fontWeight: '800', color: '#F8FAFC', textAlign: 'center',
+  },
+  emptyText: { color: '#64748B', textAlign: 'center', fontSize: 15, marginTop: 40 },
+
+  // Mixer card
+  mixerCard: {
+    backgroundColor: '#080E1A', borderRadius: 16,
+    borderWidth: 1, borderColor: '#1E293B',
+    overflow: 'hidden',
+  },
+  mixerTitle: {
+    color: '#64748B', fontSize: 11, fontWeight: '700',
+    letterSpacing: 1.2, margin: 14, marginBottom: 8,
+  },
+
+  // Track strip
+  trackStrip: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 12, marginBottom: 10,
+    backgroundColor: '#0F172A', borderRadius: 12,
+    overflow: 'hidden', borderWidth: 1, borderColor: '#1E293B',
+  },
+  trackStripMine: { borderColor: '#4F46E5' },
+  trackColorBar: { width: 4, alignSelf: 'stretch' },
+  trackInfo: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 12, paddingHorizontal: 12, gap: 10,
+  },
+  trackIcon:     { fontSize: 22 },
+  trackLabel:    { color: '#E2E8F0', fontSize: 14, fontWeight: '600' },
+  trackSublabel: { color: '#64748B', fontSize: 11, marginTop: 2 },
+  myBadge: {
+    backgroundColor: '#312E81', borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  myBadgeText: { color: '#A5B4FC', fontSize: 10, fontWeight: '700' },
+  muteBtn: {
+    width: 44, height: 44, justifyContent: 'center', alignItems: 'center',
+    marginRight: 8,
+  },
+  muteBtnActive: { opacity: 0.5 },
+  muteBtnDisabled: { opacity: 0.25 },
+  muteBtnText: { fontSize: 20 },
+
+  tipBox: {
+    margin: 12, marginTop: 4, padding: 10,
+    backgroundColor: '#0A1628', borderRadius: 8,
+    borderLeftWidth: 3, borderLeftColor: '#4F46E5',
+  },
+  tipText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
+  tipBold: { color: '#C4B5FD', fontWeight: '700' },
+
+
+  // Transport
+  transport: {
+    flexDirection: 'row', justifyContent: 'center',
+    alignItems: 'center', gap: 16,
+  },
+  transpBtn: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#334155',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  transpBtnDone: { borderColor: '#10B981' },
+  transpBtnText: { fontSize: 20 },
+  transpSkipText: { color: '#94A3B8', fontSize: 12, fontWeight: '700' },
+  playBtn: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center',
+  },
+  playBtnActive: { backgroundColor: '#7C3AED' },
+  playBtnText:   { fontSize: 28, color: '#FFF' },
+
+  // No stems inline (inside mixer card)
+  noStemsInline: {
+    marginHorizontal: 12, marginBottom: 10,
+    padding: 12, borderRadius: 10,
+    backgroundColor: '#0A0F1E',
+    borderWidth: 1, borderColor: '#1E293B',
+  },
+  noStemsInlineText: {
+    color: '#64748B', fontSize: 12, lineHeight: 18, textAlign: 'center',
+  },
+  transpDisabled: { opacity: 0.25 },
+  playBtnLoad: { backgroundColor: '#374151' },
+
+  // No stems
+  noStemsBox: {
+    alignItems: 'center', padding: 24,
+    backgroundColor: '#0A0F1E', borderRadius: 16,
+    borderWidth: 1, borderColor: '#1E293B',
+  },
+  noStemsIcon:  { fontSize: 36, marginBottom: 8 },
+  noStemsTitle: { color: '#E2E8F0', fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  noStemsText:  { color: '#64748B', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+
+  // Load button
+  loadBigBtn: {
+    backgroundColor: '#4F46E5', borderRadius: 14, padding: 16, alignItems: 'center',
+  },
+  loadBigBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+});

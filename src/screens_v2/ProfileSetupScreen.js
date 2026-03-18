@@ -3,7 +3,8 @@
  * User profile with name, photo, date of birth, and role assignments
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as ImagePicker from 'expo-image-picker';
 import {
   View,
   Text,
@@ -13,14 +14,21 @@ import {
   Alert,
   TextInput,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, saveUserProfile } from '../services/storage';
+import { syncProfileToTeamMembers } from '../services/sharedStorage';
+import { logout } from '../services/authAPI';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { parseRoleAssignments } from '../models_v2/models';
 
 export default function ProfileSetupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [orgName, setOrgName] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     lastName: '',
@@ -31,23 +39,101 @@ export default function ProfileSetupScreen({ navigation }) {
     roleAssignments: '',
   });
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProfile();
+    await fetch(`${SYNC_URL}/sync/org/profile`, { headers: syncHeaders() })
+      .then(r => r.json())
+      .then(d => setOrgName(d.name || ''))
+      .catch(() => {});
+    setRefreshing(false);
+  }, []);
+
   useEffect(() => {
     loadProfile();
+    fetch(`${SYNC_URL}/sync/org/profile`, { headers: syncHeaders() })
+      .then(r => r.json())
+      .then(d => setOrgName(d.name || ''))
+      .catch(() => {});
   }, []);
+
+  // Push local profile to Cloudflare KV so Ultimate Musician sees it
+  const pushProfileToCloud = async (p) => {
+    try {
+      await fetch(`${SYNC_URL}/sync/library-push`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          people: [{
+            id: p.id,
+            name: p.name,
+            lastName: p.lastName || '',
+            email: p.email || '',
+            phone: p.phone || '',
+            photo_url: p.photo_url || null,
+            roles: p.roles || [],
+            roleAssignments: p.roleAssignments || (p.roles || []).join(', '),
+            dateOfBirth: p.dateOfBirth || '',
+            updatedAt: new Date().toISOString(),
+          }],
+        }),
+      });
+    } catch (_) {}
+  };
+
+  // Pull this user's profile from Cloudflare KV and merge roles into local
+  const pullProfileFromCloud = async (localProfile) => {
+    try {
+      const email = (localProfile?.email || '').toLowerCase().trim();
+      if (!email) return localProfile;
+      const res = await fetch(`${SYNC_URL}/sync/people`, { headers: syncHeaders() });
+      if (!res.ok) return localProfile;
+      const people = await res.json();
+      const remote = people.find(p => (p.email || '').toLowerCase() === email);
+      if (!remote) return localProfile;
+      // Merge: remote roles win if they differ from local (admin may have updated them)
+      return {
+        ...localProfile,
+        roles: remote.roles?.length ? remote.roles : localProfile.roles,
+        roleAssignments: remote.roleAssignments || localProfile.roleAssignments,
+        photo_url: remote.photo_url || localProfile.photo_url,
+      };
+    } catch (_) {
+      return localProfile;
+    }
+  };
 
   const loadProfile = async () => {
     const userProfile = await getUserProfile();
     if (userProfile) {
-      setProfile(userProfile);
+      // Merge with latest from Cloudflare KV
+      const merged = await pullProfileFromCloud(userProfile);
+      const normalizedRoles = parseRoleAssignments(
+        merged.roleAssignments || merged.roles || [],
+      );
+      const normalizedProfile = {
+        ...merged,
+        roleAssignments: merged.roleAssignments || normalizedRoles.join(', '),
+        roles: normalizedRoles,
+      };
+
+      // Persist the merged profile locally
+      if (merged !== userProfile) {
+        await saveUserProfile(normalizedProfile).catch(() => {});
+      }
+
+      setProfile(normalizedProfile);
       setFormData({
-        name: userProfile.name || '',
-        lastName: userProfile.lastName || '',
-        email: userProfile.email || '',
-        phone: userProfile.phone || '',
-        dateOfBirth: userProfile.dateOfBirth || '',
-        photo_url: userProfile.photo_url || '',
-        roleAssignments: userProfile.roleAssignments || '',
+        name: normalizedProfile.name || '',
+        lastName: normalizedProfile.lastName || '',
+        email: normalizedProfile.email || '',
+        phone: normalizedProfile.phone || '',
+        dateOfBirth: normalizedProfile.dateOfBirth || '',
+        photo_url: normalizedProfile.photo_url || '',
+        roleAssignments: normalizedProfile.roleAssignments || normalizedRoles.join(', '),
       });
+
+      syncProfileToTeamMembers(normalizedProfile).catch(() => {});
     } else {
       setIsEditing(true); // Auto-enable editing for new users
     }
@@ -60,6 +146,7 @@ export default function ProfileSetupScreen({ navigation }) {
     }
 
     try {
+      const normalizedRoles = parseRoleAssignments(formData.roleAssignments);
       const updatedProfile = {
         ...profile,
         id: profile?.id || `user_${Date.now()}`,
@@ -69,8 +156,8 @@ export default function ProfileSetupScreen({ navigation }) {
         phone: formData.phone,
         dateOfBirth: formData.dateOfBirth,
         photo_url: formData.photo_url,
-        roleAssignments: formData.roleAssignments,
-        roles: formData.roleAssignments ? formData.roleAssignments.split(',').map(r => r.trim()) : [],
+        roleAssignments: normalizedRoles.join(', '),
+        roles: normalizedRoles,
         notification_preferences: profile?.notification_preferences || {
           assignments: true,
           messages: true,
@@ -79,6 +166,9 @@ export default function ProfileSetupScreen({ navigation }) {
       };
 
       await saveUserProfile(updatedProfile);
+      await syncProfileToTeamMembers(updatedProfile);
+      // Push to Cloudflare KV so Ultimate Musician reflects the update
+      pushProfileToCloud(updatedProfile).catch(() => {});
       setProfile(updatedProfile);
       setIsEditing(false);
 
@@ -87,6 +177,20 @@ export default function ProfileSetupScreen({ navigation }) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to save profile. Please try again.');
     }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          navigation.getParent()?.reset({ index: 0, routes: [{ name: 'Login' }] });
+        },
+      },
+    ]);
   };
 
   const handleCancel = () => {
@@ -98,26 +202,30 @@ export default function ProfileSetupScreen({ navigation }) {
         phone: profile.phone || '',
         dateOfBirth: profile.dateOfBirth || '',
         photo_url: profile.photo_url || '',
-        roleAssignments: profile.roleAssignments || '',
+        roleAssignments:
+          profile.roleAssignments ||
+          parseRoleAssignments(profile.roles || []).join(', '),
       });
       setIsEditing(false);
     }
   };
 
-  const handlePhotoUpload = () => {
-    Alert.alert(
-      'Photo Upload',
-      'Photo upload feature will be available soon. For now, you can use a default avatar.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Use Default',
-          onPress: () => {
-            setFormData({ ...formData, photo_url: 'https://via.placeholder.com/150' });
-          },
-        },
-      ]
-    );
+  const handlePhotoUpload = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Allow photo library access to set a profile picture.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: false,
+    });
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setFormData(prev => ({ ...prev, photo_url: result.assets[0].uri }));
+    }
   };
 
   return (
@@ -125,6 +233,7 @@ export default function ProfileSetupScreen({ navigation }) {
       style={styles.container}
       contentContainerStyle={styles.content}
       nestedScrollEnabled={true}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
     >
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.headerIcon}>👤</Text>
@@ -292,6 +401,40 @@ export default function ProfileSetupScreen({ navigation }) {
           </View>
         </View>
       )}
+
+      {/* Church / Organization */}
+      {orgName ? (
+        <View style={[styles.accountSection, { marginTop: 16 }]}>
+          <Text style={styles.accountTitle}>Your Church</Text>
+          <View style={styles.accountRow}>
+            <Text style={styles.accountLabel}>Organization:</Text>
+            <Text style={[styles.accountValue, { color: '#818CF8' }]}>🏛 {orgName}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={styles.supportCard}>
+        <Text style={styles.supportTitle}>Support</Text>
+        <Text style={styles.supportText}>
+          Ran into a bug, crash, or sync problem? Send a report and the team will receive it.
+        </Text>
+        <TouchableOpacity
+          style={styles.supportButton}
+          onPress={() =>
+            navigation.navigate('Feedback', {
+              subject: 'Playback issue report',
+              source: 'profile_screen',
+            })
+          }
+        >
+          <Text style={styles.supportButtonText}>Report a Problem</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Logout */}
+      <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+        <Text style={styles.logoutBtnText}>Sign Out</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -483,5 +626,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#F9FAFB',
     fontWeight: '500',
+  },
+  supportCard: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#0B1120',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  supportTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#E5E7EB',
+    marginBottom: 8,
+  },
+  supportText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#9CA3AF',
+    marginBottom: 14,
+  },
+  supportButton: {
+    backgroundColor: '#1D4ED8',
+    borderRadius: 12,
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  supportButtonText: {
+    color: '#F9FAFB',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  logoutBtn: {
+    marginTop: 24,
+    marginBottom: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#7F1D1D',
+    alignItems: 'center',
+  },
+  logoutBtnText: {
+    color: '#EF4444',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

@@ -24,6 +24,7 @@ export const ROLES = {
   BRASS: 'brass',
 
   // Technical Roles
+  SOUND_TECH: 'sound_tech',
   FOH_ENGINEER: 'foh_engineer',
   MONITOR_ENGINEER: 'monitor_engineer',
   STREAM_ENGINEER: 'stream_engineer',
@@ -51,6 +52,7 @@ export const ROLE_LABELS = {
   [ROLES.PERCUSSION]: 'Percussion',
   [ROLES.STRINGS]: 'Strings',
   [ROLES.BRASS]: 'Brass',
+  [ROLES.SOUND_TECH]: 'Sound Tech',
   [ROLES.FOH_ENGINEER]: 'FOH Engineer',
   [ROLES.MONITOR_ENGINEER]: 'Monitor Engineer',
   [ROLES.STREAM_ENGINEER]: 'Stream Engineer',
@@ -58,7 +60,111 @@ export const ROLE_LABELS = {
   [ROLES.PROPRESENTER]: 'ProPresenter',
   [ROLES.LIGHTING]: 'Lighting',
   [ROLES.STAGE_MANAGER]: 'Stage Manager',
+  sound: 'Sound Tech',
+  Sound: 'Sound Tech',
+  sound_tech: 'Sound Tech',
+  'sound tech': 'Sound Tech',
+  'Sound Tech': 'Sound Tech',
+  'sound technician': 'Sound Tech',
+  'sound engineer': 'Sound Tech',
 };
+
+export const PROFILE_ROLE_ALIASES = {
+  leader: 'Leader',
+  'worship leader': 'Leader',
+  md: 'Music Director',
+  'music director': 'Music Director',
+  'vocal lead': 'Vocal Lead',
+  'lead vocal': 'Vocal Lead',
+  'lead vocals': 'Vocal Lead',
+  vocalist: 'Vocal Lead',
+  'back vocal': 'Vocal BGV',
+  'back vocals': 'Vocal BGV',
+  'background vocal': 'Vocal BGV',
+  'background vocals': 'Vocal BGV',
+  'vocal bgv': 'Vocal BGV',
+  bgv: 'Vocal BGV',
+  'bgv 1': 'Vocal BGV',
+  'bgv 2': 'Vocal BGV',
+  'bgv 3': 'Vocal BGV',
+  drums: 'Drums',
+  drummer: 'Drums',
+  bass: 'Bass',
+  bassist: 'Bass',
+  guitar: 'Electric Guitar',
+  guitarist: 'Electric Guitar',
+  'electric guitar': 'Electric Guitar',
+  'electric guitarist': 'Electric Guitar',
+  'e guitar': 'Electric Guitar',
+  'e. guitar': 'Electric Guitar',
+  eguitar: 'Electric Guitar',
+  acoustic: 'Acoustic Guitar',
+  'acoustic guitar': 'Acoustic Guitar',
+  'acoustic guitarist': 'Acoustic Guitar',
+  'a guitar': 'Acoustic Guitar',
+  'a. guitar': 'Acoustic Guitar',
+  aguitar: 'Acoustic Guitar',
+  keys: 'Keys',
+  key: 'Keys',
+  keyboard: 'Keys',
+  keyboardist: 'Keys',
+  piano: 'Keys',
+  synth: 'Synth/Pad',
+  pad: 'Synth/Pad',
+  'synth/pad': 'Synth/Pad',
+  'synth pad': 'Synth/Pad',
+  track: 'Tracks',
+  tracks: 'Tracks',
+  sound: 'Sound Tech',
+  'sound tech': 'Sound Tech',
+  'sound technician': 'Sound Tech',
+  'sound engineer': 'Sound Tech',
+  'foh engineer': 'Sound Tech',
+  'front of house': 'Sound Tech',
+  'monitor engineer': 'Sound Tech',
+  'stream engineer': 'Sound Tech',
+  media: 'Media',
+  'media tech': 'Media',
+  propresenter: 'Media',
+};
+
+export function normalizeProfileRole(role) {
+  const raw = String(role || '').trim();
+  if (!raw) return '';
+
+  const directMatch = Object.values(PROFILE_ROLE_ALIASES).find(
+    (value) => value.toLowerCase() === raw.toLowerCase(),
+  );
+  if (directMatch) return directMatch;
+
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\./g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return PROFILE_ROLE_ALIASES[normalized] || raw;
+}
+
+export function parseRoleAssignments(value) {
+  const roles = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[,\n;]/);
+  const seen = new Set();
+  const normalizedRoles = [];
+
+  for (const role of roles) {
+    const normalizedRole = normalizeProfileRole(role);
+    if (!normalizedRole) continue;
+    const key = normalizedRole.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalizedRoles.push(normalizedRole);
+  }
+
+  return normalizedRoles;
+}
 
 /**
  * User Profile (Team Member)

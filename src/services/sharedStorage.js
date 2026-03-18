@@ -261,18 +261,37 @@ export const syncProfileToTeamMembers = async (localProfile) => {
   const existingIndex = members.findIndex(m =>
     m.email?.toLowerCase() === localProfile.email?.toLowerCase()
   );
+  const existingMember = existingIndex !== -1 ? members[existingIndex] : null;
+  const nextName = localProfile.name ?? existingMember?.name ?? '';
+  const existingLastName = existingMember?.lastName ?? '';
+  const nextRoles =
+    Array.isArray(localProfile.roles) && localProfile.roles.length > 0
+      ? localProfile.roles
+      : existingMember?.roles || [];
+  const nextLastName =
+    localProfile.lastName !== undefined
+      ? localProfile.lastName
+      : nextName &&
+          existingLastName &&
+          nextName.toLowerCase().endsWith(existingLastName.toLowerCase())
+        ? ''
+        : existingLastName;
 
   const memberData = {
-    id: localProfile.id || `person_${Date.now()}`,
-    name: localProfile.name,
-    lastName: localProfile.lastName,
-    email: localProfile.email,
-    phone: localProfile.phone,
-    dateOfBirth: localProfile.dateOfBirth,
-    photo_url: localProfile.photo_url,
-    roles: localProfile.roles || [],
-    roleAssignments: localProfile.roleAssignments,
-    blockout_dates: localProfile.blockout_dates || [],
+    id: existingMember?.id || localProfile.id || `person_${Date.now()}`,
+    name: nextName,
+    lastName: nextLastName,
+    email: localProfile.email ?? existingMember?.email ?? '',
+    phone: localProfile.phone ?? existingMember?.phone ?? '',
+    dateOfBirth: localProfile.dateOfBirth ?? existingMember?.dateOfBirth ?? '',
+    photo_url: localProfile.photo_url ?? existingMember?.photo_url ?? null,
+    roles: nextRoles,
+    roleAssignments:
+      localProfile.roleAssignments ??
+      existingMember?.roleAssignments ??
+      nextRoles.join(', '),
+    blockout_dates:
+      localProfile.blockout_dates ?? existingMember?.blockout_dates ?? [],
     updatedAt: new Date().toISOString(),
   };
 
