@@ -10,6 +10,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { featureFlags as screenFeatureFlags } from 'react-native-screens';
 
 // Import screens
 import LoginScreen from './src/screens_v2/LoginScreen';
@@ -23,6 +24,7 @@ import LivePerformanceScreen from './src/screens_v2/LivePerformanceScreen';
 import LyricsViewScreen from './src/screens_v2/LyricsViewScreen';
 import SetlistRunnerScreen from './src/screens_v2/SetlistRunnerScreen';
 import AdminDashboardScreen from './src/screens_v2/AdminDashboardScreen';
+import LeaderDashboardScreen from './src/screens_v2/LeaderDashboardScreen';
 import ContentEditorScreen from './src/screens_v2/ContentEditorScreen';
 import RegistrationScreen from './src/screens_v2/RegistrationScreen';
 import PersonalPracticeScreen from './src/screens_v2/PersonalPracticeScreen';
@@ -30,17 +32,41 @@ import ResetPasswordScreen from './src/screens_v2/ResetPasswordScreen';
 import VerifyScreen from './src/screens_v2/VerifyScreen';
 import FeedbackScreen from './src/screens_v2/FeedbackScreen';
 import AppErrorBoundary from './src/components_v2/AppErrorBoundary';
+import MessageNotificationWatcher from './src/components_v2/MessageNotificationWatcher';
+import PushNotificationManager from './src/components_v2/PushNotificationManager';
 import {
   flushFeedbackQueue,
   registerGlobalErrorHandler,
   setFeedbackRuntimeContext,
 } from './src/services/feedback';
+import { syncPushRegistration } from './src/services/pushNotifications';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 const navigationRef = createNavigationContainerRef();
+const linking = {
+  prefixes: ['ultimateplayback://'],
+  config: {
+    screens: {
+      Login: 'login',
+      Register: 'invite',
+      Verify: 'verify',
+      ResetPassword: 'reset-password',
+    },
+  },
+};
 
 registerGlobalErrorHandler();
+
+// The experimental native-controlled bottom tab implementation in newer
+// react-native-screens builds is unstable in Expo Go for this app's current
+// navigation stack. Keep Playback on the stable JS-controlled tab path.
+if (
+  screenFeatureFlags?.experiment
+  && typeof screenFeatureFlags.experiment.controlledBottomTabs === 'boolean'
+) {
+  screenFeatureFlags.experiment.controlledBottomTabs = false;
+}
 
 function tabIcon(icon, size) {
   return <Text style={{ fontSize: size }}>{icon}</Text>;
@@ -169,14 +195,18 @@ export default function App() {
     if (routeName && routeName !== lastRouteNameRef.current) {
       lastRouteNameRef.current = routeName;
       setFeedbackRuntimeContext({ routeName });
+      syncPushRegistration().catch(() => {});
     }
   };
 
   return (
     <GestureHandlerRootView style={styles.appContainer}>
       <AppErrorBoundary getCurrentRouteName={() => navigationRef.getCurrentRoute()?.name || lastRouteNameRef.current}>
+        <MessageNotificationWatcher />
+        <PushNotificationManager navigationRef={navigationRef} />
         <NavigationContainer
           ref={navigationRef}
+          linking={linking}
           onReady={syncCurrentRoute}
           onStateChange={syncCurrentRoute}
         >
@@ -255,6 +285,11 @@ export default function App() {
           <Stack.Screen
             name="AdminDashboard"
             component={AdminDashboardScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="LeaderDashboard"
+            component={LeaderDashboardScreen}
             options={{ headerShown: false }}
           />
           <Stack.Screen

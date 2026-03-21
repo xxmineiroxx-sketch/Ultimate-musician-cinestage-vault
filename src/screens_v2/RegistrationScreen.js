@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -6,22 +6,86 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { register } from '../services/authAPI';
 import { parseRoleAssignments } from '../models_v2/models';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
 const ROLES = ['Keys', 'Drums', 'Bass', 'Electric Guitar', 'Acoustic Guitar',
   'Lead Vocals', 'BG Vocals', 'Music Director', 'Sound Tech', 'Other'];
 
+function splitInviteName(fullName) {
+  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: '', lastName: '' };
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return {
+    firstName: parts.slice(0, -1).join(' '),
+    lastName: parts[parts.length - 1],
+  };
+}
+
 export default function RegistrationScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const prefillEmail = route?.params?.email || '';
+  const inviteParams = route?.params || {};
+  const inviteNameParts = useMemo(
+    () => splitInviteName(inviteParams.name),
+    [inviteParams.name],
+  );
+  const prefillEmail = inviteParams.email || '';
+  const prefillPhone = inviteParams.phone || '';
+  const prefillOrgName = inviteParams.orgName || '';
+  const inviteToken = inviteParams.token || '';
+  const isInviteFlow = Boolean(
+    inviteToken
+      || prefillEmail
+      || prefillPhone
+      || prefillOrgName
+      || inviteParams.name,
+  );
 
   const [form, setForm] = useState({
-    firstName: '', lastName: '', email: prefillEmail,
-    password: '', confirmPassword: '', phone: '', role: '',
+    firstName: inviteNameParts.firstName,
+    lastName: inviteNameParts.lastName,
+    email: prefillEmail,
+    password: '',
+    confirmPassword: '',
+    phone: prefillPhone,
+    role: '',
   });
   const [loading, setLoading] = useState(false);
   const [showRoles, setShowRoles] = useState(false);
 
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      firstName: inviteNameParts.firstName || current.firstName,
+      lastName: inviteNameParts.lastName || current.lastName,
+      email: prefillEmail || current.email,
+      phone: prefillPhone || current.phone,
+    }));
+  }, [inviteNameParts.firstName, inviteNameParts.lastName, prefillEmail, prefillPhone]);
+
+  const pushRoleToCloud = (firstName, lastName, email, phone, role) => {
+    if (!role && !email) return;
+    const name = `${firstName} ${lastName}`.trim();
+    const roles = role ? [role] : [];
+    fetch(`${SYNC_URL}/sync/people`, {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify({
+        person: {
+          email: email.trim(),
+          phone: phone.trim(),
+          name,
+          roles,
+          roleAssignments: roles.join(', '),
+          roleSyncSource: 'playback_profile',
+          roleSyncUpdatedAt: new Date().toISOString(),
+          playbackRegistered: true,
+          inviteToken,
+        },
+      }),
+    }).catch(() => {});
+  };
 
   const handleRegister = async () => {
     const { firstName, lastName, email, password, confirmPassword, phone, role } = form;
@@ -41,6 +105,7 @@ export default function RegistrationScreen({ navigation, route }) {
         phone: phone.trim(),
         roleAssignments: parseRoleAssignments(role ? [role] : []),
       });
+      pushRoleToCloud(firstName.trim(), lastName.trim(), email.trim(), phone.trim(), role);
       if (result?.needsVerification) {
         navigation.replace('Verify', {
           identifier: result.email || email.trim(),
@@ -72,6 +137,30 @@ export default function RegistrationScreen({ navigation, route }) {
 
         {/* Card */}
         <View style={styles.card}>
+          {isInviteFlow && (
+            <View style={styles.inviteCard}>
+              <Text style={styles.inviteEyebrow}>Team Invitation</Text>
+              <Text style={styles.inviteTitle}>
+                {prefillOrgName ? `You were invited to join ${prefillOrgName}` : 'Your invitation is ready'}
+              </Text>
+              <Text style={styles.inviteBody}>
+                Create your account with the invited contact info below. A 6-digit confirmation code will be emailed to you after registration.
+              </Text>
+              <View style={styles.inviteMetaRow}>
+                {prefillEmail ? (
+                  <View style={styles.inviteMetaChip}>
+                    <Text style={styles.inviteMetaChipText}>{prefillEmail}</Text>
+                  </View>
+                ) : null}
+                {prefillPhone ? (
+                  <View style={styles.inviteMetaChip}>
+                    <Text style={styles.inviteMetaChipText}>{prefillPhone}</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          )}
+
           {/* Name row */}
           <View style={styles.row}>
             <View style={{ flex: 1, marginRight: 8 }}>
@@ -125,7 +214,16 @@ export default function RegistrationScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.backLink}
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+              return;
+            }
+            navigation.replace('Login');
+          }}
+        >
           <Text style={styles.backLinkText}>Already have an account? Sign in</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -140,6 +238,13 @@ const styles = StyleSheet.create({
   title: { color: '#F9FAFB', fontSize: 28, fontWeight: '900', textAlign: 'center' },
   subtitle: { color: '#6B7280', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   card: { backgroundColor: '#0B1120', borderRadius: 20, borderWidth: 1, borderColor: '#1F2937', padding: 20, marginBottom: 16 },
+  inviteCard: { backgroundColor: '#111827', borderRadius: 16, borderWidth: 1, borderColor: '#312E81', padding: 16, marginBottom: 10 },
+  inviteEyebrow: { color: '#A5B4FC', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 },
+  inviteTitle: { color: '#F9FAFB', fontSize: 18, fontWeight: '800', lineHeight: 24 },
+  inviteBody: { color: '#CBD5E1', fontSize: 13, lineHeight: 20, marginTop: 8 },
+  inviteMetaRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 },
+  inviteMetaChip: { backgroundColor: '#1E1B4B', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8, marginBottom: 8 },
+  inviteMetaChipText: { color: '#C7D2FE', fontSize: 12, fontWeight: '700' },
   row: { flexDirection: 'row', marginBottom: 0 },
   label: { color: '#6B7280', fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12 },
   input: { backgroundColor: '#020617', borderRadius: 12, borderWidth: 1, borderColor: '#1F2937', paddingHorizontal: 14, paddingVertical: 12, color: '#F9FAFB', fontSize: 15, marginBottom: 4 },

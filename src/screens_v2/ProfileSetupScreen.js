@@ -3,7 +3,9 @@
  * User profile with name, photo, date of birth, and role assignments
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import {
   View,
@@ -22,6 +24,100 @@ import { syncProfileToTeamMembers } from '../services/sharedStorage';
 import { logout } from '../services/authAPI';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { parseRoleAssignments } from '../models_v2/models';
+
+const normalizeRemotePhoneLookup = (value) =>
+  String(value || '').replace(/\D+/g, '');
+
+const PHOTO_MIME_BY_EXT = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+const MAX_PROFILE_PHOTO_BASE64_LENGTH = 900000;
+const DEFAULT_NOTIFICATION_PREFERENCES = {
+  assignments: true,
+  messages: true,
+  reminders: true,
+};
+
+const isPortablePhotoUrl = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('https://')
+  );
+};
+
+const inferPhotoMimeType = (uri, fallback = 'image/jpeg') => {
+  const normalized = String(uri || '').split('?')[0].trim().toLowerCase();
+  const extension = normalized.includes('.') ? normalized.split('.').pop() : '';
+  return PHOTO_MIME_BY_EXT[extension] || fallback;
+};
+
+const buildPhotoDataUrl = (base64, mimeType = 'image/jpeg') =>
+  `data:${mimeType};base64,${base64}`;
+
+const parseValidDate = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return null;
+  return date;
+};
+
+const parseMemberSinceFromId = (id) => {
+  const match = String(id || '').match(/(?:^|_)(\d{10,})(?:$|_)/);
+  if (!match) return null;
+  const timestamp = Number(match[1]);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime()) || date.getFullYear() < 2020) return null;
+  return date;
+};
+
+const formatMemberSince = (profile) => {
+  const candidates = [
+    profile?.playbackRegisteredAt,
+    profile?.inviteRegisteredAt,
+    profile?.createdAt,
+    profile?.memberSince,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseValidDate(candidate);
+    if (parsed) return parsed.toLocaleDateString();
+  }
+  const parsedFromId = parseMemberSinceFromId(profile?.id);
+  return parsedFromId ? parsedFromId.toLocaleDateString() : 'N/A';
+};
+
+const getPreferredSyncedPhotoUrl = (...values) => {
+  for (const value of values) {
+    if (isPortablePhotoUrl(value)) return value;
+  }
+  return '';
+};
+
+const findRemotePersonMatch = (people, localProfile) => {
+  const localId = String(localProfile?.id || '').trim();
+  const localEmail = String(localProfile?.email || '').trim().toLowerCase();
+  const localPhone = normalizeRemotePhoneLookup(localProfile?.phone);
+
+  return (Array.isArray(people) ? people : []).find((person) => {
+    const personId = String(person?.id || '').trim();
+    const personEmail = String(person?.email || '').trim().toLowerCase();
+    const personPhone = normalizeRemotePhoneLookup(person?.phone);
+
+    return (
+      (localId && personId && personId === localId)
+      || (localEmail && personEmail && personEmail === localEmail)
+      || (localPhone && personPhone && personPhone === localPhone)
+    );
+  }) || null;
+};
 
 export default function ProfileSetupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -73,7 +169,18 @@ export default function ProfileSetupScreen({ navigation }) {
             photo_url: p.photo_url || null,
             roles: p.roles || [],
             roleAssignments: p.roleAssignments || (p.roles || []).join(', '),
+            roleSyncSource: 'playback_profile',
+            roleSyncUpdatedAt: new Date().toISOString(),
             dateOfBirth: p.dateOfBirth || '',
+            playbackRegistered:
+              p.playbackRegistered === true || Boolean(p.playbackRegisteredAt),
+            playbackRegisteredAt: p.playbackRegisteredAt || null,
+            inviteRegisteredAt: p.inviteRegisteredAt || null,
+            createdAt:
+              p.createdAt
+              || p.playbackRegisteredAt
+              || p.inviteRegisteredAt
+              || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }],
         }),
@@ -85,40 +192,157 @@ export default function ProfileSetupScreen({ navigation }) {
   const pullProfileFromCloud = async (localProfile) => {
     try {
       const email = (localProfile?.email || '').toLowerCase().trim();
-      if (!email) return localProfile;
+      const phone = normalizeRemotePhoneLookup(localProfile?.phone);
+      const id = String(localProfile?.id || '').trim();
+      if (!email && !phone && !id) return localProfile;
       const res = await fetch(`${SYNC_URL}/sync/people`, { headers: syncHeaders() });
       if (!res.ok) return localProfile;
       const people = await res.json();
-      const remote = people.find(p => (p.email || '').toLowerCase() === email);
+      const remote = findRemotePersonMatch(people, localProfile);
       if (!remote) return localProfile;
-      // Merge: remote roles win if they differ from local (admin may have updated them)
+      const remoteRoles = parseRoleAssignments(
+        remote.roleAssignments || remote.roles || [],
+      );
+      const mergedRoles = remoteRoles.length > 0
+        ? remoteRoles
+        : parseRoleAssignments(localProfile.roles || localProfile.roleAssignments || []);
+      const mergedPhoto = getPreferredSyncedPhotoUrl(
+        remote.photo_url,
+        localProfile.photo_url,
+      );
+
       return {
         ...localProfile,
-        roles: remote.roles?.length ? remote.roles : localProfile.roles,
-        roleAssignments: remote.roleAssignments || localProfile.roleAssignments,
-        photo_url: remote.photo_url || localProfile.photo_url,
+        id: remote.id || localProfile.id,
+        name: remote.name || localProfile.name,
+        lastName: remote.lastName || localProfile.lastName,
+        email: remote.email || localProfile.email,
+        phone: remote.phone || localProfile.phone,
+        roles: mergedRoles,
+        roleAssignments:
+          remote.roleAssignments
+          || localProfile.roleAssignments
+          || mergedRoles.join(', '),
+        dateOfBirth: remote.dateOfBirth || localProfile.dateOfBirth,
+        photo_url: mergedPhoto || localProfile.photo_url || '',
+        createdAt:
+          remote.createdAt
+          || remote.playbackRegisteredAt
+          || remote.inviteRegisteredAt
+          || localProfile.createdAt
+          || '',
+        inviteRegisteredAt:
+          remote.inviteRegisteredAt || localProfile.inviteRegisteredAt || '',
+        playbackRegisteredAt:
+          remote.playbackRegisteredAt || localProfile.playbackRegisteredAt || '',
+        updatedAt: remote.updatedAt || localProfile.updatedAt || '',
       };
     } catch (_) {
       return localProfile;
     }
   };
 
+  const convertPhotoToPortable = useCallback(async (value, options = {}) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+    if (isPortablePhotoUrl(normalized)) return normalized;
+
+    try {
+      const base64 =
+        options.base64
+        || await FileSystem.readAsStringAsync(normalized, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      const normalizedBase64 = String(base64 || '').replace(/\s+/g, '');
+      if (!normalizedBase64) return '';
+      if (normalizedBase64.length > MAX_PROFILE_PHOTO_BASE64_LENGTH) return '';
+      return buildPhotoDataUrl(
+        normalizedBase64,
+        options.mimeType || inferPhotoMimeType(normalized),
+      );
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const persistProfilePhoto = useCallback(async (nextPhotoUrl) => {
+    if (!profile?.name || !profile?.lastName) {
+      setIsEditing(true);
+      setFormData((prev) => ({ ...prev, photo_url: nextPhotoUrl || '' }));
+      return false;
+    }
+
+    const normalizedRoles = parseRoleAssignments(
+      profile?.roleAssignments || profile?.roles || [],
+    );
+    const updatedProfile = {
+      ...profile,
+      photo_url: nextPhotoUrl || '',
+      roles: normalizedRoles,
+      roleAssignments:
+        profile?.roleAssignments || normalizedRoles.join(', '),
+      playbackRegistered:
+        profile?.playbackRegistered === true || Boolean(profile?.playbackRegisteredAt),
+      createdAt:
+        profile?.createdAt
+        || profile?.playbackRegisteredAt
+        || profile?.inviteRegisteredAt
+        || new Date().toISOString(),
+      playbackRegisteredAt: profile?.playbackRegisteredAt || '',
+      inviteRegisteredAt: profile?.inviteRegisteredAt || '',
+      updatedAt: new Date().toISOString(),
+      notification_preferences:
+        profile?.notification_preferences || DEFAULT_NOTIFICATION_PREFERENCES,
+    };
+    const syncedProfile = {
+      ...updatedProfile,
+      photo_url: getPreferredSyncedPhotoUrl(updatedProfile.photo_url) || null,
+    };
+
+    await saveUserProfile(updatedProfile);
+    await syncProfileToTeamMembers(syncedProfile);
+    await pushProfileToCloud(syncedProfile);
+
+    setProfile(updatedProfile);
+    setFormData((prev) => ({ ...prev, photo_url: updatedProfile.photo_url || '' }));
+    return true;
+  }, [profile]);
+
   const loadProfile = async () => {
     const userProfile = await getUserProfile();
     if (userProfile) {
       // Merge with latest from Cloudflare KV
       const merged = await pullProfileFromCloud(userProfile);
+      const portablePhotoUrl = await convertPhotoToPortable(merged.photo_url);
       const normalizedRoles = parseRoleAssignments(
         merged.roleAssignments || merged.roles || [],
       );
       const normalizedProfile = {
         ...merged,
+        createdAt:
+          merged.createdAt
+          || merged.playbackRegisteredAt
+          || merged.inviteRegisteredAt
+          || userProfile.createdAt
+          || '',
+        playbackRegisteredAt:
+          merged.playbackRegisteredAt || userProfile.playbackRegisteredAt || '',
+        inviteRegisteredAt:
+          merged.inviteRegisteredAt || userProfile.inviteRegisteredAt || '',
+        updatedAt: merged.updatedAt || userProfile.updatedAt || '',
         roleAssignments: merged.roleAssignments || normalizedRoles.join(', '),
         roles: normalizedRoles,
+        photo_url: portablePhotoUrl || merged.photo_url || '',
       };
 
       // Persist the merged profile locally
-      if (merged !== userProfile) {
+      if (
+        merged !== userProfile
+        || normalizedProfile.photo_url !== (userProfile.photo_url || '')
+        || normalizedProfile.createdAt !== (userProfile.createdAt || '')
+        || normalizedProfile.playbackRegisteredAt !== (userProfile.playbackRegisteredAt || '')
+        || normalizedProfile.inviteRegisteredAt !== (userProfile.inviteRegisteredAt || '')
+      ) {
         await saveUserProfile(normalizedProfile).catch(() => {});
       }
 
@@ -133,7 +357,12 @@ export default function ProfileSetupScreen({ navigation }) {
         roleAssignments: normalizedProfile.roleAssignments || normalizedRoles.join(', '),
       });
 
-      syncProfileToTeamMembers(normalizedProfile).catch(() => {});
+      const syncedProfile = {
+        ...normalizedProfile,
+        photo_url: getPreferredSyncedPhotoUrl(normalizedProfile.photo_url) || null,
+      };
+      syncProfileToTeamMembers(syncedProfile).catch(() => {});
+      pushProfileToCloud(syncedProfile).catch(() => {});
     } else {
       setIsEditing(true); // Auto-enable editing for new users
     }
@@ -146,6 +375,8 @@ export default function ProfileSetupScreen({ navigation }) {
     }
 
     try {
+      const storedPhotoUrl =
+        (await convertPhotoToPortable(formData.photo_url)) || formData.photo_url || '';
       const normalizedRoles = parseRoleAssignments(formData.roleAssignments);
       const updatedProfile = {
         ...profile,
@@ -155,20 +386,35 @@ export default function ProfileSetupScreen({ navigation }) {
         email: formData.email,
         phone: formData.phone,
         dateOfBirth: formData.dateOfBirth,
-        photo_url: formData.photo_url,
+        photo_url: storedPhotoUrl,
         roleAssignments: normalizedRoles.join(', '),
         roles: normalizedRoles,
-        notification_preferences: profile?.notification_preferences || {
-          assignments: true,
-          messages: true,
-          reminders: true,
-        },
+        roleSyncSource: 'playback_profile',
+        roleSyncUpdatedAt: new Date().toISOString(),
+        createdAt:
+          profile?.createdAt
+          || profile?.playbackRegisteredAt
+          || profile?.inviteRegisteredAt
+          || new Date().toISOString(),
+        playbackRegisteredAt: profile?.playbackRegisteredAt || '',
+        inviteRegisteredAt: profile?.inviteRegisteredAt || '',
+        updatedAt: new Date().toISOString(),
+        playbackRegistered:
+          profile?.playbackRegistered === true || Boolean(profile?.playbackRegisteredAt),
+        notification_preferences:
+          profile?.notification_preferences || DEFAULT_NOTIFICATION_PREFERENCES,
       };
 
       await saveUserProfile(updatedProfile);
-      await syncProfileToTeamMembers(updatedProfile);
+      await syncProfileToTeamMembers({
+        ...updatedProfile,
+        photo_url: getPreferredSyncedPhotoUrl(updatedProfile.photo_url) || null,
+      });
       // Push to Cloudflare KV so Ultimate Musician reflects the update
-      pushProfileToCloud(updatedProfile).catch(() => {});
+      pushProfileToCloud({
+        ...updatedProfile,
+        photo_url: getPreferredSyncedPhotoUrl(updatedProfile.photo_url) || null,
+      }).catch(() => {});
       setProfile(updatedProfile);
       setIsEditing(false);
 
@@ -210,23 +456,92 @@ export default function ProfileSetupScreen({ navigation }) {
     }
   };
 
-  const handlePhotoUpload = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Allow photo library access to set a profile picture.');
+  const applySelectedPhoto = useCallback(async (asset) => {
+    const portablePhotoUrl = await convertPhotoToPortable(asset?.uri, {
+      base64: asset?.base64 || '',
+      mimeType: asset?.mimeType || inferPhotoMimeType(asset?.uri),
+    });
+    if (!portablePhotoUrl) {
+      Alert.alert(
+        'Profile Photo',
+        'Could not prepare this image. Try a smaller photo or use Photo Library.'
+      );
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-      base64: false,
-    });
-    if (!result.canceled && result.assets?.[0]?.uri) {
-      setFormData(prev => ({ ...prev, photo_url: result.assets[0].uri }));
+    setFormData((prev) => ({ ...prev, photo_url: portablePhotoUrl }));
+    await persistProfilePhoto(portablePhotoUrl);
+  }, [convertPhotoToPortable, persistProfilePhoto]);
+
+  const pickPhotoFromLibrary = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission required',
+          'Allow photo library access to choose a profile picture, or use Files instead.'
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.35,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        await applySelectedPhoto(result.assets[0]);
+      }
+    } catch (error) {
+      Alert.alert('Photo Library', 'Could not open the photo library. Try Files instead.');
     }
-  };
+  }, [applySelectedPhoto]);
+
+  const pickPhotoFromFiles = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        await applySelectedPhoto(result.assets[0]);
+      }
+    } catch (error) {
+      Alert.alert('Files', 'Could not import an image from Files.');
+    }
+  }, [applySelectedPhoto]);
+
+  const handlePhotoUpload = useCallback(() => {
+    Alert.alert('Profile Photo', 'Choose how you want to add your profile photo.', [
+      {
+        text: 'Photo Library',
+        onPress: () => {
+          void pickPhotoFromLibrary();
+        },
+      },
+      {
+        text: 'Files',
+        onPress: () => {
+          void pickPhotoFromFiles();
+        },
+      },
+      formData.photo_url
+        ? {
+            text: 'Remove Photo',
+            style: 'destructive',
+            onPress: () => {
+              setFormData((prev) => ({ ...prev, photo_url: '' }));
+              void persistProfilePhoto('');
+            },
+          }
+        : undefined,
+      { text: 'Cancel', style: 'cancel' },
+    ].filter(Boolean));
+  }, [formData.photo_url, persistProfilePhoto, pickPhotoFromFiles, pickPhotoFromLibrary]);
 
   return (
     <ScrollView
@@ -247,7 +562,7 @@ export default function ProfileSetupScreen({ navigation }) {
       <View style={styles.photoSection}>
         <TouchableOpacity
           style={styles.photoContainer}
-          onPress={isEditing ? handlePhotoUpload : null}
+          onPress={handlePhotoUpload}
         >
           {formData.photo_url ? (
             <Image
@@ -263,6 +578,9 @@ export default function ProfileSetupScreen({ navigation }) {
             </View>
           )}
         </TouchableOpacity>
+        <Text style={styles.photoHint}>
+          {isEditing ? 'Tap photo to change it' : 'Tap photo to add or change it'}
+        </Text>
       </View>
 
       {/* Form Fields */}
@@ -396,7 +714,7 @@ export default function ProfileSetupScreen({ navigation }) {
           <View style={styles.accountRow}>
             <Text style={styles.accountLabel}>Member Since:</Text>
             <Text style={styles.accountValue}>
-              {profile.id ? new Date(parseInt(profile.id.split('_')[1])).toLocaleDateString() : 'N/A'}
+              {formatMemberSince(profile)}
             </Text>
           </View>
         </View>
@@ -499,6 +817,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#6B7280',
     textAlign: 'center',
+  },
+  photoHint: {
+    marginTop: 12,
+    fontSize: 12,
+    color: '#818CF8',
+    fontWeight: '600',
   },
   formSection: {
     marginBottom: 24,

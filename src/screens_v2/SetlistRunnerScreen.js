@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
-import { SYNC_URL } from '../../config/syncConfig';
+import { SYNC_URL, CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SWIPE_THRESHOLD   = 60;
@@ -65,6 +65,16 @@ function normalizeRoleKey(role) {
     'front of house': 'foh_engineer',
     'monitor engineer': 'monitor_engineer',
     'stream engineer': 'stream_engineer',
+    media: 'media',
+    'media tech': 'media_tech',
+    'media operator': 'media',
+    'slide operator': 'slides',
+    'slides operator': 'slides',
+    slides: 'slides',
+    projection: 'projection',
+    'screen operator': 'screen_operator',
+    visuals: 'visual',
+    graphics: 'graphics',
   };
 
   return aliases[lower] || lower.replace(/\s+/g, '_');
@@ -89,6 +99,17 @@ const ROLE_TO_INSTRUMENT = {
 const CHART_INSTRUMENTS = ['Keys', 'Acoustic Guitar', 'Electric Guitar', 'Bass', 'Synth/Pad', 'Drums'];
 
 const SOUND_TECH_ROLES = new Set(['sound_tech', 'foh_engineer', 'monitor_engineer', 'stream_engineer']);
+const MEDIA_ROLES = new Set(['media', 'media_tech', 'slides', 'slide_operator', 'projection', 'screen_operator', 'visual', 'graphics']);
+
+const DRUM_PATTERNS = [
+  { label: 'Driving',   text: 'Driving — K on 1&3, S on 2&4, HH 8ths' },
+  { label: 'Half-time', text: 'Half-time — K on 1, S on 3, slow HH' },
+  { label: 'Ballad',    text: 'Ballad — light brush/rim, sparse kick' },
+  { label: 'Build',     text: '▲ Build — open HH → ride bell, crescendo' },
+  { label: 'Rim click', text: 'Rim click only — no full snare' },
+  { label: 'Wash',      text: 'Cymbal wash — swell into section' },
+  { label: '🔇 Tacet',  text: '(tacet — rest this section)' },
+];
 
 const PART_LABELS = {
   lead: 'Lead', lead_vocal: 'Lead',
@@ -96,6 +117,11 @@ const PART_LABELS = {
   bgv2: 'BGV 2', bgv_2: 'BGV 2',
   bgv3: 'BGV 3', bgv_3: 'BGV 3',
   bgv: 'BGV', harmony: 'Harmony',
+  soprano: 'Soprano', mezzo: 'Mezzo-Soprano',
+  alto: 'Alto', tenor: 'Tenor',
+  baritone: 'Baritone', bass: 'Bass',
+  voice1: '1st Voice', voice2: '2nd Voice', voice3: '3rd Voice',
+  voice4: '4th Voice', voice5: '5th Voice',
 };
 
 function getMyPartForSong(songId, va, profile) {
@@ -136,6 +162,7 @@ function detectRoleType(role) {
   const r = normalizeRoleKey(role);
   if (!r) return 'general';
   if (SOUND_TECH_ROLES.has(r)) return 'sound_tech';
+  if (MEDIA_ROLES.has(r) || r.includes('media') || r.includes('slide') || r.includes('projection') || r.includes('visual') || r.includes('screen') || r.includes('graphic')) return 'media';
   if (
     r.includes('vocal') || r.includes('leader') || r.includes('worship') ||
     r.includes('director') || r.includes('singer') || r.includes('bgv') ||
@@ -228,6 +255,10 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const lastMidiPress   = useRef({ key: '', time: 0 });
   const midiWsRef       = useRef(null);
 
+  // ── Live Performance Sync ──────────────────────────────────────────────────
+  const [isLiveSession, setIsLiveSession] = useState(false);
+  const perfWsRef = useRef(null);
+
   const scrollRef     = useRef(null);
   const scrollY       = useRef(0);
   const contentH      = useRef(0);
@@ -296,6 +327,77 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     scrollY.current = Math.max(0, targetY - 40);
     scrollRef.current?.scrollTo({ y: scrollY.current, animated: true });
   }, []); // stable — only refs + route-level songs
+
+  // ── Performance sync — scroll to a section by label ───────────────────────
+  function scrollToSectionByLabel(label) {
+    if (!label) return;
+    const curSong = songs[currentIndexRef.current];
+    if (!curSong) return;
+    const text = curSong.lyrics || curSong.chordChart || '';
+    const secs = parseSections(text);
+    const idx = secs.findIndex(s => s.name.toLowerCase().startsWith(label.toLowerCase()));
+    if (idx >= 0) scrollToSection(idx);
+  }
+
+  // ── Performance sync — handle PERF events from UM ─────────────────────────
+  const handlePerfEvent = useCallback((event) => {
+    const { type, song: songData, sectionLabel } = event;
+    switch (type) {
+      case 'PERF_START': {
+        setIsLiveSession(true);
+        if (songData?.title) {
+          const idx = songs.findIndex(s =>
+            s.id === songData.id ||
+            (s.title && songData.title && s.title.toLowerCase() === songData.title.toLowerCase())
+          );
+          if (idx >= 0) goTo(idx);
+        }
+        break;
+      }
+      case 'PERF_SONG': {
+        if (songData?.title) {
+          const idx = songs.findIndex(s =>
+            s.id === songData.id ||
+            (s.title && songData.title && s.title.toLowerCase() === songData.title.toLowerCase())
+          );
+          if (idx >= 0) goTo(idx);
+        }
+        break;
+      }
+      case 'PERF_SECTION':
+        scrollToSectionByLabel(sectionLabel);
+        break;
+      case 'PERF_PLAY':
+        setAutoScroll(true);
+        break;
+      case 'PERF_PAUSE':
+        setAutoScroll(false);
+        break;
+      case 'PERF_STOP':
+        setIsLiveSession(false);
+        setAutoScroll(false);
+        break;
+      default:
+        break;
+    }
+  }, [goTo, scrollToSection, songs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Performance sync — CineStage WebSocket (cloud path) ───────────────────
+  useEffect(() => {
+    const wsBase = CINESTAGE_URL.replace(/^https/, 'wss').replace(/^http/, 'ws');
+    const ws = new WebSocket(`${wsBase}/ws/sync?orgId=${SYNC_ORG_ID}&secretKey=${SYNC_SECRET_KEY}`);
+    perfWsRef.current = ws;
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        const inner = msg.type === 'broadcast' ? msg.data : msg;
+        if (inner.type && inner.type.startsWith('PERF_')) handlePerfEvent(inner);
+      } catch {}
+    };
+    ws.onerror = () => {};
+    ws.onclose = () => { perfWsRef.current = null; };
+    return () => { ws.close(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── MIDI WebSocket — connect to sync server bridge ──────────────────────────
   useEffect(() => {
@@ -368,10 +470,18 @@ export default function SetlistRunnerScreen({ navigation, route }) {
       case 'MIDI_SPEED_DOWN':
         setScrollSpeed(s => Math.max(1, s - 1));
         break;
+      case 'PERF_START':
+      case 'PERF_SONG':
+      case 'PERF_SECTION':
+      case 'PERF_PLAY':
+      case 'PERF_PAUSE':
+      case 'PERF_STOP':
+        handlePerfEvent(cmd);
+        break;
       default:
         break;
     }
-  }, [goNext, goPrev, goTo, scrollToSection, songs.length]);
+  }, [goNext, goPrev, goTo, scrollToSection, handlePerfEvent, songs.length]);
 
   // ── Broadcast song position → desktop updates APC Mini grid LEDs ─────────────
   useEffect(() => {
@@ -467,11 +577,25 @@ export default function SetlistRunnerScreen({ navigation, route }) {
       return { type: 'no_content', label: '🎚️ Lead vocal shown above for this song.' };
     }
 
+    if (activeRoleType === 'media') {
+      const mediaNotes = song.mediaNotes || song.notes || '';
+      return { type: 'media_cues', text: mediaNotes };
+    }
+
     if (activeRoleType === 'instrument') {
-      const instrChart  = selectedInstrument ? (song.instrumentNotes?.[chartKey(selectedInstrument)] || '') : '';
+      const instrKey   = chartKey(selectedInstrument || '');
+      const instrChart = selectedInstrument
+        ? (song.instrumentNotes?.[instrKey] || song.instrumentSheets?.[instrKey] || '')
+        : '';
+      const isDrums    = selectedInstrument === 'Drums';
+
+      if (isDrums) {
+        // Drums see lyrics as reference to write patterns against, plus their own notes
+        return { type: 'drum_notes', text: instrChart || '', lyrics: song.lyrics || '' };
+      }
+
       const masterChart = song.chordChart || '';
       const chartText   = instrChart || masterChart;
-
       if (chartText) {
         return {
           type: 'chord_chart',
@@ -491,7 +615,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
 
   const normalizedActiveRole = normalizeRoleKey(activeRole);
   const content        = song ? getContent() : { type: 'none', text: '' };
-  const canAutoScroll  = content.type === 'lyrics' || content.type === 'chord_chart';
+  const canAutoScroll  = content.type === 'lyrics' || content.type === 'chord_chart' || content.type === 'drum_notes';
   const isSoundTech    = SOUND_TECH_ROLES.has(normalizedActiveRole);
   const myPart         = song && !isSoundTech ? getMyPartForSong(song.id, vocalAssignments, userProfile) : null;
   const leadVocal      = song && isSoundTech ? getSongLeadVocal(song.id, vocalAssignments) : null;
@@ -544,6 +668,13 @@ export default function SetlistRunnerScreen({ navigation, route }) {
             {transitionMode === 'cut' ? '✂ CUT' : '◈ FADE'}
           </Text>
         </TouchableOpacity>
+
+        {/* LIVE session indicator */}
+        {isLiveSession && (
+          <View style={styles.liveBadge}>
+            <Text style={styles.liveBadgeText}>🔴 LIVE</Text>
+          </View>
+        )}
 
         {/* MIDI connection indicator */}
         <View style={[styles.midiIndicator, midiConnected && styles.midiIndicatorOn]}>
@@ -759,6 +890,93 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         ) : null}
 
+        {/* ── DRUM NOTES ── */}
+        {content.type === 'drum_notes' ? (
+          <View>
+            {/* Badge row */}
+            <View style={styles.instrBadgeRow}>
+              <View style={[styles.instrBadge, { backgroundColor: '#34D39920', borderColor: '#34D39950' }]}>
+                <Text style={[styles.instrBadgeText, { color: '#34D399' }]}>🥁 Drums</Text>
+              </View>
+              {song.key ? <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>{song.key}</Text></View> : null}
+              {song.tempo ? <View style={styles.tempoBadge}><Text style={styles.tempoBadgeText}>{song.tempo} BPM</Text></View> : null}
+            </View>
+
+            {/* Pattern feel chips — read-only reference */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10, marginTop: 2 }}>
+              <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2 }}>
+                {DRUM_PATTERNS.map(({ label }) => (
+                  <View key={label} style={{ backgroundColor: '#34D39915', borderRadius: 8, borderWidth: 1, borderColor: '#34D39940', paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ color: '#34D399', fontSize: 11, fontWeight: '700' }}>{label}</Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            {/* Lyrics reference — so drummer can map patterns to song structure */}
+            {content.lyrics ? (
+              <View style={{ marginBottom: 14, backgroundColor: '#0A0F1A', borderRadius: 8, borderWidth: 1, borderColor: '#1E293B', padding: 12 }}>
+                <Text style={{ color: '#374151', fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  🎤 Lyrics Reference
+                </Text>
+                <Text style={[styles.lyricsText, { color: '#4B5563', fontSize: 13 }]}>{content.lyrics}</Text>
+              </View>
+            ) : null}
+
+            {/* Drum notes — editable */}
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => navigation.navigate('ContentEditor', {
+                song,
+                serviceId: '',
+                type: 'chord_chart',
+                existing: content.text,
+                instrument: 'Drums',
+                isAdmin: false,
+              })}
+            >
+              <Text style={styles.editBtnText}>✏️ {content.text ? 'Edit' : 'Add'} Drum Notes</Text>
+            </TouchableOpacity>
+
+            {content.text ? (
+              <Text style={[styles.chordChartText, { fontFamily: 'monospace' }]}>{content.text}</Text>
+            ) : (
+              <Text style={[styles.noContentHint, { textAlign: 'center', marginTop: 12 }]}>
+                Tap ✏️ above to add your groove and pattern cues.
+              </Text>
+            )}
+          </View>
+        ) : null}
+
+        {/* ── MEDIA CUES ── */}
+        {content.type === 'media_cues' ? (
+          <View style={styles.notesCard}>
+            <Text style={[styles.notesLabel, { color: '#818CF8' }]}>📺 MEDIA / SLIDES</Text>
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => navigation.navigate('ContentEditor', {
+                song,
+                serviceId: '',
+                type: 'notes',
+                existing: content.text,
+                instrument: 'Media',
+                isAdmin: false,
+              })}
+            >
+              <Text style={styles.editBtnText}>✏️ Edit Slide Cues</Text>
+            </TouchableOpacity>
+            {content.text ? (
+              <Text style={styles.notesText}>{content.text}</Text>
+            ) : (
+              <View style={{ alignItems: 'center', paddingTop: 24 }}>
+                <Text style={{ fontSize: 36, marginBottom: 8 }}>📺</Text>
+                <Text style={[styles.noContentTitle, { textAlign: 'center' }]}>{song.title}</Text>
+                <Text style={[styles.noContentHint, { textAlign: 'center' }]}>No slide cues for this song.{'\n'}Tap ✏️ to add media/projection notes.</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+
         {/* ── NOTES (fallback) ── */}
         {content.type === 'notes' ? (
           <View style={styles.notesCard}>
@@ -771,7 +989,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         {content.type === 'no_content' ? (
           <View style={styles.noContentState}>
             <Text style={styles.noContentIcon}>
-              {activeRoleType === 'vocal' ? '🎤' : activeRoleType === 'instrument' ? '🎼' : activeRoleType === 'sound_tech' ? '🎚' : '🎵'}
+              {activeRoleType === 'vocal' ? '🎤' : activeRoleType === 'instrument' ? '🎼' : activeRoleType === 'sound_tech' ? '🎚' : activeRoleType === 'media' ? '📺' : '🎵'}
             </Text>
             <Text style={styles.noContentTitle}>{song.title}</Text>
             {song.key ? (
@@ -780,7 +998,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
               </Text>
             ) : null}
             <Text style={styles.noContentHint}>{content.label}</Text>
-            {activeRoleType !== 'sound_tech' ? (
+            {activeRoleType !== 'sound_tech' && activeRoleType !== 'media' ? (
               <TouchableOpacity
                 style={styles.editBtn}
                 onPress={() => navigation.navigate('ContentEditor', {
@@ -918,6 +1136,11 @@ const styles = StyleSheet.create({
   transitionPillLabelActive: { color: '#A78BFA' },
 
   // MIDI indicator (top right) — shows role icon + green dot when connected
+  liveBadge: {
+    backgroundColor: '#EF4444', borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 3, marginRight: 6,
+  },
+  liveBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
   midiIndicator: {
     width: 34, height: 34, borderRadius: 17,
     backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#374151',

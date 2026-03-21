@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { getUserProfile, saveUserProfile } from './storage';
+import { unregisterStoredPushToken } from './pushNotifications';
 import { syncProfileToTeamMembers } from './sharedStorage';
 import { parseRoleAssignments } from '../models_v2/models';
 
@@ -101,6 +102,74 @@ async function syncRequest(path, body) {
   }
   if (!res.ok) throw createSyncError(data);
   return data;
+}
+
+async function fetchRemoteTeamProfile({ id = '', email = '', phone = '' } = {}) {
+  const normalizedId = String(id || '').trim();
+  const normalizedEmail = extractEmail(email);
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedPhoneLookup = normalizePhoneLookup(normalizedPhone);
+
+  if (!normalizedId && !normalizedEmail && !normalizedPhoneLookup) {
+    return null;
+  }
+
+  try {
+    const res = await fetch(`${SYNC_URL}/sync/people`, {
+      headers: syncHeaders(),
+    });
+    if (!res.ok) return null;
+
+    const people = await res.json();
+    if (!Array.isArray(people)) return null;
+
+    const remote = people.find((person) => {
+      const personId = String(person?.id || '').trim();
+      const personEmail = extractEmail(person?.email);
+      const personPhoneLookup = normalizePhoneLookup(person?.phone);
+
+      return (
+        (normalizedId && personId && personId === normalizedId)
+        || (normalizedEmail && personEmail && personEmail === normalizedEmail)
+        || (
+          normalizedPhoneLookup
+          && personPhoneLookup
+          && personPhoneLookup === normalizedPhoneLookup
+        )
+      );
+    });
+
+    if (!remote) return null;
+
+    const remoteRoles = parseRoleAssignments(
+      remote.roleAssignments || remote.roles || [],
+    );
+
+    return {
+      id: String(remote.id || '').trim(),
+      name: normalizeDisplayName(remote.name),
+      lastName: String(remote.lastName || '').trim(),
+      email: extractEmail(remote.email),
+      phone: normalizePhone(remote.phone),
+      dateOfBirth: String(remote.dateOfBirth || '').trim(),
+      photo_url: remote.photo_url || '',
+      createdAt:
+        remote.createdAt || remote.playbackRegisteredAt || remote.inviteRegisteredAt || '',
+      inviteRegisteredAt: remote.inviteRegisteredAt || '',
+      playbackRegisteredAt: remote.playbackRegisteredAt || '',
+      playbackRegistered:
+        remote.playbackRegistered === true || Boolean(remote.playbackRegisteredAt),
+      roles: remoteRoles,
+      roleAssignments:
+        String(remote.roleAssignments || '').trim()
+        || remoteRoles.join(', '),
+      blockout_dates: Array.isArray(remote.blockout_dates)
+        ? remote.blockout_dates
+        : [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function getDeviceId() {
@@ -244,42 +313,109 @@ async function hydrateLocalProfile({
           existingProfile?.phone,
       ) === normalizedIdentifier);
   const baseProfile = sameUser ? existingProfile : null;
-  const { firstName, lastName } = splitNameParts(resolvedName);
-  const normalizedRoles = parseRoleAssignments(
-    roleAssignments || baseProfile?.roleAssignments || baseProfile?.roles || [],
-  );
-
-  const nextProfile = {
-    ...(baseProfile || {}),
-    id: baseProfile?.id || `user_${Date.now()}`,
-    authIdentifier:
-      normalizedIdentifier ||
-      baseProfile?.authIdentifier ||
-      normalizedEmail ||
-      normalizedPhone,
+  const remoteProfile = await fetchRemoteTeamProfile({
+    id: baseProfile?.id || '',
     email: normalizedEmail || baseProfile?.email || '',
-    name: baseProfile?.name || firstName || resolvedName,
-    lastName: baseProfile?.lastName || lastName || '',
     phone: normalizedPhone || baseProfile?.phone || '',
-    dateOfBirth: baseProfile?.dateOfBirth || '',
-    photo_url: baseProfile?.photo_url || '',
+  });
+  const remoteRoles = Array.isArray(remoteProfile?.roles)
+    ? remoteProfile.roles
+    : [];
+  const mergedBaseProfile = {
+    ...(baseProfile || {}),
+    notification_preferences:
+      baseProfile?.notification_preferences ||
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    id: remoteProfile?.id || baseProfile?.id || '',
+    name: remoteProfile?.name || baseProfile?.name || '',
+    lastName: remoteProfile?.lastName || baseProfile?.lastName || '',
+    email:
+      normalizedEmail || remoteProfile?.email || baseProfile?.email || '',
+    phone:
+      normalizedPhone || remoteProfile?.phone || baseProfile?.phone || '',
+    dateOfBirth:
+      remoteProfile?.dateOfBirth || baseProfile?.dateOfBirth || '',
+    photo_url: remoteProfile?.photo_url || baseProfile?.photo_url || '',
+    createdAt:
+      remoteProfile?.createdAt
+      || remoteProfile?.playbackRegisteredAt
+      || remoteProfile?.inviteRegisteredAt
+      || baseProfile?.createdAt
+      || '',
+    inviteRegisteredAt:
+      remoteProfile?.inviteRegisteredAt || baseProfile?.inviteRegisteredAt || '',
+    playbackRegisteredAt:
+      remoteProfile?.playbackRegisteredAt || baseProfile?.playbackRegisteredAt || '',
+    playbackRegistered:
+      remoteProfile?.playbackRegistered === true
+      || baseProfile?.playbackRegistered === true
+      || Boolean(remoteProfile?.playbackRegisteredAt)
+      || Boolean(baseProfile?.playbackRegisteredAt),
     roles:
-      normalizedRoles.length > 0
-        ? normalizedRoles
+      remoteRoles.length > 0
+        ? remoteRoles
         : Array.isArray(baseProfile?.roles)
           ? baseProfile.roles
           : [],
     roleAssignments:
+      remoteProfile?.roleAssignments || baseProfile?.roleAssignments || '',
+    blockout_dates:
+      Array.isArray(remoteProfile?.blockout_dates)
+      && remoteProfile.blockout_dates.length > 0
+        ? remoteProfile.blockout_dates
+        : Array.isArray(baseProfile?.blockout_dates)
+          ? baseProfile.blockout_dates
+          : [],
+  };
+  const { firstName, lastName } = splitNameParts(resolvedName);
+  const normalizedRoles = parseRoleAssignments(
+    roleAssignments
+      || mergedBaseProfile?.roleAssignments
+      || mergedBaseProfile?.roles
+      || [],
+  );
+
+  const nextProfile = {
+    ...mergedBaseProfile,
+    id: mergedBaseProfile?.id || `user_${Date.now()}`,
+    authIdentifier:
+      normalizedIdentifier ||
+      mergedBaseProfile?.authIdentifier ||
+      normalizedEmail ||
+      normalizedPhone,
+    email: normalizedEmail || mergedBaseProfile?.email || '',
+    name: mergedBaseProfile?.name || firstName || resolvedName,
+    lastName: mergedBaseProfile?.lastName || lastName || '',
+    phone: normalizedPhone || mergedBaseProfile?.phone || '',
+    dateOfBirth: mergedBaseProfile?.dateOfBirth || '',
+    photo_url: mergedBaseProfile?.photo_url || '',
+    createdAt:
+      mergedBaseProfile?.createdAt
+      || mergedBaseProfile?.playbackRegisteredAt
+      || mergedBaseProfile?.inviteRegisteredAt
+      || new Date().toISOString(),
+    inviteRegisteredAt: mergedBaseProfile?.inviteRegisteredAt || '',
+    playbackRegisteredAt: mergedBaseProfile?.playbackRegisteredAt || '',
+    playbackRegistered:
+      mergedBaseProfile?.playbackRegistered === true
+      || Boolean(mergedBaseProfile?.playbackRegisteredAt),
+    roles:
+      normalizedRoles.length > 0
+        ? normalizedRoles
+        : Array.isArray(mergedBaseProfile?.roles)
+          ? mergedBaseProfile.roles
+          : [],
+    roleAssignments:
       normalizedRoles.length > 0
         ? normalizedRoles.join(', ')
-        : baseProfile?.roleAssignments || '',
-    blockout_dates: Array.isArray(baseProfile?.blockout_dates)
-      ? baseProfile.blockout_dates
+        : mergedBaseProfile?.roleAssignments || '',
+    blockout_dates: Array.isArray(mergedBaseProfile?.blockout_dates)
+      ? mergedBaseProfile.blockout_dates
       : [],
-    grantedRole: grantedRole || role || baseProfile?.grantedRole || null,
-    orgRole: orgRole || baseProfile?.orgRole || null,
+    grantedRole: grantedRole || role || mergedBaseProfile?.grantedRole || null,
+    orgRole: orgRole || mergedBaseProfile?.orgRole || null,
     notification_preferences:
-      baseProfile?.notification_preferences ||
+      mergedBaseProfile?.notification_preferences ||
       DEFAULT_NOTIFICATION_PREFERENCES,
   };
 
@@ -548,6 +684,7 @@ export async function changePassword(identifier, currentPassword, newPassword) {
 }
 
 export async function logout() {
+  await unregisterStoredPushToken().catch(() => {});
   await AsyncStorage.multiRemove([
     USER_KEY,
     SESSION_KEY,

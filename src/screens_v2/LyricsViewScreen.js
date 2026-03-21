@@ -95,7 +95,7 @@ const AUTO_SCROLL_STEP = 1;      // px per step
 
 export default function LyricsViewScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { song, userRole, capo = 0, concertKey } = route.params || {};
+  const { song, userRole, capo = 0, concertKey, myPart } = route.params || {};
   const [autoScroll, setAutoScroll] = useState(false);
   const [fontSize, setFontSize] = useState(20);
   const scrollRef = useRef(null);
@@ -197,6 +197,27 @@ export default function LyricsViewScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Your Part badge — shown for vocalists when admin has assigned parts */}
+      {myPart && isVocal ? (
+        <View style={styles.partBanner}>
+          <Text style={styles.partBannerLabel}>YOUR PART  </Text>
+          <Text style={styles.partBannerValue}>
+            {myPart.partKey === 'lead' || myPart.partKey === 'lead_vocal' ? 'Lead Vocal'
+              : myPart.partKey === 'soprano' ? 'Soprano'
+              : myPart.partKey === 'mezzo' ? 'Mezzo-Soprano'
+              : myPart.partKey === 'alto' ? 'Alto'
+              : myPart.partKey === 'tenor' ? 'Tenor'
+              : myPart.partKey === 'baritone' ? 'Baritone'
+              : myPart.partKey === 'bass' ? 'Bass'
+              : myPart.partKey?.startsWith('bgv') ? myPart.partKey.toUpperCase().replace('BGV', 'BGV ')
+              : myPart.partKey?.startsWith('voice') ? `${myPart.partKey.replace('voice', '')}${['st','nd','rd'][Number(myPart.partKey.replace('voice',''))-1]||'th'} Voice`
+              : myPart.partKey}
+            {myPart.key ? `  ·  Key ${myPart.key}` : ''}
+          </Text>
+          {myPart.notes ? <Text style={styles.partBannerNotes} numberOfLines={2}>{myPart.notes}</Text> : null}
+        </View>
+      ) : null}
 
       {/* Lyrics */}
       <ScrollView
@@ -393,6 +414,23 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     lineHeight: 28,
   },
+  partBanner: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1E1B4B',
+    borderBottomWidth: 1,
+    borderBottomColor: '#4F46E5',
+    flexDirection: 'column',
+  },
+  partBannerLabel: {
+    color: '#6B7280',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  partBannerValue: { color: '#A5B4FC', fontSize: 14, fontWeight: '800', marginTop: 1 },
+  partBannerNotes: { color: '#818CF8', fontSize: 11, marginTop: 4, lineHeight: 16 },
   footer: {
     paddingHorizontal: 20,
     paddingVertical: 12,

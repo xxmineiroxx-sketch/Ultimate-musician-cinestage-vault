@@ -776,6 +776,7 @@ export default function SetlistScreen({ navigation, route }) {
                     song: { ...song, lyrics: vocalLyrics },
                     userRole,
                     assignmentId: selectedAssignment?.id,
+                    myPart,
                   })
                 }
               >
@@ -1029,6 +1030,8 @@ export default function SetlistScreen({ navigation, route }) {
                   serviceId: selectedAssignment?.service_id,
                   songId: song.id,
                   userRole: selectedAssignment?.role,
+                  userProfile: profile,
+                  vocalAssignments,
                   youtubeUrl: ytUrl,
                 })}
                 activeOpacity={0.8}

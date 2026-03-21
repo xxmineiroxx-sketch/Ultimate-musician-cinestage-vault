@@ -117,6 +117,25 @@ const ROLE_CHIPS = [
   'Keys', 'Synth/Pad', 'Tracks', 'Sound', 'Media',
 ];
 
+const VOCAL_PARTS = [
+  { key: 'lead',     label: 'Lead Vocal',   color: '#7C3AED' },
+  { key: 'soprano',  label: 'Soprano',      color: '#EC4899' },
+  { key: 'mezzo',    label: 'Mezzo',        color: '#F472B6' },
+  { key: 'alto',     label: 'Alto',         color: '#8B5CF6' },
+  { key: 'tenor',    label: 'Tenor',        color: '#3B82F6' },
+  { key: 'baritone', label: 'Baritone',     color: '#06B6D4' },
+  { key: 'bass_v',   label: 'Bass',         color: '#10B981' },
+  { key: 'bgv1',     label: 'BGV 1',        color: '#6366F1' },
+  { key: 'bgv2',     label: 'BGV 2',        color: '#818CF8' },
+  { key: 'bgv3',     label: 'BGV 3',        color: '#A5B4FC' },
+];
+
+const VOCAL_TEAM_ROLES = new Set([
+  'Worship Leader', 'Vocal Lead', 'Vocal BGV', 'Vocals', 'BGV',
+  'worship_leader', 'lead_vocal', 'lead_vocals', 'vocals', 'vocalist',
+  'bgv', 'background_vocal', 'soprano', 'alto', 'tenor', 'baritone',
+]);
+
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();
   const tid  = setTimeout(() => ctrl.abort(), 8000);
@@ -147,11 +166,40 @@ function dayShortMonth(dateStr) {
   return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short' });
 }
 
+function formatServiceDate(dateStr) {
+  if (!dateStr) return '?';
+  const [year, month, day] = String(dateStr).split('T')[0].split('-');
+  if (!year || !month || !day) return dateStr;
+  return `${day}/${month}/${year}`;
+}
+
+function todayDateStr() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function serviceSortKey(svc) {
+  return `${svc?.date || '0000-00-00'}T${svc?.time || '00:00'}`;
+}
+
+function isPastService(svc, today = todayDateStr()) {
+  return !!svc?.date && svc.date < today;
+}
+
 export default function AdminDashboardScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { mdRole } = route.params || {};
-  // Admin has full access; MD has restricted access (no delete, no role grants)
-  const isAdmin = mdRole === 'admin';
+  // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
+  const isOrgOwner = mdRole === 'org_owner';
+  const isAdmin    = mdRole === 'admin' || isOrgOwner;
+  const isManager  = mdRole === 'manager';
+  // canApprove = admin, manager, or org_owner
+  const canApprove = isAdmin || isManager;
+  // manager can add/edit members, add songs, create services
+  const canManageMembers = isAdmin || isManager;
 
   const [tab, setTab]         = useState('Calendar');
   const [loading, setLoading] = useState(false);
@@ -176,6 +224,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [newSvcDate, setNewSvcDate]         = useState('');
   const [newSvcTime, setNewSvcTime]         = useState('');
   const [savingSvc, setSavingSvc]           = useState(false);
+  const [showArchivedServices, setShowArchivedServices] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Expanded service plan (both Calendar + Services tabs share this)
@@ -207,10 +256,56 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [libQuery, setLibQuery] = useState('');
   const [songs, setSongs] = useState([]); // full song library from KV
 
+  // Vocal assignments { [svcId]: { [songId]: { [partKey]: { personId, name, role } } } }
+  const [vocalAssignments, setVocalAssignments]   = useState({});
+  const [expandedVocalSong, setExpandedVocalSong] = useState(null); // { svcId, songId }
+  const [vocalPartPicker, setVocalPartPicker]     = useState(null); // { svcId, songId, partKey, partLabel }
+  const [savingVocals, setSavingVocals]           = useState(false);
+
   // Proposals
   const [proposals, setProposals] = useState([]);
   const [approvingId, setApprovingId] = useState(null);
   const [rejectingId, setRejectingId] = useState(null);
+
+  // Pending services & songs (from Leaders)
+  const [pendingServices, setPendingServices] = useState([]);
+  const [pendingSongs, setPendingSongs]       = useState([]);
+  const [approvingSvcId, setApprovingSvcId]   = useState(null);
+  const [approvingSongId, setApprovingSongId] = useState(null);
+
+  // Role grant modal
+  const [showGrantRole, setShowGrantRole]   = useState(null); // person object
+  const [grantingRole, setGrantingRole]     = useState('');
+  const [savingGrant, setSavingGrant]       = useState(false);
+
+  // Edit member modal
+  const [showEditMember, setShowEditMember] = useState(null);
+  const [editName, setEditName]             = useState('');
+  const [editEmail, setEditEmail]           = useState('');
+  const [editRole, setEditRole]             = useState('');
+  const [savingEdit, setSavingEdit]         = useState(false);
+
+  // Add song to library
+  const [showAddSong, setShowAddSong]         = useState(false);
+  const [newSongTitle, setNewSongTitle]       = useState('');
+  const [newSongArtist, setNewSongArtist]     = useState('');
+  const [newSongKey, setNewSongKey]           = useState('');
+  const [newSongBpm, setNewSongBpm]           = useState('');
+  const [newSongYouTube, setNewSongYouTube]   = useState('');
+  const [newSongLyrics, setNewSongLyrics]     = useState('');
+  const [newSongChords, setNewSongChords]     = useState('');
+  const [addSongTab, setAddSongTab]           = useState('info'); // 'info' | 'lyrics' | 'chords'
+  const [savingNewSong, setSavingNewSong]     = useState(false);
+
+  // Compose message (outbound from admin/manager)
+  const [showCompose, setShowCompose]       = useState(false);
+  const [composeTo, setComposeTo]           = useState('all_team');
+  const [composeToName, setComposeToName]   = useState('All Team');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeBody, setComposeBody]       = useState('');
+  const [sendingCompose, setSendingCompose] = useState(false);
+  const [showRecipientPicker, setShowRecipientPicker] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
 
   React.useEffect(() => { loadAll(); }, []);
 
@@ -219,11 +314,13 @@ export default function AdminDashboardScreen({ navigation, route }) {
     setError(null);
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, lib, props] = await Promise.all([
+      const [prof, msgs, lib, props, pSvcs, pSongs] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/proposals`,       { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/services/pending`,        { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -231,7 +328,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
       setPeople(lib.people   || []);
       setPlans(lib.plans     || {});
       setSongs(lib.songs     || []);
+      setVocalAssignments(lib.vocalAssignments || {});
       setProposals(Array.isArray(props) ? props : []);
+      setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
+      setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
@@ -310,7 +410,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       await fetchJson(
         `${SYNC_URL}/sync/message/reply?messageId=${encodeURIComponent(selectedMsg.id)}`,
         { method: 'POST', headers: syncHeaders(),
-          body: JSON.stringify({ reply_text: replyText.trim(), admin_name: profile?.name || 'Admin' }) }
+          body: JSON.stringify({ reply_text: replyText.trim(), admin_name: profile?.name || (isAdmin ? 'Admin' : 'Manager') }) }
       );
       setReplyText('');
       Alert.alert('Sent ✓', 'Reply delivered.');
@@ -356,6 +456,44 @@ export default function AdminDashboardScreen({ navigation, route }) {
       ]
     );
   }, [deleteSelectedMessage, selectedMsg]);
+
+  const deleteInboxMessage = useCallback(async (message) => {
+    if (!message?.id) return;
+    setDeletingMessage(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(message.id)}&scope=global`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      if (selectedMsg?.id === message.id) setSelectedMsg(null);
+      await loadAll();
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeletingMessage(false);
+    }
+  }, [loadAll, selectedMsg?.id]);
+
+  const confirmDeleteInboxMessage = useCallback((message) => {
+    if (!message?.id) return;
+    Alert.alert(
+      'Delete message thread?',
+      'This removes the thread from the shared admin inbox in Ultimate Playback and Ultimate Musician.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void deleteInboxMessage(message);
+          },
+        },
+      ]
+    );
+  }, [deleteInboxMessage]);
 
   // ── Create service ──────────────────────────────────────────────────────
   const handleCreateService = async () => {
@@ -459,7 +597,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
       await fetchJson(`${SYNC_URL}/sync/publish`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ serviceId: svc.id, plan }),
+        body: JSON.stringify({
+          serviceId: svc.id,
+          plan,
+          vocalAssignments: vocalAssignments[svc.id] || {},
+        }),
       });
       Alert.alert(
         '📤 Published ✓',
@@ -468,6 +610,34 @@ export default function AdminDashboardScreen({ navigation, route }) {
       loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setPublishingId(null); }
+  };
+
+  // ── Assign vocal part to person ─────────────────────────────────────────
+  const handleAssignVocalPart = async (svcId, songId, partKey, person) => {
+    setSavingVocals(true);
+    try {
+      const svcVocals = { ...(vocalAssignments[svcId] || {}) };
+      if (!svcVocals[songId]) svcVocals[songId] = {};
+      if (person) {
+        svcVocals[songId] = {
+          ...svcVocals[songId],
+          [partKey]: { personId: person.id, name: person.name, role: (person.roles || [])[0] || '' },
+        };
+      } else {
+        const updated = { ...svcVocals[songId] };
+        delete updated[partKey];
+        svcVocals[songId] = updated;
+      }
+      const updatedAll = { ...vocalAssignments, [svcId]: svcVocals };
+      setVocalAssignments(updatedAll);
+      setVocalPartPicker(null);
+      await fetchJson(`${SYNC_URL}/sync/publish`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({ serviceId: svcId, plan: plans[svcId] || {}, vocalAssignments: svcVocals }),
+      });
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSavingVocals(false); }
   };
 
   // ── Delete member (Admin only) ──────────────────────────────────────────
@@ -511,6 +681,153 @@ export default function AdminDashboardScreen({ navigation, route }) {
         finally { setRejectingId(null); }
       }},
     ]);
+  };
+
+  // ── Approve/reject pending service (from Leader) ────────────────────────
+  const handleApprovePendingService = async (svc) => {
+    setApprovingSvcId(svc.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/services/approve?id=${encodeURIComponent(svc.id)}`, { method: 'POST', headers: syncHeaders() });
+      setPendingServices(prev => prev.filter(s => s.id !== svc.id));
+      Alert.alert('Approved ✓', `"${svc.name}" is now live.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setApprovingSvcId(null); }
+  };
+
+  const handleRejectPendingService = (svc) => {
+    Alert.alert('Reject service?', `Reject "${svc.name}" submitted by ${svc.created_by_name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        try {
+          await fetchJson(`${SYNC_URL}/sync/services/reject?id=${encodeURIComponent(svc.id)}`, { method: 'POST', headers: syncHeaders(), body: JSON.stringify({}) });
+          setPendingServices(prev => prev.filter(s => s.id !== svc.id));
+        } catch (e) { Alert.alert('Error', e.message); }
+      }},
+    ]);
+  };
+
+  // ── Approve/reject pending song (from Leader) ────────────────────────────
+  const handleApprovePendingSong = async (song) => {
+    setApprovingSongId(song.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/library/song-approve?id=${encodeURIComponent(song.id)}`, { method: 'POST', headers: syncHeaders() });
+      setPendingSongs(prev => prev.filter(s => s.id !== song.id));
+      Alert.alert('Approved ✓', `"${song.title}" added to library.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setApprovingSongId(null); }
+  };
+
+  const handleRejectPendingSong = (song) => {
+    Alert.alert('Reject song?', `Reject "${song.title}" proposed by ${song.from_name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: async () => {
+        try {
+          await fetchJson(`${SYNC_URL}/sync/library/song-reject?id=${encodeURIComponent(song.id)}`, { method: 'POST', headers: syncHeaders(), body: JSON.stringify({}) });
+          setPendingSongs(prev => prev.filter(s => s.id !== song.id));
+        } catch (e) { Alert.alert('Error', e.message); }
+      }},
+    ]);
+  };
+
+  // ── Grant app role (Admin only) ─────────────────────────────────────────
+  const handleGrantRole = async () => {
+    if (!showGrantRole || !grantingRole) return;
+    setSavingGrant(true);
+    try {
+      // 'none' = revoke grant (send null)
+      const roleValue = grantingRole === 'none' ? null : grantingRole;
+      await fetchJson(`${SYNC_URL}/sync/grant`, {
+        method: 'POST', headers: syncHeaders(),
+        body: JSON.stringify({ email: showGrantRole.email, name: showGrantRole.name, role: roleValue }),
+      });
+      setShowGrantRole(null); setGrantingRole('');
+      Alert.alert('Role granted ✓', `${showGrantRole.name} is now ${grantingRole}.`);
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSavingGrant(false); }
+  };
+
+  // ── Edit member (Admin + Manager) ──────────────────────────────────────
+  const handleEditMember = async () => {
+    if (!showEditMember || !editName.trim()) return;
+    setSavingEdit(true);
+    try {
+      const updated = people.map(p =>
+        p.id === showEditMember.id
+          ? { ...p, name: editName.trim(), email: editEmail.trim(), roles: editRole ? [editRole] : (p.roles || []) }
+          : p
+      );
+      await publishUpdate(plans, services, updated);
+      setShowEditMember(null);
+      loadAll();
+      Alert.alert('Saved ✓', 'Member updated.');
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSavingEdit(false); }
+  };
+
+  // ── Add song to library (Admin + Manager) ───────────────────────────────
+  const handleAddSongToLibrary = async () => {
+    if (!newSongTitle.trim()) { Alert.alert('Required', 'Song title is required.'); return; }
+    setSavingNewSong(true);
+    try {
+      const hdrs = syncHeaders();
+      const lib = await fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: hdrs });
+      const newSong = {
+        id: `song_${Date.now()}`,
+        title: newSongTitle.trim(),
+        artist: newSongArtist.trim(),
+        key: newSongKey.trim(),
+        bpm: newSongBpm ? parseInt(newSongBpm, 10) : undefined,
+        youtubeUrl: newSongYouTube.trim() || undefined,
+        lyrics: newSongLyrics.trim() || undefined,
+        chordChart: newSongChords.trim() || undefined,
+      };
+      await fetchJson(`${SYNC_URL}/sync/library-push`, {
+        method: 'POST', headers: hdrs,
+        body: JSON.stringify({ ...lib, songs: [...(lib.songs || []), newSong] }),
+      });
+      setNewSongTitle(''); setNewSongArtist(''); setNewSongKey(''); setNewSongBpm('');
+      setNewSongYouTube(''); setNewSongLyrics(''); setNewSongChords(''); setAddSongTab('info');
+      setShowAddSong(false);
+      Alert.alert('Added ✓', `"${newSong.title}" added to library.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSavingNewSong(false); }
+  };
+
+  // ── Compose message (Admin + Manager outbound) ──────────────────────────
+  const handleCompose = async () => {
+    if (!composeSubject.trim() || !composeBody.trim()) {
+      Alert.alert('Required', 'Subject and message are required.'); return;
+    }
+    const toTarget = String(composeTo || '').trim().toLowerCase();
+    if (!toTarget) {
+      Alert.alert('Required', 'Choose a recipient.'); return;
+    }
+    setSendingCompose(true);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/message`, {
+        method: 'POST', headers: syncHeaders(),
+        body: JSON.stringify({
+          fromEmail: profile?.email || '',
+          fromName: profile?.name || (isAdmin ? 'Admin' : 'Manager'),
+          subject: composeSubject.trim(),
+          message: composeBody.trim(),
+          to: toTarget,
+        }),
+      });
+      setComposeSubject('');
+      setComposeBody('');
+      setComposeTo('all_team');
+      setComposeToName('All Team');
+      setPickerSearch('');
+      setShowRecipientPicker(false);
+      setShowCompose(false);
+      Alert.alert('Sent ✓', composeTo === 'all_team' ? 'Message sent to all team.' : `Sent to ${toTarget}.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSendingCompose(false); }
   };
 
   // ── Library: full song library from KV ──────────────────────────────────
@@ -583,19 +900,64 @@ export default function AdminDashboardScreen({ navigation, route }) {
         </View>
         {songs.length === 0
           ? <Text style={s.planEmpty}>No songs yet — tap "+ Add Song"</Text>
-          : songs.map((song, i) => (
-          <View key={song.id || i} style={s.planSongRow}>
-            <Text style={s.planSongNum}>{i + 1}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.planSongTitle}>{song.title}</Text>
-              {song.artist ? <Text style={s.planSongArtist}>{song.artist}</Text> : null}
-            </View>
-            {song.key ? <View style={s.keyChip}><Text style={s.keyChipText}>{song.key}</Text></View> : null}
-            <TouchableOpacity style={s.removeBtn} onPress={() => handleRemoveSong(svc.id, song.id)}>
-              <Text style={s.removeBtnText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+          : songs.map((song, i) => {
+            const songVA = (vocalAssignments[svc.id] || {})[song.id] || {};
+            const hasVocals = Object.keys(songVA).length > 0;
+            const isVocalExpanded = expandedVocalSong?.svcId === svc.id && expandedVocalSong?.songId === song.id;
+            return (
+              <View key={song.id || i}>
+                <View style={s.planSongRow}>
+                  <Text style={s.planSongNum}>{i + 1}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.planSongTitle}>{song.title}</Text>
+                    {song.artist ? <Text style={s.planSongArtist}>{song.artist}</Text> : null}
+                  </View>
+                  {song.key ? <View style={s.keyChip}><Text style={s.keyChipText}>{song.key}</Text></View> : null}
+                  <TouchableOpacity
+                    style={[s.vocalToggleBtn, hasVocals && s.vocalToggleBtnActive, isVocalExpanded && s.vocalToggleBtnOpen]}
+                    onPress={() => setExpandedVocalSong(isVocalExpanded ? null : { svcId: svc.id, songId: song.id })}
+                  >
+                    <Text style={s.vocalToggleTxt}>🎤{hasVocals ? ' ✓' : ''}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.removeBtn} onPress={() => handleRemoveSong(svc.id, song.id)}>
+                    <Text style={s.removeBtnText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                {isVocalExpanded && (
+                  <View style={s.vocalPanel}>
+                    <Text style={s.vocalPanelTitle}>Vocal Assignments — {song.title}</Text>
+                    {VOCAL_PARTS.map(part => {
+                      const assigned = songVA[part.key];
+                      return (
+                        <TouchableOpacity
+                          key={part.key}
+                          style={s.vocalPartRow}
+                          onPress={() => setVocalPartPicker({ svcId: svc.id, songId: song.id, partKey: part.key, partLabel: part.label })}
+                        >
+                          <View style={[s.vocalPartDot, { backgroundColor: part.color + '40', borderColor: part.color }]} />
+                          <Text style={s.vocalPartLabel}>{part.label}</Text>
+                          <View style={{ flex: 1 }} />
+                          {assigned ? (
+                            <>
+                              <Text style={s.vocalAssignedName} numberOfLines={1}>{assigned.name}</Text>
+                              <TouchableOpacity
+                                onPress={() => handleAssignVocalPart(svc.id, song.id, part.key, null)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <Text style={s.vocalClearBtn}>✕</Text>
+                              </TouchableOpacity>
+                            </>
+                          ) : (
+                            <Text style={s.vocalUnassigned}>— Tap to assign —</Text>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            );
+          })}
 
         {/* Team */}
         <View style={[s.planSubHeader, { marginTop: 16 }]}>
@@ -611,7 +973,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
             const assignId = `${svc.id}_${tm.personId}`;
             const assignIdEmail = tm.email ? `${svc.id}_${tm.email}` : null;
             const resp     = assignmentResponses[assignId] || (assignIdEmail ? assignmentResponses[assignIdEmail] : null);
-            const respStatus = tm.status || resp?.status || 'pending';
+            const respStatus = resp?.status || tm.status || 'pending';
             return (
               <View key={`${tm.personId}_${i}`} style={s.planTeamRow}>
                 <View style={[s.planTeamAvatar, respStatus === 'accepted' && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
@@ -746,42 +1108,97 @@ export default function AdminDashboardScreen({ navigation, route }) {
       contentContainerStyle={s.tabContent}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
     >
-      <TouchableOpacity style={s.addBtn} onPress={() => setShowNewService(v => !v)}>
-        <Text style={s.addBtnText}>{showNewService ? '✕ Cancel' : '+ New Service'}</Text>
-      </TouchableOpacity>
-      {renderNewServiceForm()}
+      {/* ── Pending Approvals from Leaders ── */}
+      {canApprove && pendingServices.length > 0 && (
+        <View style={s.pendingApprovalSection}>
+          <Text style={s.pendingApprovalHeader}>⏳ Pending Approval ({pendingServices.length})</Text>
+          {pendingServices.map(svc => (
+            <View key={svc.id} style={s.pendingApprovalCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.pendingApprovalTitle}>{svc.name}</Text>
+                <Text style={s.pendingApprovalMeta}>{formatServiceDate(svc.date)}{svc.time ? ` · ${svc.time}` : ''} · by {svc.created_by_name || 'Leader'}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={s.approveBtn} onPress={() => handleApprovePendingService(svc)} disabled={approvingSvcId === svc.id}>
+                  {approvingSvcId === svc.id ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={s.approveBtnTxt}>✓ Approve</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.rejectBtn} onPress={() => handleRejectPendingService(svc)}>
+                  <Text style={s.rejectBtnTxt}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       {(() => {
-        const today2 = new Date(); today2.setHours(0, 0, 0, 0);
-        const upcomingSvcs = services.filter(svc => {
-          if (!svc.date) return true;
-          const d = new Date(svc.date.includes('T') ? svc.date : svc.date + 'T00:00:00');
-          return d >= today2;
-        }).sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+        const today = todayDateStr();
+        const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
+        const upcomingSvcs = allSvcs.filter((svc) => !isPastService(svc, today));
+        const archivedSvcs = [...allSvcs]
+          .filter((svc) => isPastService(svc, today))
+          .sort((a, b) => serviceSortKey(b).localeCompare(serviceSortKey(a)));
 
-        if (upcomingSvcs.length === 0 && !loading) return (
-          <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No upcoming services</Text></View>
+        if (allSvcs.length === 0 && !loading) return (
+          <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No services yet. Create one from the Calendar tab.</Text></View>
         );
 
-        return upcomingSvcs.map(svc => {
-        const plan   = plans[svc.id] || {};
-        const isOpen = expandedSvc?.id === svc.id;
+        const renderServiceCard = (svc) => {
+          const plan = plans[svc.id] || {};
+          const isOpen = expandedSvc?.id === svc.id;
+          return (
+            <View key={svc.id} style={[s.svcCard, isOpen && s.svcCardOpen]}>
+              <TouchableOpacity style={s.svcCardTap} onPress={() => setExpandedSvc(isOpen ? null : svc)}>
+                <View style={s.svcHeaderRow}>
+                  <Text style={s.svcName}>{svc.name || svc.title}</Text>
+                  <Text style={s.svcDate}>{formatServiceDate(svc.date)}</Text>
+                </View>
+                <Text style={s.svcMeta}>
+                  🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
+                </Text>
+                <Text style={s.svcExpandHint}>{isOpen ? '▲ Close Plan' : '▼ Manage Plan'}</Text>
+              </TouchableOpacity>
+              {isOpen && renderPlanSection(svc)}
+            </View>
+          );
+        };
+
         return (
-          <View key={svc.id} style={[s.svcCard, isOpen && s.svcCardOpen]}>
-            <TouchableOpacity style={s.svcCardTap} onPress={() => setExpandedSvc(isOpen ? null : svc)}>
-              <View style={s.svcHeaderRow}>
-                <Text style={s.svcName}>{svc.name || svc.title}</Text>
-                <Text style={s.svcDate}>{svc.date}</Text>
+          <View>
+            {upcomingSvcs.length === 0 ? (
+              <View style={s.empty}>
+                <Text style={s.emptyIcon}>🗓</Text>
+                <Text style={s.emptyText}>No active or upcoming services.</Text>
               </View>
-              <Text style={s.svcMeta}>
-                🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
-              </Text>
-              <Text style={s.svcExpandHint}>{isOpen ? '▲ Close Plan' : '▼ Manage Plan'}</Text>
-            </TouchableOpacity>
-            {isOpen && renderPlanSection(svc)}
+            ) : (
+              upcomingSvcs.map(renderServiceCard)
+            )}
+
+            {archivedSvcs.length > 0 && (
+              <View style={s.archiveSection}>
+                <TouchableOpacity
+                  style={[s.archiveCard, showArchivedServices && s.archiveCardOpen]}
+                  onPress={() => setShowArchivedServices((value) => !value)}
+                  activeOpacity={0.85}
+                >
+                  <View style={s.archiveHeaderRow}>
+                    <Text style={s.archiveTitle}>🗂 Archived Services</Text>
+                    <View style={s.archiveCountBadge}>
+                      <Text style={s.archiveCountText}>{archivedSvcs.length}</Text>
+                    </View>
+                  </View>
+                  <Text style={s.archiveSubtitle}>
+                    {showArchivedServices ? 'Hide previous services' : 'Show previous services'}
+                  </Text>
+                  <Text style={s.svcExpandHint}>
+                    {showArchivedServices ? '▲ Collapse Archive' : '▼ Open Archive'}
+                  </Text>
+                </TouchableOpacity>
+                {showArchivedServices && archivedSvcs.map(renderServiceCard)}
+              </View>
+            )}
           </View>
         );
-        });
       })()}
     </ScrollView>
   );
@@ -792,11 +1209,18 @@ export default function AdminDashboardScreen({ navigation, route }) {
       contentContainerStyle={s.tabContent}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
     >
-      {/* Permission notice for MD */}
-      {!isAdmin && (
+      {/* Permission notice */}
+      {isManager && !isAdmin && (
         <View style={s.mdNoticeBanner}>
           <Text style={s.mdNoticeText}>
-            🔐 You can add and assign members. Only Admins can delete members or grant special roles.
+            🛡 Worship Leader/Manager: You can add, edit & assign members, and grant Leader roles. Only Admins can delete members or grant Admin/Manager roles.
+          </Text>
+        </View>
+      )}
+      {!isAdmin && !isManager && (
+        <View style={s.mdNoticeBanner}>
+          <Text style={s.mdNoticeText}>
+            🔐 You can add and assign members. Contact an Admin to manage roles.
           </Text>
         </View>
       )}
@@ -854,12 +1278,31 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={s.personRoles}>{person.roles.join(' · ')}</Text>
             )}
           </View>
-          {/* Delete — Admin only */}
-          {isAdmin && (
-            <TouchableOpacity style={s.deleteMemberBtn} onPress={() => handleDeleteMember(person)}>
-              <Text style={s.deleteMemberBtnText}>✕</Text>
-            </TouchableOpacity>
-          )}
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            {/* Edit — Admin + Manager */}
+            {canManageMembers && (
+              <TouchableOpacity style={s.editMemberBtn} onPress={() => {
+                setShowEditMember(person);
+                setEditName(person.name || '');
+                setEditEmail(person.email || '');
+                setEditRole((person.roles || [])[0] || '');
+              }}>
+                <Text style={s.editMemberBtnTxt}>✏️</Text>
+              </TouchableOpacity>
+            )}
+            {/* Grant Role — Admin + Manager (manager limited to leader) */}
+            {canManageMembers && (
+              <TouchableOpacity style={s.grantRoleBtn} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
+                <Text style={s.grantRoleBtnTxt}>🔑</Text>
+              </TouchableOpacity>
+            )}
+            {/* Delete — Admin only */}
+            {isAdmin && (
+              <TouchableOpacity style={s.deleteMemberBtn} onPress={() => handleDeleteMember(person)}>
+                <Text style={s.deleteMemberBtnText}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       ))}
     </ScrollView>
@@ -868,6 +1311,123 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Render: Library ─────────────────────────────────────────────────────
   const renderLibrary = () => (
     <View style={{ flex: 1 }}>
+      {/* ── Pending Songs from Leaders ── */}
+      {canApprove && pendingSongs.length > 0 && (
+        <View style={[s.pendingApprovalSection, { margin: 12, marginBottom: 0 }]}>
+          <Text style={s.pendingApprovalHeader}>⏳ Pending Songs ({pendingSongs.length})</Text>
+          {pendingSongs.map(song => (
+            <View key={song.id} style={s.pendingApprovalCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.pendingApprovalTitle}>{song.title}</Text>
+                <Text style={s.pendingApprovalMeta}>{song.artist || 'Unknown'} · {song.key || '?'} · {song.bpm || '?'} BPM · by {song.from_name || 'Leader'}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={s.approveBtn} onPress={() => handleApprovePendingSong(song)} disabled={approvingSongId === song.id}>
+                  {approvingSongId === song.id ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={s.approveBtnTxt}>✓ Add</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={s.rejectBtn} onPress={() => handleRejectPendingSong(song)}>
+                  <Text style={s.rejectBtnTxt}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* Add Song to Library — Admin + Manager */}
+      {canManageMembers && (
+        <>
+          <TouchableOpacity
+            style={[s.addBtn, { margin: 12, marginBottom: showAddSong ? 0 : 4 }]}
+            onPress={() => setShowAddSong(v => !v)}>
+            <Text style={s.addBtnText}>{showAddSong ? '✕ Cancel' : '+ Add Song to Library'}</Text>
+          </TouchableOpacity>
+          {showAddSong && (
+            <View style={[s.formCard, { margin: 12, marginTop: 8 }]}>
+              {/* Mini tab switcher */}
+              <View style={s.addSongTabs}>
+                {[
+                  { id: 'info',   label: 'ℹ️ Info' },
+                  { id: 'lyrics', label: '🎤 Lyrics' },
+                  { id: 'chords', label: '🎸 Chords' },
+                ].map(t => (
+                  <TouchableOpacity key={t.id}
+                    style={[s.addSongTab, addSongTab === t.id && s.addSongTabActive]}
+                    onPress={() => setAddSongTab(t.id)}>
+                    <Text style={[s.addSongTabText, addSongTab === t.id && s.addSongTabTextActive]}>{t.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {addSongTab === 'info' && (
+                <>
+                  <Text style={s.formLabel}>Title *</Text>
+                  <TextInput style={s.formInput} value={newSongTitle} onChangeText={setNewSongTitle}
+                    placeholder="Song Title" placeholderTextColor="#6B7280" />
+                  <Text style={s.formLabel}>Artist</Text>
+                  <TextInput style={s.formInput} value={newSongArtist} onChangeText={setNewSongArtist}
+                    placeholder="Artist Name" placeholderTextColor="#6B7280" />
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.formLabel}>Key</Text>
+                      <TextInput style={s.formInput} value={newSongKey} onChangeText={setNewSongKey}
+                        placeholder="G, A, Bb..." placeholderTextColor="#6B7280" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.formLabel}>BPM</Text>
+                      <TextInput style={s.formInput} value={newSongBpm} onChangeText={setNewSongBpm}
+                        placeholder="120" placeholderTextColor="#6B7280" keyboardType="number-pad" />
+                    </View>
+                  </View>
+                  <Text style={s.formLabel}>YouTube Link (optional)</Text>
+                  <TextInput style={s.formInput} value={newSongYouTube} onChangeText={setNewSongYouTube}
+                    placeholder="https://youtube.com/watch?v=..." placeholderTextColor="#6B7280"
+                    autoCapitalize="none" keyboardType="url" />
+                </>
+              )}
+
+              {addSongTab === 'lyrics' && (
+                <>
+                  <Text style={s.formLabel}>Lyrics</Text>
+                  <TextInput
+                    style={[s.formInput, s.multilineInput]}
+                    value={newSongLyrics}
+                    onChangeText={setNewSongLyrics}
+                    placeholder={'Verse 1:\n...\n\nChorus:\n...'}
+                    placeholderTextColor="#6B7280"
+                    multiline
+                    textAlignVertical="top"
+                  />
+                </>
+              )}
+
+              {addSongTab === 'chords' && (
+                <>
+                  <Text style={s.formLabel}>Chord Chart</Text>
+                  <TextInput
+                    style={[s.formInput, s.multilineInput, s.monoInput]}
+                    value={newSongChords}
+                    onChangeText={setNewSongChords}
+                    placeholder={'[Verse]\nG     D     Em    C\nAmazing grace...'}
+                    placeholderTextColor="#6B7280"
+                    multiline
+                    textAlignVertical="top"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </>
+              )}
+
+              <TouchableOpacity style={[s.saveBtn, { marginTop: 4 }, savingNewSong && s.saveBtnDisabled]}
+                onPress={handleAddSongToLibrary} disabled={savingNewSong}>
+                {savingNewSong ? <ActivityIndicator size="small" color="#FFF" />
+                  : <Text style={s.saveBtnText}>Add to Library</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
+      )}
+
       <View style={s.searchBar}>
         <TextInput style={s.searchInput} value={libQuery} onChangeText={setLibQuery}
           placeholder="🔍  Search songs..." placeholderTextColor="#6B7280" />
@@ -997,42 +1557,208 @@ export default function AdminDashboardScreen({ navigation, route }) {
   };
 
   // ── Render: Messages ────────────────────────────────────────────────────
-  const renderMessages = () => (
-    <FlatList
-      data={messages}
-      keyExtractor={m => m.id}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
-      contentContainerStyle={s.tabContent}
-      renderItem={({ item }) => (
-        <TouchableOpacity
-          style={[s.msgCard, !item.read && s.msgCardUnread]}
-          onPress={() => setSelectedMsg(item)}
-        >
-          <View style={s.msgHeader}>
-            {!item.read && <View style={s.unreadDot} />}
-            <Text style={s.msgFrom}>{item.fromName || item.from_name || item.fromEmail || item.from_email}</Text>
-            <Text style={s.msgTime}>{timeAgo(item.timestamp)}</Text>
+  const renderMessages = () => {
+    const filteredPeople = people.filter((person) => {
+      if (!pickerSearch.trim()) return true;
+      const query = pickerSearch.trim().toLowerCase();
+      return (
+        String(person?.name || '').toLowerCase().includes(query)
+        || String(person?.email || '').toLowerCase().includes(query)
+      );
+    });
+
+    if (showRecipientPicker) {
+      return (
+        <View style={s.composeScreen}>
+          <View style={s.composeHeader}>
+            <TouchableOpacity onPress={() => setShowRecipientPicker(false)}>
+              <Text style={s.backText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={s.topBarTitle}>Choose Recipient</Text>
+            <View style={s.composeHeaderSpacer} />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-            <Text style={s.msgSubject}>{item.subject}</Text>
-            {item.to === 'all_team' && (
-              <View style={s.broadcastBadge}><Text style={s.broadcastBadgeText}>👥 Team</Text></View>
+          <TextInput
+            style={s.pickerSearch}
+            value={pickerSearch}
+            onChangeText={setPickerSearch}
+            placeholder="Search team..."
+            placeholderTextColor="#6B7280"
+            autoFocus
+          />
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.pickerList}>
+            <TouchableOpacity
+              style={[s.pickerItem, composeTo === 'all_team' && s.pickerItemActive]}
+              onPress={() => {
+                setComposeTo('all_team');
+                setComposeToName('All Team');
+                setShowRecipientPicker(false);
+              }}
+            >
+              <Text style={s.pickerItemIcon}>👥</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.pickerItemName}>All Team</Text>
+                <Text style={s.pickerItemSub}>Broadcast to everyone</Text>
+              </View>
+              {composeTo === 'all_team' && <Text style={s.checkmark}>✓</Text>}
+            </TouchableOpacity>
+
+            {filteredPeople.map((person) => {
+              const targetEmail = String(person?.email || '').trim().toLowerCase();
+              const disabled = !targetEmail;
+              const isSelected = !disabled && composeTo === targetEmail;
+              return (
+                <TouchableOpacity
+                  key={person.id || `${person.name}_${targetEmail}`}
+                  style={[
+                    s.pickerItem,
+                    isSelected && s.pickerItemActive,
+                    disabled && s.pickerItemDisabled,
+                  ]}
+                  disabled={disabled}
+                  onPress={() => {
+                    setComposeTo(targetEmail);
+                    setComposeToName(person?.name || targetEmail);
+                    setShowRecipientPicker(false);
+                  }}
+                >
+                  <View style={s.pickerAvatar}>
+                    <Text style={s.pickerAvatarText}>
+                      {(person?.name || '?')[0].toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.pickerItemName, disabled && s.pickerItemNameDisabled]}>
+                      {person?.name || 'Unknown member'}
+                    </Text>
+                    <Text style={s.pickerItemSub}>
+                      {targetEmail || 'Add email on the member profile first'}
+                    </Text>
+                  </View>
+                  {isSelected && <Text style={s.checkmark}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+
+            {filteredPeople.length === 0 && (
+              <Text style={s.pickerEmpty}>No team members found.</Text>
             )}
-          </View>
-          <Text style={s.msgPreview} numberOfLines={2}>{item.message}</Text>
-          {(item.replies || []).length > 0 && (
-            <Text style={s.repliedBadge}>✓ {item.replies.length} repl{item.replies.length > 1 ? 'ies' : 'y'} sent</Text>
-          )}
-        </TouchableOpacity>
-      )}
-      ListEmptyComponent={
-        <View style={s.empty}>
-          <Text style={s.emptyIcon}>📭</Text>
-          <Text style={s.emptyText}>No team messages yet</Text>
+          </ScrollView>
         </View>
-      }
-    />
-  );
+      );
+    }
+
+    if (showCompose) {
+      return (
+        <View style={s.composeScreen}>
+          <View style={s.composeHeader}>
+            <TouchableOpacity
+              onPress={() => {
+                setShowCompose(false);
+                setShowRecipientPicker(false);
+                setPickerSearch('');
+              }}
+            >
+              <Text style={s.backText}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={s.topBarTitle}>New Message</Text>
+            <TouchableOpacity onPress={handleCompose} disabled={sendingCompose}>
+              {sendingCompose
+                ? <ActivityIndicator size="small" color="#8B5CF6" />
+                : <Text style={s.composeSendText}>Send</Text>}
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={s.composeBodyWrap}
+            keyboardShouldPersistTaps="handled"
+          >
+            <TouchableOpacity style={s.toRow} onPress={() => setShowRecipientPicker(true)}>
+              <Text style={s.toLabel}>To:</Text>
+              <View style={[s.toChip, { flex: 1 }]}>
+                <Text style={s.toChipText}>
+                  {composeTo === 'all_team' ? '👥 All Team' : `👤 ${composeToName}`}
+                </Text>
+              </View>
+              <Text style={s.chevron}>›</Text>
+            </TouchableOpacity>
+
+            <TextInput
+              style={s.composeInput}
+              value={composeSubject}
+              onChangeText={setComposeSubject}
+              placeholder="Subject"
+              placeholderTextColor="#6B7280"
+              autoFocus
+            />
+            <TextInput
+              style={s.composeBodyInput}
+              value={composeBody}
+              onChangeText={setComposeBody}
+              placeholder="Write your message..."
+              placeholderTextColor="#6B7280"
+              multiline
+              textAlignVertical="top"
+            />
+          </ScrollView>
+        </View>
+      );
+    }
+
+    return (
+      <View style={{ flex: 1 }}>
+        {canManageMembers && (
+          <TouchableOpacity
+            style={[s.addBtn, { margin: 12, marginBottom: 4 }]}
+            onPress={() => {
+              setShowCompose(true);
+              setShowRecipientPicker(false);
+              setPickerSearch('');
+            }}
+          >
+            <Text style={s.addBtnText}>✉️ Compose Message</Text>
+          </TouchableOpacity>
+        )}
+        <FlatList
+          data={messages}
+          keyExtractor={m => m.id}
+          refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
+          contentContainerStyle={s.tabContent}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[s.msgCard, !item.read && s.msgCardUnread]}
+              onPress={() => setSelectedMsg(item)}
+              onLongPress={() => confirmDeleteInboxMessage(item)}
+              delayLongPress={250}
+            >
+              <View style={s.msgHeader}>
+                {!item.read && <View style={s.unreadDot} />}
+                <Text style={s.msgFrom}>{item.fromName || item.from_name || item.fromEmail || item.from_email}</Text>
+                <Text style={s.msgTime}>{timeAgo(item.timestamp)}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <Text style={s.msgSubject}>{item.subject}</Text>
+                {item.to === 'all_team' && (
+                  <View style={s.broadcastBadge}><Text style={s.broadcastBadgeText}>👥 Team</Text></View>
+                )}
+              </View>
+              <Text style={s.msgPreview} numberOfLines={2}>{item.message}</Text>
+              {(item.replies || []).length > 0 && (
+                <Text style={s.repliedBadge}>✓ {item.replies.length} repl{item.replies.length > 1 ? 'ies' : 'y'} sent</Text>
+              )}
+              <Text style={s.msgHint}>Long press to delete</Text>
+            </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <View style={s.empty}>
+              <Text style={s.emptyIcon}>📭</Text>
+              <Text style={s.emptyText}>No team messages yet</Text>
+            </View>
+          }
+        />
+      </View>
+    );
+  };
 
   // ── Message thread ──────────────────────────────────────────────────────
   if (selectedMsg) {
@@ -1058,7 +1784,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={s.adminBubbleText}>{r.message}</Text>
             </View>
           ))}
-          <Text style={s.replyLabel}>Reply as Admin</Text>
+          <Text style={s.replyLabel}>Reply as {isOrgOwner ? 'Org Owner' : isAdmin ? 'Admin' : isManager ? 'Manager' : 'Music Director'}</Text>
           <TextInput style={s.replyInput} value={replyText} onChangeText={setReplyText}
             placeholder="Type reply..." placeholderTextColor="#6B7280" multiline textAlignVertical="top" />
           <TouchableOpacity style={[s.replyBtn, sendingReply && s.replyBtnDisabled]}
@@ -1080,7 +1806,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
         </TouchableOpacity>
         <View style={s.topCenter}>
           <View style={[s.mdBadge, isAdmin && s.adminBadgeStyle]}>
-            <Text style={s.mdBadgeText}>{isAdmin ? '👑 Admin' : '🎛 Music Director'}</Text>
+            <Text style={s.mdBadgeText}>
+              {isOrgOwner ? '🏛 Org Owner' : isAdmin ? '👑 Admin' : isManager ? '🛡 Worship Leader' : '🎛 Music Director'}
+            </Text>
           </View>
           <Text style={s.topBarTitle}>Admin Dashboard</Text>
         </View>
@@ -1237,6 +1965,149 @@ export default function AdminDashboardScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
+
+      {/* ── Edit Member Modal (Admin + Manager) ────────────────────── */}
+      <Modal visible={!!showEditMember} animationType="slide" transparent onRequestClose={() => setShowEditMember(null)}>
+        <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
+            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Edit Member</Text>
+            <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
+            <Text style={s.formLabel}>Name *</Text>
+            <TextInput style={s.formInput} value={editName} onChangeText={setEditName}
+              placeholder="Full name" placeholderTextColor="#6B7280" />
+            <Text style={s.formLabel}>Email</Text>
+            <TextInput style={s.formInput} value={editEmail} onChangeText={setEditEmail}
+              placeholder="email@example.com" placeholderTextColor="#6B7280"
+              keyboardType="email-address" autoCapitalize="none" />
+            <Text style={s.formLabel}>Primary Role</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              <View style={s.chipRow}>
+                {ROLE_CHIPS.map(r => (
+                  <TouchableOpacity key={r}
+                    style={[s.roleChipBtn, editRole === r && s.roleChipBtnActive]}
+                    onPress={() => setEditRole(editRole === r ? '' : r)}>
+                    <Text style={[s.roleChipBtnText, editRole === r && s.roleChipBtnTextActive]}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowEditMember(null)}>
+                <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 2, backgroundColor: '#4F46E5', borderRadius: 10, paddingVertical: 12, alignItems: 'center', opacity: (savingEdit || !editName.trim()) ? 0.5 : 1 }}
+                onPress={handleEditMember} disabled={savingEdit || !editName.trim()}>
+                {savingEdit ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Save Changes</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Vocal Part Picker Modal ───────────────────────────────── */}
+      <Modal visible={!!vocalPartPicker} animationType="slide" transparent onRequestClose={() => setVocalPartPicker(null)}>
+        <View style={s.modalOverlay}>
+          <View style={s.modalCard}>
+            <View style={s.modalTitleRow}>
+              <View>
+                <Text style={s.modalTitle}>🎤 {vocalPartPicker?.partLabel}</Text>
+                <Text style={{ color: '#6B7280', fontSize: 12, marginTop: 2 }}>Assign vocalist to this part</Text>
+              </View>
+              <TouchableOpacity onPress={() => setVocalPartPicker(null)}>
+                <Text style={s.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            {/* Clear option */}
+            <TouchableOpacity
+              style={s.vocalUnassignRow}
+              onPress={() => vocalPartPicker && handleAssignVocalPart(vocalPartPicker.svcId, vocalPartPicker.songId, vocalPartPicker.partKey, null)}
+            >
+              <Text style={s.vocalUnassignText}>— Clear / Unassign —</Text>
+            </TouchableOpacity>
+            <FlatList
+              data={(() => {
+                const svcTeam = plans[vocalPartPicker?.svcId || '']?.team || [];
+                const teamIds = new Set(svcTeam.map(t => t.personId));
+                const vocalInTeam = [], otherInTeam = [], notInTeam = [];
+                for (const p of people) {
+                  const isInTeam = teamIds.has(p.id);
+                  const isVocal  = (p.roles || []).some(r => VOCAL_TEAM_ROLES.has(r));
+                  if (isInTeam && isVocal) vocalInTeam.push(p);
+                  else if (isInTeam)       otherInTeam.push(p);
+                  else                     notInTeam.push(p);
+                }
+                return [...vocalInTeam, ...otherInTeam, ...notInTeam];
+              })()}
+              keyExtractor={p => p.id || p.name}
+              style={{ maxHeight: 340 }}
+              renderItem={({ item }) => {
+                const svcTeam = plans[vocalPartPicker?.svcId || '']?.team || [];
+                const inTeam  = svcTeam.some(t => t.personId === item.id);
+                const isVocal = (item.roles || []).some(r => VOCAL_TEAM_ROLES.has(r));
+                return (
+                  <TouchableOpacity
+                    style={[s.modalPerson, savingVocals && { opacity: 0.5 }]}
+                    onPress={() => vocalPartPicker && handleAssignVocalPart(vocalPartPicker.svcId, vocalPartPicker.songId, vocalPartPicker.partKey, item)}
+                    disabled={savingVocals}
+                  >
+                    <View style={s.personAvatar}>
+                      <Text style={s.personAvatarText}>{(item.name || '?')[0]}</Text>
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={s.modalPersonName}>{item.name}</Text>
+                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 2 }}>
+                        {inTeam  && <View style={s.roleChipSmall}><Text style={s.roleChipSmallText}>In team</Text></View>}
+                        {isVocal && <View style={[s.roleChipSmall, { borderColor: '#EC4899' }]}><Text style={[s.roleChipSmallText, { color: '#F472B6' }]}>Vocal</Text></View>}
+                      </View>
+                    </View>
+                    {savingVocals
+                      ? <ActivityIndicator size="small" color="#8B5CF6" />
+                      : <Text style={s.modalPersonAdd}>→ Assign</Text>}
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={<Text style={[s.planEmpty, { padding: 16 }]}>No team members added yet.</Text>}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Grant Role Modal (Admin + Manager) ─────────────────────── */}
+      <Modal visible={!!showGrantRole} animationType="slide" transparent onRequestClose={() => setShowGrantRole(null)}>
+        <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
+            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Grant Role</Text>
+            <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
+              Set role for {showGrantRole?.name}
+              {isManager && !isAdmin ? '\n🛡 Manager: can only grant Leader role' : ''}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+              {(isOrgOwner ? ['org_owner', 'admin', 'manager', 'leader', 'none']
+                : isAdmin  ? ['manager', 'leader', 'none']
+                : ['leader', 'none']).map(r => (
+                <TouchableOpacity key={r}
+                  style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
+                    backgroundColor: grantingRole === r ? '#7C3AED' : '#1F2937',
+                    borderColor: grantingRole === r ? '#7C3AED' : '#374151' }}
+                  onPress={() => setGrantingRole(r)}>
+                  <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700', textTransform: 'capitalize' }}>
+                    {r === 'manager' ? 'Worship Leader' : r}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowGrantRole(null)}>
+                <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={{ flex: 2, backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={handleGrantRole} disabled={savingGrant || !grantingRole}>
+                {savingGrant ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Grant Role</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1298,6 +2169,31 @@ const s = StyleSheet.create({
   svcDate: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
   svcMeta: { fontSize: 12, color: '#9CA3AF', marginBottom: 4 },
   svcExpandHint: { fontSize: 11, color: '#8B5CF6', fontWeight: '600' },
+  archiveSection: { marginTop: 4 },
+  archiveCard: {
+    backgroundColor: '#0A0F1F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#243047',
+    marginBottom: 12,
+    padding: 14,
+  },
+  archiveCardOpen: { borderColor: '#8B5CF6' },
+  archiveHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  archiveTitle: { fontSize: 15, fontWeight: '800', color: '#E5E7EB' },
+  archiveSubtitle: { fontSize: 12, color: '#94A3B8', marginBottom: 4 },
+  archiveCountBadge: {
+    minWidth: 28,
+    height: 22,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    backgroundColor: '#312E81',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#6366F1',
+  },
+  archiveCountText: { fontSize: 11, fontWeight: '800', color: '#C7D2FE' },
 
   // Plan section
   planSection: { padding: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#1F2937' },
@@ -1311,6 +2207,21 @@ const s = StyleSheet.create({
   publishBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   publishedAt: { fontSize: 11, color: '#C4B5FD', marginTop: 2 },
   planSongRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
+  // Vocal assignment
+  vocalToggleBtn: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 7, backgroundColor: '#1F2937', borderWidth: 1, borderColor: '#374151' },
+  vocalToggleBtnActive: { backgroundColor: '#4C1D9530', borderColor: '#7C3AED' },
+  vocalToggleBtnOpen: { backgroundColor: '#7C3AED40', borderColor: '#A78BFA' },
+  vocalToggleTxt: { fontSize: 11, fontWeight: '700', color: '#9CA3AF' },
+  vocalPanel: { paddingHorizontal: 12, paddingBottom: 10, paddingTop: 6, backgroundColor: '#07091A', borderBottomWidth: 1, borderBottomColor: '#1F2937' },
+  vocalPanelTitle: { fontSize: 10, fontWeight: '700', color: '#4B5563', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  vocalPartRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#ffffff06' },
+  vocalPartDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
+  vocalPartLabel: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', width: 90 },
+  vocalAssignedName: { fontSize: 12, fontWeight: '700', color: '#A5B4FC', maxWidth: 140 },
+  vocalClearBtn: { fontSize: 13, color: '#EF444450', fontWeight: '700', paddingLeft: 6 },
+  vocalUnassigned: { fontSize: 11, color: '#374151', fontStyle: 'italic' },
+  vocalUnassignRow: { backgroundColor: '#1F293730', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10, alignItems: 'center', borderWidth: 1, borderColor: '#374151' },
+  vocalUnassignText: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
   planSongNum: { fontSize: 11, color: '#6B7280', width: 18, textAlign: 'center' },
   planSongTitle: { fontSize: 13, fontWeight: '700', color: '#F9FAFB' },
   planSongArtist: { fontSize: 11, color: '#6B7280' },
@@ -1377,6 +2288,111 @@ const s = StyleSheet.create({
   songServices: { fontSize: 11, color: '#6B7280', marginTop: 4 },
 
   // Messages
+  composeScreen: { flex: 1 },
+  composeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  composeHeaderSpacer: { width: 52 },
+  composeSendText: { fontSize: 15, color: '#8B5CF6', fontWeight: '700', minWidth: 40, textAlign: 'right' },
+  composeBodyWrap: { padding: 16, paddingBottom: 40 },
+  toRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  toLabel: { fontSize: 13, fontWeight: '700', color: '#9CA3AF', width: 26 },
+  toChip: {
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: '#0B1120',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#374151',
+    paddingHorizontal: 12,
+  },
+  toChipText: { fontSize: 14, fontWeight: '600', color: '#E5E7EB' },
+  chevron: { fontSize: 22, lineHeight: 22, color: '#4B5563' },
+  composeInput: {
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#F9FAFB',
+    marginBottom: 12,
+  },
+  composeBodyInput: {
+    minHeight: 180,
+    backgroundColor: '#0B1120',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: '#F9FAFB',
+  },
+  pickerSearch: {
+    backgroundColor: '#0B1120',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#374151',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: '#F9FAFB',
+    margin: 16,
+    marginBottom: 10,
+  },
+  pickerList: { paddingHorizontal: 16, paddingBottom: 28 },
+  pickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#0B1120',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  pickerItemActive: {
+    borderColor: '#8B5CF6',
+    backgroundColor: '#141127',
+  },
+  pickerItemDisabled: {
+    opacity: 0.55,
+  },
+  pickerItemIcon: { fontSize: 20 },
+  pickerAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#4338CA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerAvatarText: { fontSize: 14, fontWeight: '800', color: '#FFF' },
+  pickerItemName: { fontSize: 14, fontWeight: '700', color: '#F9FAFB' },
+  pickerItemNameDisabled: { color: '#9CA3AF' },
+  pickerItemSub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  checkmark: { fontSize: 18, fontWeight: '800', color: '#8B5CF6' },
+  pickerEmpty: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 24,
+  },
   msgCard: { padding: 14, backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#374151', marginBottom: 10 },
   msgCardUnread: { borderColor: '#8B5CF6', backgroundColor: '#0D0B1E' },
   msgHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, gap: 6 },
@@ -1386,6 +2402,7 @@ const s = StyleSheet.create({
   msgSubject: { fontSize: 15, fontWeight: '700', color: '#F9FAFB', marginBottom: 4 },
   msgPreview: { fontSize: 13, color: '#9CA3AF', lineHeight: 18, marginBottom: 6 },
   repliedBadge: { fontSize: 11, color: '#22C55E', fontWeight: '600' },
+  msgHint: { fontSize: 11, color: '#4B5563', marginTop: 8 },
   broadcastBadge: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#064E3B', borderRadius: 6, borderWidth: 1, borderColor: '#10B981' },
   broadcastBadgeText: { fontSize: 9, fontWeight: '700', color: '#34D399' },
 
@@ -1448,4 +2465,32 @@ const s = StyleSheet.create({
   proposalApproveBtnText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
   proposalRejectBtn: { paddingHorizontal: 20, borderRadius: 10, paddingVertical: 10, borderWidth: 1, borderColor: '#374151', alignItems: 'center' },
   proposalRejectBtnText: { fontSize: 13, fontWeight: '600', color: '#EF4444' },
+
+  // Pending Approvals (from Leaders)
+  pendingApprovalSection: { backgroundColor: '#7C3AED11', borderRadius: 12, borderWidth: 1, borderColor: '#7C3AED33', padding: 12, marginBottom: 14 },
+  pendingApprovalHeader:  { color: '#A78BFA', fontSize: 12, fontWeight: '800', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
+  pendingApprovalCard:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B1120', borderRadius: 10, borderWidth: 1, borderColor: '#1E2A40', padding: 10, marginBottom: 8 },
+  pendingApprovalTitle:   { color: '#E0E7FF', fontSize: 14, fontWeight: '700' },
+  pendingApprovalMeta:    { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  approveBtn:             { backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  approveBtnTxt:          { color: '#FFF', fontSize: 12, fontWeight: '800' },
+  rejectBtn:              { backgroundColor: '#7F1D1D22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#EF4444' },
+  rejectBtnTxt:           { color: '#EF4444', fontSize: 12, fontWeight: '700' },
+
+  // Grant Role button
+  grantRoleBtn:    { backgroundColor: '#7C3AED22', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, borderWidth: 1, borderColor: '#7C3AED' },
+  grantRoleBtnTxt: { color: '#A78BFA', fontSize: 13 },
+
+  // Edit member button
+  editMemberBtn:    { backgroundColor: '#1E2A4020', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, borderWidth: 1, borderColor: '#374151' },
+  editMemberBtnTxt: { color: '#9CA3AF', fontSize: 14 },
+
+  // Add Song tabs
+  addSongTabs:         { flexDirection: 'row', gap: 6, marginBottom: 16 },
+  addSongTab:          { flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: '#1F2937', borderWidth: 1, borderColor: '#374151', alignItems: 'center' },
+  addSongTabActive:    { backgroundColor: '#4F46E520', borderColor: '#4F46E5' },
+  addSongTabText:      { fontSize: 12, fontWeight: '600', color: '#6B7280' },
+  addSongTabTextActive:{ color: '#818CF8', fontWeight: '700' },
+  multilineInput:      { minHeight: 220, textAlignVertical: 'top' },
+  monoInput:           { fontFamily: 'Courier', fontSize: 13, lineHeight: 20 },
 });

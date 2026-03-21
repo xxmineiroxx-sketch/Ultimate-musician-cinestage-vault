@@ -48,6 +48,88 @@ export const getTeamMemberByEmail = async (email) => {
   return members.find(m => m.email?.toLowerCase() === email?.toLowerCase());
 };
 
+const normalizePhoneForLookup = (value) =>
+  String(value || '').replace(/\D+/g, '');
+
+const INVITE_STATUS_ORDER = {
+  '': 0,
+  ready: 1,
+  pending: 2,
+  accepted: 3,
+  registered: 4,
+};
+
+const normalizeInviteStatus = (value) =>
+  String(value || '').trim().toLowerCase();
+
+const isPortablePhotoUrl = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('https://')
+  );
+};
+
+const pickPreferredPhotoUrl = (...values) => {
+  for (const value of values) {
+    if (isPortablePhotoUrl(value)) return String(value || '').trim();
+  }
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+};
+
+const getEffectiveInviteStatus = (person = {}) => {
+  const baseStatus = normalizeInviteStatus(person?.inviteStatus);
+  const isRegistered =
+    person?.playbackRegistered === true
+    || Boolean(person?.playbackRegisteredAt)
+    || Boolean(person?.inviteRegisteredAt);
+  if (isRegistered || baseStatus === 'registered') return 'registered';
+  if (person?.inviteAcceptedAt) {
+    return INVITE_STATUS_ORDER[baseStatus] >= INVITE_STATUS_ORDER.accepted
+      ? baseStatus
+      : 'accepted';
+  }
+  return baseStatus;
+};
+
+const pickHighestInviteStatus = (...records) => {
+  let bestStatus = '';
+  let bestRank = -1;
+
+  for (const record of records) {
+    const status = getEffectiveInviteStatus(record);
+    const rank = INVITE_STATUS_ORDER[status] ?? 0;
+    if (rank >= bestRank) {
+      bestStatus = status;
+      bestRank = rank;
+    }
+  }
+
+  return bestStatus;
+};
+
+const findTeamMemberIndex = (members, localProfile) => {
+  const profileId = String(localProfile?.id || '').trim();
+  const profileEmail = String(localProfile?.email || '').trim().toLowerCase();
+  const profilePhone = normalizePhoneForLookup(localProfile?.phone);
+
+  return members.findIndex((member) => {
+    const memberId = String(member?.id || '').trim();
+    const memberEmail = String(member?.email || '').trim().toLowerCase();
+    const memberPhone = normalizePhoneForLookup(member?.phone);
+
+    if (profileId && memberId && memberId === profileId) return true;
+    if (profileEmail && memberEmail && memberEmail === profileEmail) return true;
+    if (profilePhone && memberPhone && memberPhone === profilePhone) return true;
+    return false;
+  });
+};
+
 export const updateTeamMember = async (memberId, updates) => {
   const members = await getSharedTeamMembers();
   const index = members.findIndex(m => m.id === memberId);
@@ -258,9 +340,7 @@ export const getSongsByIds = async (songIds) => {
  */
 export const syncProfileToTeamMembers = async (localProfile) => {
   const members = await getSharedTeamMembers();
-  const existingIndex = members.findIndex(m =>
-    m.email?.toLowerCase() === localProfile.email?.toLowerCase()
-  );
+  const existingIndex = findTeamMemberIndex(members, localProfile);
   const existingMember = existingIndex !== -1 ? members[existingIndex] : null;
   const nextName = localProfile.name ?? existingMember?.name ?? '';
   const existingLastName = existingMember?.lastName ?? '';
@@ -276,6 +356,14 @@ export const syncProfileToTeamMembers = async (localProfile) => {
           nextName.toLowerCase().endsWith(existingLastName.toLowerCase())
         ? ''
         : existingLastName;
+  const nextInviteStatus = pickHighestInviteStatus(existingMember, localProfile);
+  const nextPlaybackRegistered =
+    localProfile.playbackRegistered === true
+      || existingMember?.playbackRegistered === true
+      || Boolean(localProfile.playbackRegisteredAt)
+      || Boolean(existingMember?.playbackRegisteredAt)
+      || Boolean(localProfile.inviteRegisteredAt)
+      || Boolean(existingMember?.inviteRegisteredAt);
 
   const memberData = {
     id: existingMember?.id || localProfile.id || `person_${Date.now()}`,
@@ -284,14 +372,38 @@ export const syncProfileToTeamMembers = async (localProfile) => {
     email: localProfile.email ?? existingMember?.email ?? '',
     phone: localProfile.phone ?? existingMember?.phone ?? '',
     dateOfBirth: localProfile.dateOfBirth ?? existingMember?.dateOfBirth ?? '',
-    photo_url: localProfile.photo_url ?? existingMember?.photo_url ?? null,
+    photo_url: pickPreferredPhotoUrl(localProfile.photo_url, existingMember?.photo_url),
     roles: nextRoles,
     roleAssignments:
       localProfile.roleAssignments ??
       existingMember?.roleAssignments ??
       nextRoles.join(', '),
+    roleSyncSource: 'playback_profile',
+    roleSyncUpdatedAt: new Date().toISOString(),
     blockout_dates:
       localProfile.blockout_dates ?? existingMember?.blockout_dates ?? [],
+    inviteStatus: nextInviteStatus,
+    inviteToken:
+      localProfile.inviteToken ?? existingMember?.inviteToken ?? '',
+    inviteCreatedAt:
+      localProfile.inviteCreatedAt ?? existingMember?.inviteCreatedAt ?? null,
+    inviteSentAt:
+      localProfile.inviteSentAt ?? existingMember?.inviteSentAt ?? null,
+    inviteAcceptedAt:
+      localProfile.inviteAcceptedAt ?? existingMember?.inviteAcceptedAt ?? null,
+    inviteRegisteredAt:
+      localProfile.inviteRegisteredAt ?? existingMember?.inviteRegisteredAt ?? null,
+    playbackRegistered: nextPlaybackRegistered,
+    playbackRegisteredAt:
+      localProfile.playbackRegisteredAt
+      ?? existingMember?.playbackRegisteredAt
+      ?? localProfile.inviteRegisteredAt
+      ?? existingMember?.inviteRegisteredAt
+      ?? null,
+    createdAt:
+      localProfile.createdAt
+      ?? existingMember?.createdAt
+      ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
@@ -325,8 +437,14 @@ export const syncTeamMemberToProfile = async (email) => {
       phone: member.phone,
       dateOfBirth: member.dateOfBirth,
       photo_url: member.photo_url,
+      createdAt: member.createdAt || '',
+      inviteRegisteredAt: member.inviteRegisteredAt || '',
+      playbackRegisteredAt: member.playbackRegisteredAt || '',
+      playbackRegistered: member.playbackRegistered === true,
       roles: member.roles || [],
       roleAssignments: member.roleAssignments,
+      roleSyncSource: member.roleSyncSource || '',
+      roleSyncUpdatedAt: member.roleSyncUpdatedAt || null,
       blockout_dates: member.blockout_dates || [],
     };
   }

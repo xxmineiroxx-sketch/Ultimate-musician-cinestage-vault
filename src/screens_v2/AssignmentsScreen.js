@@ -3,9 +3,10 @@
  * View and respond to service assignments
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -46,6 +47,20 @@ function dedupAssignments(list) {
     seen.add(key);
     return true;
   });
+}
+
+function pickPreferredAssignmentStatus(currentValue, nextValue) {
+  const normalize = (value) => String(value || '').trim().toLowerCase();
+  const rank = { '': 0, pending: 1, accepted: 2, declined: 2 };
+  const current = normalize(currentValue);
+  const next = normalize(nextValue);
+  const currentRank = rank[current] ?? 0;
+  const nextRank = rank[next] ?? 0;
+
+  if (nextRank > currentRank) return next;
+  if (currentRank > nextRank) return current;
+  if (next && next !== current && next !== 'pending') return next;
+  return current || next || 'pending';
 }
 
 // Group assignments by service_id.
@@ -127,17 +142,12 @@ export default function AssignmentsScreen({ navigation }) {
   const [syncEmail, setSyncEmail] = useState(null); // email being used for sync
   const [syncError, setSyncError] = useState(null);
 
-  useEffect(() => {
-    loadAssignments();
-    syncFromServer();
-  }, []);
-
-  const loadAssignments = async () => {
+  const loadAssignments = useCallback(async () => {
     const data = await getAssignments();
     // Filter out past-day services (end-of-day grace: today's service stays all day)
     const active = dedupAssignments(data).filter(a => !isPastService(a.service_date));
     setAssignments(active);
-  };
+  }, []);
 
   const syncFromServer = useCallback(async () => {
     setSyncing(true);
@@ -172,30 +182,32 @@ export default function AssignmentsScreen({ navigation }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const remote = await res.json();
 
-      if (remote.length > 0) {
-        // Merge remote with local — preserve local status changes (accepted/declined).
-        // Match by id first; fall back to service_id+role compound key for stability.
-        const local = await getAssignments();
-        const localById = Object.fromEntries(local.map(a => [a.id, a]));
-        const localByCompound = Object.fromEntries(
-          local.map(a => [`${a.service_id}_${a.role}`, a])
-        );
-        const localResponses = await getLocalResponses();
-        const merged = remote.map(r => {
-          // 1. Try persisted local response (always wins — never reset by sync)
-          const override = localResponses[r.service_id];
-          if (override) return { ...r, status: override.status };
-          // 2. Fall back to ID match or compound key match
-          const match = localById[r.id] || localByCompound[`${r.service_id}_${r.role}`];
-          return match
-            ? { ...r, status: match.status, readiness: match.readiness }
-            : r;
-        });
-        // Prune past-service assignments from local storage (end-of-day grace)
-        const active = dedupAssignments(merged).filter(a => !isPastService(a.service_date));
-        await saveAssignments(active);
-        setAssignments(active);
-      }
+      // Merge remote with local — preserve only stronger local decisions.
+      // Match by id first; fall back to service_id+role compound key for stability.
+      const local = await getAssignments();
+      const localById = Object.fromEntries(local.map(a => [a.id, a]));
+      const localByCompound = Object.fromEntries(
+        local.map(a => [`${a.service_id}_${a.role}`, a])
+      );
+      const localResponses = await getLocalResponses();
+      const merged = remote.map(r => {
+        // 1. Try persisted local response (always wins — never reset by sync)
+        const override = localResponses[r.service_id];
+        if (override) return { ...r, status: override.status };
+        // 2. Fall back to ID match or compound key match
+        const match = localById[r.id] || localByCompound[`${r.service_id}_${r.role}`];
+        return match
+          ? {
+              ...r,
+              status: pickPreferredAssignmentStatus(match.status, r.status),
+              readiness: match.readiness,
+            }
+          : r;
+      });
+      // Prune past-service assignments from local storage (end-of-day grace)
+      const active = dedupAssignments(merged).filter(a => !isPastService(a.service_date));
+      await saveAssignments(active);
+      setAssignments(active);
       setLastSync(new Date());
     } catch (e) {
       setSyncError(e?.message || 'Network request failed');
@@ -203,6 +215,13 @@ export default function AssignmentsScreen({ navigation }) {
       setSyncing(false);
     }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadAssignments();
+      syncFromServer();
+    }, [loadAssignments, syncFromServer])
+  );
 
   const pushResponse = (assignment, status, declineReason = '') => {
     getUserProfile().then(prof => {

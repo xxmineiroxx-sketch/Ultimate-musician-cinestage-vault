@@ -19,6 +19,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
+import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
@@ -140,6 +141,19 @@ function groupByService(list) {
     map.get(key).push(a);
   }
   return Array.from(map.values());
+}
+function pickPreferredAssignmentStatus(currentValue, nextValue) {
+  const normalize = (value) => String(value || '').trim().toLowerCase();
+  const rank = { '': 0, pending: 1, accepted: 2, declined: 2 };
+  const current = normalize(currentValue);
+  const next = normalize(nextValue);
+  const currentRank = rank[current] ?? 0;
+  const nextRank = rank[next] ?? 0;
+
+  if (nextRank > currentRank) return next;
+  if (currentRank > nextRank) return current;
+  if (next && next !== current && next !== 'pending') return next;
+  return current || next || 'pending';
 }
 function groupStatus(group) {
   if (group.some(a => a.status === 'pending')) return 'pending';
@@ -378,6 +392,8 @@ export default function HomeScreen({ navigation }) {
 
     if (lastShownDay === dayKey) return;
 
+    void playNotificationSound('verse');
+
     Alert.alert(
       `📖 ${theme.label} — Day ${plan.day}`,
       `"${verse.text}"\n${verse.ref}\n\n📚 Today's Reading\nOT: ${plan.ot}\nNT: ${plan.nt}\n${plan.wisdom}`,
@@ -427,10 +443,17 @@ export default function HomeScreen({ navigation }) {
         if (res.ok) {
           const remote = await res.json();
           // Always replace local cache with server's authoritative list.
-          // Preserve locally-set status/readiness for known assignments.
+          // Preserve only stronger local decisions; never let a stale local
+          // "pending" overwrite a real accepted/declined server response.
           const localMap = Object.fromEntries(userAssignments.map(a => [a.id, a]));
           const merged = dedupAssignments(remote.map(r =>
-            localMap[r.id] ? { ...r, status: localMap[r.id].status, readiness: localMap[r.id].readiness } : r
+            localMap[r.id]
+              ? {
+                  ...r,
+                  status: pickPreferredAssignmentStatus(localMap[r.id].status, r.status),
+                  readiness: localMap[r.id].readiness,
+                }
+              : r
           ));
           await saveAssignments(merged);
           userAssignments = merged;
@@ -621,8 +644,8 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       )}
 
-      {/* MD / Admin Panel card */}
-      {mdRole && (
+      {/* Admin / Manager / MD Panel card */}
+      {mdRole && mdRole !== 'leader' && (
         <TouchableOpacity
           style={styles.adminCard}
           onPress={() => navigation.navigate('AdminDashboard', { mdRole })}
@@ -630,12 +653,34 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.adminCardLeft}>
             <View style={styles.adminBadge}>
               <Text style={styles.adminBadgeText}>
-                {mdRole === 'admin' ? '👑 Admin' : '🎛 Music Director'}
+                {mdRole === 'org_owner' ? '🏛 Org Owner'
+                  : mdRole === 'admin'   ? '👑 Admin'
+                  : mdRole === 'manager' ? '🛡 Worship Leader'
+                  : '🎛 Music Director'}
               </Text>
             </View>
             <Text style={styles.adminCardTitle}>Admin Panel</Text>
             <Text style={styles.adminCardDesc}>
               Manage messages, services, team & songs
+            </Text>
+          </View>
+          <Text style={styles.adminCardArrow}>›</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Leader Dashboard card */}
+      {mdRole === 'leader' && (
+        <TouchableOpacity
+          style={[styles.adminCard, { borderColor: '#7C3AED44' }]}
+          onPress={() => navigation.navigate('LeaderDashboard', { leaderEmail: profile?.email, leaderName: profile?.name })}
+        >
+          <View style={styles.adminCardLeft}>
+            <View style={[styles.adminBadge, { backgroundColor: '#7C3AED22', borderColor: '#7C3AED' }]}>
+              <Text style={[styles.adminBadgeText, { color: '#A78BFA' }]}>🎼 Leader</Text>
+            </View>
+            <Text style={styles.adminCardTitle}>Leader Dashboard</Text>
+            <Text style={styles.adminCardDesc}>
+              Services, team, library & setlists
             </Text>
           </View>
           <Text style={styles.adminCardArrow}>›</Text>

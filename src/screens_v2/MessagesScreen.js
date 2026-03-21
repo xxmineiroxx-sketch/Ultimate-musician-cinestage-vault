@@ -26,6 +26,17 @@ async function fetchJson(url, opts = {}) {
   }
 }
 
+function isPersonalInboxMessage(thread, email = '') {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!thread || typeof thread !== 'object') return false;
+  if (thread.visibility === 'admin_only' || thread.isSystemMsg) return false;
+  return (
+    (thread.fromEmail || '').toLowerCase() === normalizedEmail ||
+    thread.to === 'all_team' ||
+    (thread.to || '').toLowerCase() === normalizedEmail
+  );
+}
+
 export default function MessagesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [profile, setProfile]     = useState(null);
@@ -59,7 +70,10 @@ export default function MessagesScreen({ navigation }) {
         `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(email)}`,
         { headers: syncHeaders() }
       );
-      setThreads(data);
+      const filtered = Array.isArray(data)
+        ? data.filter(thread => isPersonalInboxMessage(thread, email))
+        : [];
+      setThreads(filtered);
     } catch (_) {
       // server unreachable — keep existing
     } finally {
@@ -143,6 +157,44 @@ export default function MessagesScreen({ navigation }) {
       ]
     );
   }, [hideSelectedThread, selected?.id]);
+
+  const hideInboxThread = useCallback(async (thread) => {
+    if (!thread?.id || !profile?.email) return;
+    setDeleting(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(thread.id)}&scope=viewer&email=${encodeURIComponent(profile.email)}`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      if (selected?.id === thread.id) setSelected(null);
+      await refreshInbox(profile.email);
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [profile?.email, refreshInbox, selected?.id]);
+
+  const confirmHideInboxThread = useCallback((thread) => {
+    if (!thread?.id) return;
+    Alert.alert(
+      'Delete from your inbox?',
+      'This removes the thread only from this Playback inbox. Admin records stay intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void hideInboxThread(thread);
+          },
+        },
+      ]
+    );
+  }, [hideInboxThread]);
 
   // ── Compose view ─────────────────────────────────────────────────────────
 
@@ -308,6 +360,8 @@ export default function MessagesScreen({ navigation }) {
             <TouchableOpacity
               style={[s.threadCard, hasReply && s.threadCardWithReply]}
               onPress={() => setSelected(item)}
+              onLongPress={() => confirmHideInboxThread(item)}
+              delayLongPress={250}
             >
               <View style={s.threadCardHeader}>
                 <Text style={s.threadSubject}>{item.subject}</Text>
@@ -337,6 +391,7 @@ export default function MessagesScreen({ navigation }) {
                   👤 {lastReply.from}: {lastReply.message}
                 </Text>
               ) : null}
+              <Text style={s.threadHint}>Long press to delete</Text>
             </TouchableOpacity>
           );
         }}
@@ -405,6 +460,7 @@ const s = StyleSheet.create({
   },
   pendingBadgeText: { fontSize: 12, color: '#6B7280' },
   lastReply: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+  threadHint: { fontSize: 11, color: '#4B5563', marginTop: 8 },
   broadcastBadge: { paddingHorizontal: 7, paddingVertical: 2, backgroundColor: '#064E3B', borderRadius: 8, borderWidth: 1, borderColor: '#10B981' },
   broadcastBadgeText: { fontSize: 10, fontWeight: '700', color: '#34D399' },
 
