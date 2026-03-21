@@ -22,6 +22,11 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.ultimatemusician.playback",
       "buildNumber": "16",
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.ultimatemusician.playback"
+        ]
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -73,7 +78,8 @@
     "owner": "ultimate-dev",
     "plugins": [
       "expo-asset",
-      "expo-notifications"
+      "expo-notifications",
+      "./plugins/withNativeModules"
     ]
   }
 }
