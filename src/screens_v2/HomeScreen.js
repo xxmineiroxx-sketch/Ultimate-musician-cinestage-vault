@@ -34,6 +34,8 @@ Notifications.setNotificationHandler({
 });
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { sendVerseToWatch, sendServiceInfoToWatch } from '../services/watchBridge';
+import { updateWidgetData } from '../services/widgetDataWriter';
 const SETLIST_HIDE_AFTER_SERVICE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MONTHLY_POPUP_SEEN_KEY = '@up_monthly_assignment_popup_seen_v1';
 const LAST_VERSE_DAY_KEY = '@up_last_verse_day_v1';
@@ -376,6 +378,41 @@ export default function HomeScreen({ navigation }) {
   const lastTriggerTsRef = useRef(null);
   const lastMsgTsRef = useRef(null);          // tracks latest message timestamp for sound
   const notifIdsRef = useRef([]);              // scheduled reminder notification IDs
+
+  // ── Sync verse + service data to Apple Watch and iOS Widget ─────────────────
+  useEffect(() => {
+    // Verse → Watch
+    if (verseOfDay) {
+      sendVerseToWatch({
+        text:  verseOfDay.text  || '',
+        ref:   verseOfDay.ref   || '',
+        theme: seasonTheme?.label || '',
+      });
+    }
+    // Next service + role → Watch
+    const nextGroup = upcomingServices[0];
+    if (nextGroup) {
+      const a = nextGroup[0];
+      sendServiceInfoToWatch({
+        serviceName: a.service_name || a.org_name || '',
+        serviceDate: a.service_date || '',
+        role:        a.role         || '',
+      });
+    }
+    // Widget data (verse + service + role)
+    updateWidgetData({
+      verse: verseOfDay
+        ? { text: verseOfDay.text, ref: verseOfDay.ref, theme: seasonTheme?.key || '' }
+        : null,
+      nextService: nextGroup
+        ? { name: nextGroup[0].service_name || nextGroup[0].org_name || '',
+            date: nextGroup[0].service_date || '',
+            time: nextGroup[0].service_time || '' }
+        : null,
+      role:             nextGroup?.[0]?.role || '',
+      assignmentStatus: nextGroup?.[0]?.status || 'pending',
+    });
+  }, [verseOfDay, upcomingServices, seasonTheme]);
 
   const getVerseByDay = useCallback((date = new Date()) => {
     const theme = getThemeByDate(date);

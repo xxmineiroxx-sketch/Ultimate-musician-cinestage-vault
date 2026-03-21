@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
 import { SYNC_URL, CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
+import { sendPlaybackState, onWatchCommand, IS_WATCH_SUPPORTED } from '../services/watchBridge';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SWIPE_THRESHOLD   = 60;
@@ -312,6 +313,39 @@ export default function SetlistRunnerScreen({ navigation, route }) {
       midiWsRef.current?.close();
     };
   }, []);
+
+  // ── Apple Watch sync ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!IS_WATCH_SUPPORTED) return;
+    const s = songs[currentIndex];
+    if (!s) return;
+    // Derive current section label from scroll position
+    const text = s.lyrics || s.chordChart || '';
+    const secs = parseSections(text);
+    const sectionLabel = secs.length ? secs[0].name : '';
+    sendPlaybackState({
+      isPlaying:    autoScroll,
+      songTitle:    s.title || s.name || '',
+      artist:       s.artist || '',
+      songIndex:    currentIndex,
+      totalSongs:   songs.length,
+      sectionLabel,
+      bpm:          s.bpm ?? null,
+      key:          s.key || null,
+    });
+  }, [autoScroll, currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle commands arriving FROM the Apple Watch (PLAY/PAUSE/NEXT/PREV)
+  useEffect(() => {
+    const unsub = onWatchCommand((msg) => {
+      const cmd = (msg?.cmd || '').toUpperCase();
+      if (cmd === 'PLAY')  setAutoScroll(true);
+      if (cmd === 'PAUSE') setAutoScroll(false);
+      if (cmd === 'NEXT')  goNext();
+      if (cmd === 'PREV')  goPrev();
+    });
+    return unsub;
+  }, [goNext, goPrev]);
 
   // ── Scroll to a section (0-indexed) in the current song ─────────────────────
   // Uses refs only → stable callback, no stale closure issues
