@@ -504,6 +504,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
       const newSvc = {
         id: `svc_${Date.now()}`, name: newSvcName.trim(), title: newSvcName.trim(),
         date: newSvcDate.trim(), time: newSvcTime.trim(), serviceType: 'standard', status: 'draft',
+        created_by_name:  profile?.name  || (isAdmin ? 'Admin' : 'Worship Leader'),
+        created_by_email: profile?.email || '',
+        created_by_at:    new Date().toISOString(),
       };
       await publishUpdate(plans, [...services, newSvc], null);
       setNewSvcName(''); setNewSvcDate(''); setNewSvcTime('');
@@ -1087,6 +1090,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
                       <Text style={s.svcMeta}>
                         🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
                       </Text>
+                      {svc.created_by_name ? (
+                        <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
+                      ) : null}
                     </View>
                     <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>
                       {isOpen ? '▲' : '▶'}
@@ -1156,6 +1162,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 <Text style={s.svcMeta}>
                   🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
                 </Text>
+                {svc.created_by_name ? (
+                  <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
+                ) : null}
                 <Text style={s.svcExpandHint}>{isOpen ? '▲ Close Plan' : '▼ Manage Plan'}</Text>
               </TouchableOpacity>
               {isOpen && renderPlanSection(svc)}
@@ -2169,6 +2178,7 @@ const s = StyleSheet.create({
   svcDate: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
   svcMeta: { fontSize: 12, color: '#9CA3AF', marginBottom: 4 },
   svcExpandHint: { fontSize: 11, color: '#8B5CF6', fontWeight: '600' },
+  svcCreatedBy: { fontSize: 11, color: '#4B5563', fontStyle: 'italic', marginTop: 2 },
   archiveSection: { marginTop: 4 },
   archiveCard: {
     backgroundColor: '#0A0F1F',

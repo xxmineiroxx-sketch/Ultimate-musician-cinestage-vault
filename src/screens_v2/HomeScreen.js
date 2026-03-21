@@ -14,6 +14,7 @@ import {
   Alert,
   AppState,
   Modal,
+  Platform,
   Pressable,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -21,6 +22,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
+import * as Notifications from 'expo-notifications';
+
+// Notifications: show alerts + play sound even when app is in foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 const SETLIST_HIDE_AFTER_SERVICE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -363,6 +374,8 @@ export default function HomeScreen({ navigation }) {
   const [readingPlan, setReadingPlan] = useState(_initPlan);
   const appStateRef = useRef(AppState.currentState);
   const lastTriggerTsRef = useRef(null);
+  const lastMsgTsRef = useRef(null);          // tracks latest message timestamp for sound
+  const notifIdsRef = useRef([]);              // scheduled reminder notification IDs
 
   const getVerseByDay = useCallback((date = new Date()) => {
     const theme = getThemeByDate(date);
@@ -510,6 +523,8 @@ export default function HomeScreen({ navigation }) {
       .sort((g1, g2) => new Date(g1[0].service_date) - new Date(g2[0].service_date));
 
     setUpcomingServices(upcomingGrouped);
+    // Schedule local push reminders for upcoming services (non-blocking)
+    scheduleServiceReminders(upcomingGrouped).catch(() => {});
 
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -538,7 +553,7 @@ export default function HomeScreen({ navigation }) {
     };
     setMonthlyStats(stats);
     await maybeShowMonthlyPopup(stats);
-  }, [maybeShowMonthlyPopup]);
+  }, [maybeShowMonthlyPopup, scheduleServiceReminders]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -590,6 +605,97 @@ export default function HomeScreen({ navigation }) {
     const interval = setInterval(poll, 4000);
     return () => clearInterval(interval);
   }, [navigation]);
+
+  // Poll for new messages every 8s — play notification sound when new message arrives
+  useEffect(() => {
+    let initialized = false;
+    const pollMessages = async () => {
+      const prof = await getUserProfile().catch(() => null);
+      if (!prof?.email) return;
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 5000);
+        let res;
+        try {
+          res = await fetch(
+            `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(prof.email)}`,
+            { headers: syncHeaders(), signal: ctrl.signal }
+          );
+        } finally { clearTimeout(tid); }
+        if (!res.ok) return;
+        const msgs = await res.json();
+        if (!Array.isArray(msgs) || msgs.length === 0) { initialized = true; return; }
+        const latestTs = msgs[0].timestamp || msgs[0].id;
+        if (!initialized) {
+          // First load — just record the current latest, don't beep
+          lastMsgTsRef.current = latestTs;
+          initialized = true;
+          return;
+        }
+        if (latestTs !== lastMsgTsRef.current) {
+          lastMsgTsRef.current = latestTs;
+          playNotificationSound('message');
+        }
+      } catch (_) { initialized = true; }
+    };
+    const interval = setInterval(pollMessages, 8000);
+    pollMessages(); // immediate first check (sets baseline, no sound)
+    return () => clearInterval(interval);
+  }, []);
+
+  // Schedule local push reminders 3 days + 1 day before each upcoming service
+  const scheduleServiceReminders = useCallback(async (upcomingGroups) => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+      // Cancel old reminders
+      await Promise.all(notifIdsRef.current.map(id =>
+        Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+      ));
+      notifIdsRef.current = [];
+      const now = Date.now();
+      for (const group of upcomingGroups) {
+        const a = group[0];
+        const serviceDate = a.service_date || a.date;
+        if (!serviceDate) continue;
+        const dateStr = String(serviceDate).includes('T') ? serviceDate : serviceDate + 'T09:00:00';
+        const svcMs = new Date(dateStr).getTime();
+        if (isNaN(svcMs)) continue;
+        const svcName = a.service_name || a.name || 'Service';
+        const roles = [...new Set(group.map(g => ROLE_LABELS[g.role] || g.role).filter(Boolean))];
+        const roleStr = roles.join(', ') || 'team member';
+        // 3-day reminder
+        const threeDayMs = svcMs - (3 * 24 * 60 * 60 * 1000);
+        if (threeDayMs > now + 60000) {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `📅 3-Day Reminder: ${svcName}`,
+              body: `You're serving as ${roleStr}. Service is in 3 days — prepare now!`,
+              sound: true,
+              data: { serviceId: a.service_id, type: 'service_reminder' },
+            },
+            trigger: { type: 'date', date: new Date(threeDayMs) },
+          }).catch(() => null);
+          if (id) notifIdsRef.current.push(id);
+        }
+        // 1-day reminder
+        const oneDayMs = svcMs - (24 * 60 * 60 * 1000);
+        if (oneDayMs > now + 60000) {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `⚡ Tomorrow: ${svcName}`,
+              body: `Don't forget — you're serving as ${roleStr} tomorrow!`,
+              sound: true,
+              data: { serviceId: a.service_id, type: 'service_reminder' },
+            },
+            trigger: { type: 'date', date: new Date(oneDayMs) },
+          }).catch(() => null);
+          if (id) notifIdsRef.current.push(id);
+        }
+      }
+    } catch (_) {}
+  }, []);
 
   // Only count upcoming/today assignments (not past services)
   const activeAssignments = assignments.filter(a => !isPastService(a.service_date));
