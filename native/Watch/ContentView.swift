@@ -51,13 +51,13 @@ struct NowPlayingPage: View {
       // Section label + key/bpm pills
       HStack(spacing: 4) {
         if !wc.sectionLabel.isEmpty {
-          Pill(text: wc.sectionLabel, color: .indigo)
+          Pill(text: wc.sectionLabel, color: .purple)
         }
         if let k = wc.key, !k.isEmpty {
           Pill(text: k, color: .blue)
         }
         if let b = wc.bpm {
-          Pill(text: "\(b) bpm", color: .teal)
+          Pill(text: "\(b) bpm", color: .green)
         }
       }
 
@@ -94,7 +94,7 @@ struct NowPlayingPage: View {
         .frame(width: 6, height: 6)
     }
     .padding(.horizontal, 8)
-    .containerBackground(Color.black, for: .tabView)
+    .background(Color.black)
   }
 }
 
@@ -113,7 +113,7 @@ struct VersePage: View {
           .font(.system(size: 11))
           .foregroundColor(.gray)
       } else {
-        Text(""" + wc.verseText + """)
+        Text("\"\(wc.verseText)\"")
           .font(.system(size: 11))
           .foregroundColor(.white)
           .lineLimit(5)
@@ -124,7 +124,7 @@ struct VersePage: View {
       }
     }
     .padding(.horizontal, 10)
-    .containerBackground(Color.black, for: .tabView)
+    .background(Color.black)
   }
 }
 
@@ -167,7 +167,7 @@ struct ServicePage: View {
       }
     }
     .padding(.horizontal, 10)
-    .containerBackground(Color.black, for: .tabView)
+    .background(Color.black)
   }
 }
 

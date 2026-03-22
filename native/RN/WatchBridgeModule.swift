@@ -3,6 +3,7 @@
 // Bridges React Native ↔ WCSession (iPhone side).
 
 import Foundation
+import React
 import WatchConnectivity
 
 @objc(WatchBridgeModule)

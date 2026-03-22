@@ -13,7 +13,7 @@ struct UltimateWidget: Widget {
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: kind, provider: UltimateWidgetProvider()) { entry in
       UltimateWidgetEntryView(entry: entry)
-        .containerBackground(Color(red: 0.01, green: 0.04, blue: 0.09), for: .widget)
+        .ultimateWidgetBackground()
     }
     .configurationDisplayName("Ultimate Playback")
     .description("Verse of the day, next service, and your role.")
@@ -48,7 +48,7 @@ struct SmallWidgetView: View {
         .foregroundColor(.yellow)
 
       if let v = entry.payload?.verse {
-        Text(""\(v.text)"")
+        Text("\"\(v.text)\"")
           .font(.system(size: 10))
           .foregroundColor(.white)
           .lineLimit(5)
@@ -82,7 +82,7 @@ struct MediumWidgetView: View {
           .foregroundColor(.yellow)
 
         if let v = entry.payload?.verse {
-          Text(""\(v.text)"")
+          Text("\"\(v.text)\"")
             .font(.system(size: 10))
             .foregroundColor(.white)
             .lineLimit(4)
@@ -154,7 +154,7 @@ struct LargeWidgetView: View {
       // App header
       HStack {
         Image(systemName: "music.note.list")
-          .foregroundColor(.indigo)
+          .foregroundColor(.blue)
         Text("Ultimate Playback")
           .font(.system(size: 11, weight: .bold))
           .foregroundColor(.white)
@@ -175,7 +175,7 @@ struct LargeWidgetView: View {
           .foregroundColor(.yellow)
 
         if let v = entry.payload?.verse {
-          Text(""\(v.text)"")
+          Text("\"\(v.text)\"")
             .font(.system(size: 11))
             .foregroundColor(.white)
             .lineLimit(4)
@@ -268,23 +268,48 @@ struct LargeWidgetView: View {
   }
 }
 
-// ── Preview ───────────────────────────────────────────────────────────────────
-#Preview("Small", as: .systemSmall) {
-  UltimateWidget()
-} timeline: {
-  UltimateEntry(date: .now, payload: WidgetPayload(
-    verse: .init(text: "I can do all things through Christ who strengthens me.", ref: "Philippians 4:13", theme: "strength"),
-    nextService: .init(name: "Sunday Worship", date: "Mar 23, 2026", time: "10:00 AM"),
-    role: "Vocals", assignmentStatus: "confirmed", updatedAt: nil
-  ))
+private extension View {
+  @ViewBuilder
+  func ultimateWidgetBackground() -> some View {
+    if #available(iOSApplicationExtension 17.0, *) {
+      self.containerBackground(Color(red: 0.01, green: 0.04, blue: 0.09), for: .widget)
+    } else {
+      self
+        .background(Color(red: 0.01, green: 0.04, blue: 0.09))
+    }
+  }
 }
 
-#Preview("Medium", as: .systemMedium) {
-  UltimateWidget()
-} timeline: {
-  UltimateEntry(date: .now, payload: WidgetPayload(
-    verse: .init(text: "I can do all things through Christ who strengthens me.", ref: "Philippians 4:13", theme: nil),
-    nextService: .init(name: "Sunday Worship", date: "Mar 23, 2026", time: nil),
-    role: "Drums", assignmentStatus: "pending", updatedAt: nil
-  ))
+#if DEBUG
+struct UltimateWidget_Previews: PreviewProvider {
+  static let sampleEntry = UltimateEntry(
+    date: Date(),
+    payload: WidgetPayload(
+      verse: .init(
+        text: "I can do all things through Christ who strengthens me.",
+        ref: "Philippians 4:13",
+        theme: "strength"
+      ),
+      nextService: .init(
+        name: "Sunday Worship",
+        date: "23/03/2026",
+        time: "10:00"
+      ),
+      role: "Vocals",
+      assignmentStatus: "confirmed",
+      updatedAt: nil
+    )
+  )
+
+  static var previews: some View {
+    Group {
+      UltimateWidgetEntryView(entry: sampleEntry)
+        .previewContext(WidgetPreviewContext(family: .systemSmall))
+      UltimateWidgetEntryView(entry: sampleEntry)
+        .previewContext(WidgetPreviewContext(family: .systemMedium))
+      UltimateWidgetEntryView(entry: sampleEntry)
+        .previewContext(WidgetPreviewContext(family: .systemLarge))
+    }
+  }
 }
+#endif

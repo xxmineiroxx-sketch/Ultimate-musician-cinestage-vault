@@ -36,17 +36,18 @@ struct UltimateWidgetProvider: TimelineProvider {
   private let fileName   = "widget_data.json"
 
   func placeholder(in context: Context) -> UltimateEntry {
-    UltimateEntry(date: .now, payload: nil)
+    UltimateEntry(date: Date(), payload: nil)
   }
 
   func getSnapshot(in context: Context, completion: @escaping (UltimateEntry) -> Void) {
-    completion(UltimateEntry(date: .now, payload: loadPayload()))
+    completion(UltimateEntry(date: Date(), payload: loadPayload()))
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<UltimateEntry>) -> Void) {
-    let entry = UltimateEntry(date: .now, payload: loadPayload())
+    let currentDate = Date()
+    let entry = UltimateEntry(date: currentDate, payload: loadPayload())
     // Refresh every 15 minutes
-    let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: .now)!
+    let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: currentDate)!
     completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
   }
 

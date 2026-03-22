@@ -3,6 +3,7 @@
 // Writes shared JSON to App Groups container so the iOS Widget can read it.
 
 import Foundation
+import React
 
 @objc(WidgetDataModule)
 class WidgetDataModule: NSObject {
