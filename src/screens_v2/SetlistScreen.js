@@ -20,7 +20,7 @@ import { getUserProfile, getAssignments } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
 // WaveformBar removed — audio handled in PersonalPractice screen
 
-import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { SYNC_URL, CINESTAGE_URL, syncHeaders } from '../../config/syncConfig';
 
 function normalizeRoleKey(role) {
   const raw = String(role || '').trim();
@@ -474,6 +474,9 @@ export default function SetlistScreen({ navigation, route }) {
   // stems status per songId: null=unchecked, 'available'=processed, 'none'=not processed
   const [stemsStatus, setStemsStatus] = useState({});
   const [stemsSubmitting, setStemsSubmitting] = useState({});
+  const [keysPreset, setKeysPreset]               = useState({});
+  const [keysPresetLoading, setKeysPresetLoading] = useState({});
+  const [keysPresetType, setKeysPresetType]       = useState('Worship Keys');
 
   useEffect(() => {
     loadData();
@@ -681,6 +684,29 @@ export default function SetlistScreen({ navigation, route }) {
       setStemsSubmitting(prev => ({ ...prev, [song.id]: false }));
     }
   }, []);
+
+  const handleGenerateKeysPreset = useCallback(async (song) => {
+    const id = song.id;
+    setKeysPresetLoading(prev => ({ ...prev, [id]: true }));
+    try {
+      const res = await fetch(`${CINESTAGE_URL}/ai/midi-presets/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instrument_type: keysPresetType,
+          song_title: song.title || '',
+          genre: 'worship',
+          style: keysPresetType.toLowerCase().replace(/\s+/g, '_'),
+        }),
+      });
+      if (!res.ok) throw new Error(`AI Preset ${res.status}`);
+      setKeysPreset(prev => ({ ...prev, [id]: await res.json() }));
+    } catch (e) {
+      Alert.alert('Preset Error', e.message);
+    } finally {
+      setKeysPresetLoading(prev => ({ ...prev, [id]: false }));
+    }
+  }, [keysPresetType]);
 
   const renderSong = (song) => {
     const userRole = selectedAssignment?.role;
@@ -973,6 +999,52 @@ export default function SetlistScreen({ navigation, route }) {
               );
             }
             return null;
+          })()}
+
+          {/* ── Keys Preset AI (keyboard role only) ── */}
+          {primaryInstrument === 'Keys' && (() => {
+            const result = keysPreset[song.id];
+            const loading = keysPresetLoading[song.id];
+            return (
+              <View style={styles.keysPresetCard}>
+                <Text style={styles.keysPresetTitle}>🎹 CineStage Preset AI</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical:8 }}>
+                  <View style={{ flexDirection:'row', gap:6 }}>
+                    {['Worship Keys','Ambient Pad','Strings','Organ B3','Synth Lead'].map(pt => (
+                      <TouchableOpacity key={pt} onPress={() => setKeysPresetType(pt)}
+                        style={[styles.presetChip, keysPresetType===pt && styles.presetChipActive]}>
+                        <Text style={[styles.presetChipText, keysPresetType===pt && styles.presetChipTextActive]}>{pt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+                <TouchableOpacity
+                  style={[styles.stemsSubmitBtn, { backgroundColor:'#1e1b4b', borderColor:'#6366f1' }]}
+                  onPress={() => handleGenerateKeysPreset(song)} disabled={!!loading}>
+                  <Text style={[styles.stemsSubmitText, { color:'#a5b4fc' }]}>
+                    {loading ? '⏳ Generating…' : '🎹 Generate Keys Preset'}
+                  </Text>
+                </TouchableOpacity>
+                {result && (
+                  <View style={{ marginTop:8, backgroundColor:'#0f172a', borderRadius:8, padding:10,
+                                 borderWidth:1, borderColor:'#1e3a5f' }}>
+                    <Text style={{ color:'#34d399', fontSize:12, fontWeight:'700', marginBottom:2 }}>
+                      ✓ {result.preset_name || result.name || keysPresetType}
+                    </Text>
+                    {result.program_number !== undefined && (
+                      <Text style={{ color:'#94a3b8', fontSize:11 }}>
+                        Program: {result.program_number} · Bank: {result.bank || 0}
+                      </Text>
+                    )}
+                    {(result.description || result.content) && (
+                      <Text style={{ color:'#94a3b8', fontSize:11, marginTop:4 }}>
+                        {result.description || result.content}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </View>
+            );
           })()}
 
           {/* ── Media Tech: lyrics + light cues ── */}
@@ -1545,6 +1617,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   stemsSubmitText: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
+  keysPresetCard: { marginTop:8, padding:12, backgroundColor:'#0b0f1a',
+                    borderRadius:10, borderWidth:1, borderColor:'#312e81' },
+  keysPresetTitle: { color:'#818cf8', fontSize:12, fontWeight:'800' },
+  presetChip: { paddingHorizontal:10, paddingVertical:4, borderRadius:20,
+                backgroundColor:'#1e293b', borderWidth:1, borderColor:'#334155' },
+  presetChipActive: { backgroundColor:'#312e81', borderColor:'#6366f1' },
+  presetChipText: { color:'#94a3b8', fontSize:11 },
+  presetChipTextActive: { color:'#a5b4fc' },
   practiceBtn: {
     marginTop: 10,
     paddingVertical: 10,

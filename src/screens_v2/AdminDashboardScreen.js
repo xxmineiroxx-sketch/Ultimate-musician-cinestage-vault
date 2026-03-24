@@ -149,20 +149,23 @@ async function fetchJson(url, opts = {}) {
 
 function monthLabel(dateStr) {
   if (!dateStr) return 'Undated';
-  const d = new Date(dateStr);
+  const [year, month, day] = String(dateStr).split('T')[0].split('-').map(Number);
+  const d = year && month && day ? new Date(year, month - 1, day) : new Date(dateStr);
   if (isNaN(d)) return 'Undated';
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function dayNum(dateStr) {
   if (!dateStr) return '?';
-  const d = new Date(dateStr);
+  const [year, month, day] = String(dateStr).split('T')[0].split('-').map(Number);
+  const d = year && month && day ? new Date(year, month - 1, day) : new Date(dateStr);
   return isNaN(d) ? '?' : d.getDate();
 }
 
 function dayShortMonth(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const [year, month, day] = String(dateStr).split('T')[0].split('-').map(Number);
+  const d = year && month && day ? new Date(year, month - 1, day) : new Date(dateStr);
   return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short' });
 }
 

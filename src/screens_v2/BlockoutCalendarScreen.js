@@ -23,6 +23,50 @@ async function serverBlockout(method, params = {}, body = null) {
   } catch (_) { return null; }
 }
 
+function toDateKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateKey(value) {
+  if (!value) return '';
+  if (value instanceof Date) return toDateKey(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) return toDateKey(parsed);
+  }
+  return '';
+}
+
+function parseDateKey(value) {
+  const dateKey = normalizeDateKey(value);
+  if (!dateKey) return null;
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDateKey(value, options) {
+  const parsed = parseDateKey(value);
+  return parsed ? parsed.toLocaleDateString('en-US', options) : '';
+}
+
+function normalizeBlockoutEntry(entry) {
+  if (!entry) return null;
+  const date = normalizeDateKey(entry.date || entry.start_date || entry.end_date);
+  if (!date) return null;
+  return {
+    ...entry,
+    date,
+  };
+}
+
 export default function BlockoutCalendarScreen({ navigation }) {
   const [profile, setProfile] = useState(null);
   const [blockoutDates, setBlockoutDates] = useState([]);
@@ -72,7 +116,15 @@ export default function BlockoutCalendarScreen({ navigation }) {
       } catch (_) {}
     }
 
-    setBlockoutDates(localDates);
+    const normalizedDates = localDates
+      .map(normalizeBlockoutEntry)
+      .filter(Boolean);
+
+    if (JSON.stringify(normalizedDates) !== JSON.stringify(localDates)) {
+      await saveUserProfile({ ...userProfile, blockout_dates: normalizedDates });
+    }
+
+    setBlockoutDates(normalizedDates);
   };
 
   const handleAddDate = async () => {
@@ -82,7 +134,7 @@ export default function BlockoutCalendarScreen({ navigation }) {
     }
 
     // Format date as YYYY-MM-DD
-    const dateStr = selectedDate.toISOString().split('T')[0];
+    const dateStr = toDateKey(selectedDate);
 
     // Check if date already blocked
     const alreadyBlocked = blockoutDates.some(b => b.date === dateStr);
@@ -158,13 +210,13 @@ export default function BlockoutCalendarScreen({ navigation }) {
 
   const isDateBlocked = (date) => {
     if (!date) return false;
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = toDateKey(date);
     return blockoutDates.some(b => b.date === dateStr);
   };
 
   const isDateSelected = (date) => {
     if (!date || !selectedDate) return false;
-    return date.toISOString().split('T')[0] === selectedDate.toISOString().split('T')[0];
+    return toDateKey(date) === toDateKey(selectedDate);
   };
 
   const isDateInPast = (date) => {
@@ -206,9 +258,11 @@ export default function BlockoutCalendarScreen({ navigation }) {
     );
   };
 
-  const sortedDates = [...blockoutDates].sort((a, b) =>
-    new Date(a.date) - new Date(b.date)
-  );
+  const sortedDates = [...blockoutDates].sort((a, b) => {
+    const aTime = parseDateKey(a.date)?.getTime() ?? 0;
+    const bTime = parseDateKey(b.date)?.getTime() ?? 0;
+    return aTime - bTime;
+  });
 
   return (
     <ScrollView
@@ -340,7 +394,7 @@ export default function BlockoutCalendarScreen({ navigation }) {
             <View key={blockout.id} style={styles.dateCard}>
               <View style={styles.dateCardContent}>
                 <Text style={styles.dateText}>
-                  📅 {new Date(blockout.date).toLocaleDateString('en-US', {
+                  📅 {formatDateKey(blockout.date, {
                     weekday: 'short',
                     year: 'numeric',
                     month: 'short',
