@@ -700,7 +700,8 @@ export default function SetlistScreen({ navigation, route }) {
         }),
       });
       if (!res.ok) throw new Error(`AI Preset ${res.status}`);
-      setKeysPreset(prev => ({ ...prev, [id]: await res.json() }));
+      const preset = await res.json();
+      setKeysPreset(prev => ({ ...prev, [id]: preset }));
     } catch (e) {
       Alert.alert('Preset Error', e.message);
     } finally {
