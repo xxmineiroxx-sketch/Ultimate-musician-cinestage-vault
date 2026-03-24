@@ -147,6 +147,13 @@ end
 configure_swift(app_target,
   bridging_header: "#{APP_TARGET}/UltimatePlayback-Bridging-Header.h")
 
+# Keep the main app target versioning aligned with app.json so
+# embedded watch/widget builds can safely match the parent app.
+app_target.build_configurations.each do |cfg|
+  cfg.build_settings['MARKETING_VERSION']       = APP_VERSION
+  cfg.build_settings['CURRENT_PROJECT_VERSION'] = APP_BUILD
+end
+
 # Add WatchConnectivity to iOS app target
 add_framework(project, app_target, 'WatchConnectivity')
 

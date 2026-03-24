@@ -9,6 +9,7 @@
  */
 
 const { withDangerousMod } = require('@expo/config-plugins');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -133,6 +134,26 @@ end
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
 
+    expo_constants_script = File.join(__dir__, '..', 'node_modules', 'expo-constants', 'scripts', 'get-app-config-ios.sh')
+    if File.exist?(expo_constants_script)
+      script_source = File.read(expo_constants_script)
+      patched_source = script_source.gsub(
+        'PROJECT_DIR_BASENAME=$(basename $PROJECT_DIR)',
+        'PROJECT_DIR_BASENAME=$(basename "$PROJECT_DIR")'
+      )
+
+      if patched_source != script_source
+        File.write(expo_constants_script, patched_source)
+      end
+    end
+
+    xcode_env_local = File.join(__dir__, '.xcode.env.local')
+    if File.exist?(xcode_env_local)
+      File.write(xcode_env_local, <<~SH)
+        export NODE_BINARY=$(command -v node)
+      SH
+    end
+
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |build_config|
         build_config.build_settings['RCT_METRO_PORT'] = metro_port
@@ -187,10 +208,24 @@ function patchXcodeProject(iosRoot) {
   writeIfChanged(xcodeProjectPath, source, 'project.pbxproj');
 }
 
+function syncNativeTargets(projectRoot) {
+  const setupScriptPath = path.join(projectRoot, 'scripts', 'setup_xcode_targets.rb');
+  if (!fs.existsSync(setupScriptPath)) {
+    return;
+  }
+
+  execFileSync('ruby', [setupScriptPath], {
+    cwd: projectRoot,
+    stdio: 'inherit',
+  });
+  console.log('[withNativeModules] Synced native watch/widget targets');
+}
+
 const plugin = (config) =>
   withDangerousMod(config, [
     'ios',
     async (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
       const src = path.join(cfg.modRequest.projectRoot, 'native', 'RN');
       const iosRoot = cfg.modRequest.platformProjectRoot;
       const appPath = path.join(iosRoot, 'UltimatePlayback');
@@ -208,6 +243,7 @@ const plugin = (config) =>
       patchAppDelegate(iosRoot);
       patchPodfile(iosRoot);
       patchXcodeProject(iosRoot);
+      syncNativeTargets(projectRoot);
 
       return cfg;
     },

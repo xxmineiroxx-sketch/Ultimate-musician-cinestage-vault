@@ -4,6 +4,7 @@
   "description": "Ultimate Playback - Musician's workspace for creating song presets with device setups",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/fix-ios-build-paths.js",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
