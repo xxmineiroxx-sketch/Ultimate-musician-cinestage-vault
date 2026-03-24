@@ -31,6 +31,7 @@ export default function RegistrationScreen({ navigation, route }) {
   const prefillEmail = inviteParams.email || '';
   const prefillPhone = inviteParams.phone || '';
   const prefillOrgName = inviteParams.orgName || '';
+  const inviteContactHint = [prefillEmail, prefillPhone].filter(Boolean).join(' or ');
   const inviteToken = inviteParams.token || '';
   const isInviteFlow = Boolean(
     inviteToken
@@ -132,7 +133,11 @@ export default function RegistrationScreen({ navigation, route }) {
         <View style={styles.brandBlock}>
           <Text style={styles.badge}>CineStage™</Text>
           <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Join your worship team on Ultimate Playback</Text>
+          <Text style={styles.subtitle}>
+            {prefillOrgName
+              ? `Join ${prefillOrgName} on Ultimate Playback`
+              : 'Join your worship team on Ultimate Playback'}
+          </Text>
         </View>
 
         {/* Card */}
@@ -144,8 +149,14 @@ export default function RegistrationScreen({ navigation, route }) {
                 {prefillOrgName ? `You were invited to join ${prefillOrgName}` : 'Your invitation is ready'}
               </Text>
               <Text style={styles.inviteBody}>
-                Create your account with the invited contact info below. A 6-digit confirmation code will be emailed to you after registration.
+                Create your account with the invited contact info below. After the 6-digit email confirmation,
+                your member profile will appear in Ultimate Playback and Ultimate Musician automatically.
               </Text>
+              {inviteContactHint ? (
+                <Text style={styles.inviteSecondaryBody}>
+                  Register with {inviteContactHint} so this invitation links to the right team member record.
+                </Text>
+              ) : null}
               <View style={styles.inviteMetaRow}>
                 {prefillEmail ? (
                   <View style={styles.inviteMetaChip}>
@@ -175,6 +186,11 @@ export default function RegistrationScreen({ navigation, route }) {
 
           <Text style={styles.label}>Email *</Text>
           <TextInput style={styles.input} value={form.email} onChangeText={v => update('email', v)} placeholder="you@example.com" placeholderTextColor="#4B5563" autoCapitalize="none" keyboardType="email-address" autoCorrect={false} />
+          {isInviteFlow ? (
+            <Text style={styles.helperText}>
+              Use the invited contact info so your account links back to this team in both apps.
+            </Text>
+          ) : null}
 
           <Text style={styles.label}>Password *</Text>
           <TextInput style={styles.input} value={form.password} onChangeText={v => update('password', v)} placeholder="Min. 6 characters" placeholderTextColor="#4B5563" secureTextEntry />
@@ -242,6 +258,7 @@ const styles = StyleSheet.create({
   inviteEyebrow: { color: '#A5B4FC', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 8 },
   inviteTitle: { color: '#F9FAFB', fontSize: 18, fontWeight: '800', lineHeight: 24 },
   inviteBody: { color: '#CBD5E1', fontSize: 13, lineHeight: 20, marginTop: 8 },
+  inviteSecondaryBody: { color: '#A5B4FC', fontSize: 12, lineHeight: 18, marginTop: 10 },
   inviteMetaRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 },
   inviteMetaChip: { backgroundColor: '#1E1B4B', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginRight: 8, marginBottom: 8 },
   inviteMetaChipText: { color: '#C7D2FE', fontSize: 12, fontWeight: '700' },
