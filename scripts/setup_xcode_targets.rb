@@ -182,7 +182,7 @@ end
 
 WATCH_ICON_VARIANTS = [
   {
-    filename: 'AppIcon24x24@2x.png',
+    filename: 'AppIconNotificationCenter24x24@2x.png',
     pixels: 48,
     size: '24x24',
     scale: '2x',
@@ -190,7 +190,7 @@ WATCH_ICON_VARIANTS = [
     subtype: '38mm',
   },
   {
-    filename: 'AppIcon27.5x27.5@2x.png',
+    filename: 'AppIconNotificationCenter27.5x27.5@2x.png',
     pixels: 55,
     size: '27.5x27.5',
     scale: '2x',
@@ -198,28 +198,45 @@ WATCH_ICON_VARIANTS = [
     subtype: '42mm',
   },
   {
-    filename: 'AppIcon29x29@2x.png',
+    filename: 'AppIconCompanionSettings29x29@2x.png',
     pixels: 58,
     size: '29x29',
     scale: '2x',
     role: 'companionSettings',
   },
   {
-    filename: 'AppIcon29x29@3x.png',
+    filename: 'AppIconCompanionSettings29x29@3x.png',
     pixels: 87,
     size: '29x29',
     scale: '3x',
     role: 'companionSettings',
   },
   {
-    filename: 'AppIcon40x40@2x.png',
+    filename: 'AppIconHomeScreen40x40@2x.png',
     pixels: 80,
     size: '40x40',
     scale: '2x',
     role: 'appLauncher',
+    subtype: '38mm',
   },
   {
-    filename: 'AppIcon40x40@2x.png',
+    filename: 'AppIconHomeScreen44x44@2x.png',
+    pixels: 88,
+    size: '44x44',
+    scale: '2x',
+    role: 'appLauncher',
+    subtype: '42mm',
+  },
+  {
+    filename: 'AppIconHomeScreen50x50@2x.png',
+    pixels: 100,
+    size: '50x50',
+    scale: '2x',
+    role: 'appLauncher',
+    subtype: '44mm',
+  },
+  {
+    filename: 'AppIconLongLook40x40@2x.png',
     pixels: 80,
     size: '40x40',
     scale: '2x',
@@ -227,7 +244,7 @@ WATCH_ICON_VARIANTS = [
     subtype: '38mm',
   },
   {
-    filename: 'AppIcon44x44@2x.png',
+    filename: 'AppIconLongLook44x44@2x.png',
     pixels: 88,
     size: '44x44',
     scale: '2x',
@@ -235,7 +252,15 @@ WATCH_ICON_VARIANTS = [
     subtype: '42mm',
   },
   {
-    filename: 'AppIcon86x86@2x.png',
+    filename: 'AppIconLongLook50x50@2x.png',
+    pixels: 100,
+    size: '50x50',
+    scale: '2x',
+    role: 'longLook',
+    subtype: '44mm',
+  },
+  {
+    filename: 'AppIconShortLook86x86@2x.png',
     pixels: 172,
     size: '86x86',
     scale: '2x',
@@ -243,12 +268,20 @@ WATCH_ICON_VARIANTS = [
     subtype: '38mm',
   },
   {
-    filename: 'AppIcon98x98@2x.png',
+    filename: 'AppIconShortLook98x98@2x.png',
     pixels: 196,
     size: '98x98',
     scale: '2x',
     role: 'quickLook',
     subtype: '42mm',
+  },
+  {
+    filename: 'AppIconShortLook108x108@2x.png',
+    pixels: 216,
+    size: '108x108',
+    scale: '2x',
+    role: 'quickLook',
+    subtype: '44mm',
   },
   {
     filename: 'AppIcon1024x1024.png',
@@ -258,36 +291,6 @@ WATCH_ICON_VARIANTS = [
     idiom: 'watch-marketing',
   },
 ].freeze
-
-def write_watch_app_info_plist(path)
-  icon_files = WATCH_ICON_VARIANTS
-    .map { |variant| File.basename(variant[:filename], '.png') }
-    .uniq
-    .reject { |name| name == 'AppIcon1024x1024' }
-
-  Xcodeproj::Plist.write_to_path({
-    'CFBundleDevelopmentRegion' => '$(DEVELOPMENT_LANGUAGE)',
-    'CFBundleDisplayName' => 'Ultimate Playback',
-    'CFBundleExecutable' => '$(EXECUTABLE_NAME)',
-    'CFBundleIdentifier' => '$(PRODUCT_BUNDLE_IDENTIFIER)',
-    'CFBundleInfoDictionaryVersion' => '6.0',
-    'CFBundleName' => '$(PRODUCT_NAME)',
-    'CFBundlePackageType' => '$(PRODUCT_BUNDLE_PACKAGE_TYPE)',
-    'CFBundleShortVersionString' => '$(MARKETING_VERSION)',
-    'CFBundleVersion' => '$(CURRENT_PROJECT_VERSION)',
-    'CFBundleIconName' => 'AppIcon',
-    'CFBundleIconFiles' => icon_files,
-    'CFBundleIcons' => {
-      'CFBundlePrimaryIcon' => {
-        'CFBundleIconFiles' => icon_files,
-        'CFBundleIconName' => 'AppIcon',
-      },
-    },
-    'WKCompanionAppBundleIdentifier' => BUNDLE_ID,
-    'WKWatchKitApp' => true,
-  }, path)
-  puts "  ~ watch app Info.plist"
-end
 
 def ensure_watch_asset_catalog(watch_dir)
   abort "Watch icon source not found at #{ICON_SOURCE}" unless File.exist?(ICON_SOURCE)
@@ -411,8 +414,7 @@ WATCH_DEPLOY      = '7.0'
 
 watch_dir = File.join(IOS_DIR, WATCH_TARGET_NAME)
 FileUtils.mkdir_p(watch_dir)
-watch_info_path = File.join(watch_dir, 'Info.plist')
-write_watch_app_info_plist(watch_info_path)
+FileUtils.rm_f(File.join(watch_dir, 'Info.plist'))
 watch_assets_dir = ensure_watch_asset_catalog(watch_dir)
 
 watch_target = find_target(project, WATCH_TARGET_NAME)
@@ -443,8 +445,11 @@ watch_target.build_configurations.each do |cfg|
   cfg.build_settings['TARGETED_DEVICE_FAMILY']    = '4'
   cfg.build_settings['SDKROOT']                   = 'watchos'
   cfg.build_settings['SUPPORTED_PLATFORMS']       = 'watchos watchsimulator'
-  cfg.build_settings['GENERATE_INFOPLIST_FILE']   = 'NO'
-  cfg.build_settings['INFOPLIST_FILE']            = "#{WATCH_TARGET_NAME}/Info.plist"
+  cfg.build_settings['GENERATE_INFOPLIST_FILE']   = 'YES'
+  cfg.build_settings.delete('INFOPLIST_FILE')
+  cfg.build_settings['INFOPLIST_KEY_CFBundleDisplayName'] = 'Ultimate Playback'
+  cfg.build_settings['INFOPLIST_KEY_WKCompanionAppBundleIdentifier'] = BUNDLE_ID
+  cfg.build_settings['INFOPLIST_KEY_WKWatchKitApp'] = 'YES'
   cfg.build_settings['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   cfg.build_settings['ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME'] = 'AccentColor'
   cfg.build_settings['MARKETING_VERSION']         = APP_VERSION
