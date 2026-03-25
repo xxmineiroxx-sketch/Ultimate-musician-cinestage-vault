@@ -4,7 +4,7 @@
  * Admin role: full access including member deletion.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
@@ -289,6 +289,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [editRole, setEditRole]             = useState('');
   const [savingEdit, setSavingEdit]         = useState(false);
   const [editMemberKeyboardHeight, setEditMemberKeyboardHeight] = useState(0);
+  const editNameInputRef = useRef(null);
+  const editEmailInputRef = useRef(null);
 
   // Add song to library
   const [showAddSong, setShowAddSong]         = useState(false);
@@ -339,6 +341,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
       changeSub?.remove();
     };
   }, [showEditMember, insets.bottom]);
+
+  React.useEffect(() => {
+    if (!showEditMember) return undefined;
+    const focusTimer = setTimeout(() => {
+      editNameInputRef.current?.focus?.();
+    }, 250);
+    return () => clearTimeout(focusTimer);
+  }, [showEditMember]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -2024,10 +2034,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Edit Member</Text>
               <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
               <Text style={s.formLabel}>Name *</Text>
-              <TextInput style={s.formInput} value={editName} onChangeText={setEditName}
+              <TextInput ref={editNameInputRef} style={s.formInput} value={editName} onChangeText={setEditName}
                 placeholder="Full name" placeholderTextColor="#6B7280" />
               <Text style={s.formLabel}>Email</Text>
-              <TextInput style={s.formInput} value={editEmail} onChangeText={setEditEmail}
+              <TextInput ref={editEmailInputRef} style={s.formInput} value={editEmail} onChangeText={setEditEmail}
                 placeholder="email@example.com" placeholderTextColor="#6B7280"
                 keyboardType="email-address" autoCapitalize="none" />
               <Text style={s.formLabel}>Primary Role</Text>
