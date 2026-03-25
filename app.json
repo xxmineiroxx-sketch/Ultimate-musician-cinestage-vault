@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ultimatemusician.playback",
-      "buildNumber": "17",
+      "buildNumber": "25",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.ultimatemusician.playback"
@@ -72,7 +72,40 @@
     },
     "extra": {
       "eas": {
-        "projectId": "67cddab2-c9c9-45c8-81c4-3ec04e6585e7"
+        "projectId": "67cddab2-c9c9-45c8-81c4-3ec04e6585e7",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "UltimatePlaybackWatch",
+                  "bundleIdentifier": "com.ultimatemusician.playback.watchkitapp",
+                  "parentBundleIdentifier": "com.ultimatemusician.playback",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.ultimatemusician.playback"
+                    ]
+                  }
+                },
+                {
+                  "targetName": "UltimatePlaybackWatchExtension",
+                  "bundleIdentifier": "com.ultimatemusician.playback.watchkitapp.watchkitextension",
+                  "parentBundleIdentifier": "com.ultimatemusician.playback.watchkitapp"
+                },
+                {
+                  "targetName": "UltimatePlaybackWidget",
+                  "bundleIdentifier": "com.ultimatemusician.playback.widget",
+                  "parentBundleIdentifier": "com.ultimatemusician.playback",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.ultimatemusician.playback"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
     },
     "owner": "ultimate-dev",

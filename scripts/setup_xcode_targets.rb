@@ -2,8 +2,9 @@
 # setup_xcode_targets.rb
 # Uses the xcodeproj gem to:
 #   1. Add WatchBridgeModule + WidgetDataModule source files to the iOS app target
-#   2. Create the WatchKit App target + copy Watch Swift files
-#   3. Create the Widget Extension target + copy Widget Swift files
+#   2. Create the WatchKit App stub target
+#   3. Create the WatchKit Extension target + copy Watch Swift files
+#   4. Create the Widget Extension target + copy Widget Swift files
 #   4. Wire App Groups entitlements for Watch and Widget targets
 #   5. Add WatchConnectivity.framework
 #
@@ -128,11 +129,52 @@ def ensure_product_reference(target, name, path)
   target.product_reference.path = path
 end
 
+def remove_phase_if_present(target, phase)
+  return unless phase
+  target.build_phases.delete(phase)
+  phase.remove_from_project
+end
+
+def remove_illegal_watch_phases(target)
+  target.build_phases.dup.each do |phase|
+    next unless %w[PBXSourcesBuildPhase PBXFrameworksBuildPhase].include?(phase.isa)
+
+    phase.files.dup.each(&:remove_from_project)
+    target.build_phases.delete(phase)
+    phase.remove_from_project
+  end
+end
+
+def write_watch_extension_info_plist(path, watch_bundle_id)
+  Xcodeproj::Plist.write_to_path({
+    'CFBundleDevelopmentRegion' => '$(DEVELOPMENT_LANGUAGE)',
+    'CFBundleDisplayName' => 'Ultimate Playback',
+    'CFBundleExecutable' => '$(EXECUTABLE_NAME)',
+    'CFBundleIdentifier' => '$(PRODUCT_BUNDLE_IDENTIFIER)',
+    'CFBundleInfoDictionaryVersion' => '6.0',
+    'CFBundleName' => '$(PRODUCT_NAME)',
+    'CFBundlePackageType' => '$(PRODUCT_BUNDLE_PACKAGE_TYPE)',
+    'CFBundleShortVersionString' => '$(MARKETING_VERSION)',
+    'CFBundleVersion' => '$(CURRENT_PROJECT_VERSION)',
+    'NSExtension' => {
+      'NSExtensionAttributes' => {
+        'WKAppBundleIdentifier' => watch_bundle_id,
+      },
+      'NSExtensionPointIdentifier' => 'com.apple.watchkit',
+    },
+  }, path)
+  puts "  ~ watch extension Info.plist"
+end
+
 # ════════════════════════════════════════════════════════════════════════════════
 puts "\n[1/4] Adding native RN modules to iOS app target..."
 # ════════════════════════════════════════════════════════════════════════════════
 app_target   = find_target(project, APP_TARGET)
 abort "Target '#{APP_TARGET}' not found!" unless app_target
+app_team_id  = app_target.build_configurations
+  .map { |cfg| cfg.build_settings['DEVELOPMENT_TEAM'] }
+  .compact
+  .find { |value| !value.to_s.empty? } || 'QK35B74FL3'
 
 app_group_ref = project.main_group.find_subpath(APP_TARGET) ||
                 project.main_group.new_group(APP_TARGET, APP_TARGET)
@@ -150,6 +192,8 @@ configure_swift(app_target,
 # Keep the main app target versioning aligned with app.json so
 # embedded watch/widget builds can safely match the parent app.
 app_target.build_configurations.each do |cfg|
+  cfg.build_settings['DEVELOPMENT_TEAM']         = app_team_id
+  cfg.build_settings['CODE_SIGN_STYLE']          = 'Automatic'
   cfg.build_settings['MARKETING_VERSION']       = APP_VERSION
   cfg.build_settings['CURRENT_PROJECT_VERSION'] = APP_BUILD
 end
@@ -162,22 +206,17 @@ puts "\n[2/4] Creating Watch App target..."
 # ════════════════════════════════════════════════════════════════════════════════
 WATCH_TARGET_NAME = 'UltimatePlaybackWatch'
 WATCH_BUNDLE_ID   = "#{BUNDLE_ID}.watchkitapp"
+WATCH_EXTENSION_TARGET_NAME = 'UltimatePlaybackWatchExtension'
+WATCH_EXTENSION_BUNDLE_ID   = "#{WATCH_BUNDLE_ID}.watchkitextension"
 WATCH_DEPLOY      = '7.0'
 
 watch_dir = File.join(IOS_DIR, WATCH_TARGET_NAME)
 FileUtils.mkdir_p(watch_dir)
 
-# Copy Watch Swift sources
-%w[WatchApp.swift ContentView.swift WatchSessionManager.swift].each do |f|
-  src  = File.join(NATIVE_DIR, 'Watch', f)
-  dest = File.join(watch_dir, f)
-  FileUtils.cp(src, dest) unless File.exist?(dest)
-end
-
 watch_target = find_target(project, WATCH_TARGET_NAME)
 unless watch_target
   watch_target = project.new_target(
-    :application,
+    :watch2_app,
     WATCH_TARGET_NAME,
     :watchos,
     WATCH_DEPLOY
@@ -186,11 +225,15 @@ unless watch_target
 else
   puts "  Target already exists: #{WATCH_TARGET_NAME}"
 end
+watch_target.product_type = Xcodeproj::Constants::PRODUCT_TYPE_UTI[:watch2_app]
+remove_illegal_watch_phases(watch_target)
 
 ensure_product_reference(watch_target, "#{WATCH_TARGET_NAME}.app", "#{WATCH_TARGET_NAME}.app")
 
 # Build settings
 watch_target.build_configurations.each do |cfg|
+  cfg.build_settings['DEVELOPMENT_TEAM']         = app_team_id
+  cfg.build_settings['CODE_SIGN_STYLE']          = 'Automatic'
   cfg.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = WATCH_BUNDLE_ID
   cfg.build_settings['PRODUCT_NAME']              = WATCH_TARGET_NAME
   cfg.build_settings['SWIFT_VERSION']             = SWIFT_VERSION
@@ -198,7 +241,6 @@ watch_target.build_configurations.each do |cfg|
   cfg.build_settings['TARGETED_DEVICE_FAMILY']    = '4'
   cfg.build_settings['SDKROOT']                   = 'watchos'
   cfg.build_settings['SUPPORTED_PLATFORMS']       = 'watchos watchsimulator'
-  cfg.build_settings['LD_RUNPATH_SEARCH_PATHS']   = ['$(inherited)', '@executable_path/Frameworks']
   cfg.build_settings['GENERATE_INFOPLIST_FILE']   = 'YES'
   cfg.build_settings['INFOPLIST_KEY_CFBundleDisplayName'] = 'Ultimate Playback'
   cfg.build_settings['INFOPLIST_KEY_WKCompanionAppBundleIdentifier'] = BUNDLE_ID
@@ -207,15 +249,9 @@ watch_target.build_configurations.each do |cfg|
   cfg.build_settings['SKIP_INSTALL']              = 'YES'
 end
 
-# Source group
+# Source/resources group
 watch_group = project.main_group.find_subpath(WATCH_TARGET_NAME) ||
               project.main_group.new_group(WATCH_TARGET_NAME, WATCH_TARGET_NAME)
-%w[WatchApp.swift ContentView.swift WatchSessionManager.swift].each do |f|
-  add_source(project, watch_group, watch_target, File.join(watch_dir, f))
-end
-
-# WatchConnectivity framework
-add_framework(project, watch_target, 'WatchConnectivity')
 
 # App Groups entitlements
 ent_path = File.join(watch_dir, "#{WATCH_TARGET_NAME}.entitlements")
@@ -226,7 +262,97 @@ watch_target.build_configurations.each do |cfg|
 end
 
 # ════════════════════════════════════════════════════════════════════════════════
-puts "\n[3/4] Creating Widget Extension target..."
+puts "\n[3/4] Creating Watch Extension target..."
+# ════════════════════════════════════════════════════════════════════════════════
+watch_extension_dir = File.join(IOS_DIR, WATCH_EXTENSION_TARGET_NAME)
+FileUtils.mkdir_p(watch_extension_dir)
+
+%w[WatchApp.swift ContentView.swift WatchSessionManager.swift].each do |f|
+  src  = File.join(NATIVE_DIR, 'Watch', f)
+  dest = File.join(watch_extension_dir, f)
+  FileUtils.cp(src, dest) unless File.exist?(dest)
+end
+
+watch_extension_info_path = File.join(watch_extension_dir, 'Info.plist')
+write_watch_extension_info_plist(watch_extension_info_path, WATCH_BUNDLE_ID)
+
+watch_extension_target = find_target(project, WATCH_EXTENSION_TARGET_NAME)
+unless watch_extension_target
+  watch_extension_target = project.new_target(
+    :watch2_extension,
+    WATCH_EXTENSION_TARGET_NAME,
+    :watchos,
+    WATCH_DEPLOY
+  )
+  puts "  Created target: #{WATCH_EXTENSION_TARGET_NAME}"
+else
+  puts "  Target already exists: #{WATCH_EXTENSION_TARGET_NAME}"
+end
+
+watch_extension_target.product_type = Xcodeproj::Constants::PRODUCT_TYPE_UTI[:watch2_extension]
+ensure_product_reference(
+  watch_extension_target,
+  "#{WATCH_EXTENSION_TARGET_NAME}.appex",
+  "#{WATCH_EXTENSION_TARGET_NAME}.appex"
+)
+
+watch_extension_target.build_configurations.each do |cfg|
+  cfg.build_settings['DEVELOPMENT_TEAM']            = app_team_id
+  cfg.build_settings['CODE_SIGN_STYLE']             = 'Automatic'
+  cfg.build_settings['PRODUCT_BUNDLE_IDENTIFIER']   = WATCH_EXTENSION_BUNDLE_ID
+  cfg.build_settings['PRODUCT_NAME']                = WATCH_EXTENSION_TARGET_NAME
+  cfg.build_settings['SWIFT_VERSION']               = SWIFT_VERSION
+  cfg.build_settings['WATCHOS_DEPLOYMENT_TARGET']   = WATCH_DEPLOY
+  cfg.build_settings['TARGETED_DEVICE_FAMILY']      = '4'
+  cfg.build_settings['SDKROOT']                     = 'watchos'
+  cfg.build_settings['SUPPORTED_PLATFORMS']         = 'watchos watchsimulator'
+  cfg.build_settings['INFOPLIST_FILE']              =
+    "#{WATCH_EXTENSION_TARGET_NAME}/Info.plist"
+  cfg.build_settings['LD_RUNPATH_SEARCH_PATHS']     = [
+    '$(inherited)',
+    '@executable_path/Frameworks',
+    '@executable_path/../../Frameworks',
+    '@executable_path/../../../../Frameworks',
+  ]
+  cfg.build_settings['MARKETING_VERSION']           = APP_VERSION
+  cfg.build_settings['CURRENT_PROJECT_VERSION']     = APP_BUILD
+  cfg.build_settings['SKIP_INSTALL']                = 'YES'
+  cfg.build_settings.delete('CODE_SIGN_ENTITLEMENTS')
+end
+
+watch_extension_group = project.main_group.find_subpath(WATCH_EXTENSION_TARGET_NAME) ||
+                        project.main_group.new_group(
+                          WATCH_EXTENSION_TARGET_NAME,
+                          WATCH_EXTENSION_TARGET_NAME
+                        )
+%w[WatchApp.swift ContentView.swift WatchSessionManager.swift].each do |f|
+  add_source(
+    project,
+    watch_extension_group,
+    watch_extension_target,
+    File.join(watch_extension_dir, f)
+  )
+end
+
+add_framework(project, watch_extension_target, 'WatchConnectivity')
+add_framework(project, watch_extension_target, 'SwiftUI')
+
+ensure_target_dependency(watch_target, watch_extension_target)
+watch_app_extension_phase = ensure_copy_phase(
+  watch_target,
+  'Embed App Extensions',
+  destination: :plug_ins,
+  dst_path: ''
+)
+ensure_embedded_product(
+  watch_target,
+  watch_app_extension_phase,
+  watch_extension_target.product_reference,
+  attributes: ['RemoveHeadersOnCopy']
+)
+
+# ════════════════════════════════════════════════════════════════════════════════
+puts "\n[4/5] Creating Widget Extension target..."
 # ════════════════════════════════════════════════════════════════════════════════
 WIDGET_TARGET_NAME = 'UltimatePlaybackWidget'
 WIDGET_BUNDLE_ID   = "#{BUNDLE_ID}.widget"
@@ -262,6 +388,8 @@ end
 ensure_product_reference(widget_target, "#{WIDGET_TARGET_NAME}.appex", "#{WIDGET_TARGET_NAME}.appex")
 
 widget_target.build_configurations.each do |cfg|
+  cfg.build_settings['DEVELOPMENT_TEAM']         = app_team_id
+  cfg.build_settings['CODE_SIGN_STYLE']          = 'Automatic'
   cfg.build_settings['PRODUCT_BUNDLE_IDENTIFIER']   = WIDGET_BUNDLE_ID
   cfg.build_settings['PRODUCT_NAME']                = WIDGET_TARGET_NAME
   cfg.build_settings['SWIFT_VERSION']               = SWIFT_VERSION
@@ -319,7 +447,7 @@ watch_content_phase = ensure_copy_phase(
 ensure_embedded_product(app_target, watch_content_phase, watch_target.product_reference)
 
 # ════════════════════════════════════════════════════════════════════════════════
-puts "\n[4/4] Saving project..."
+puts "\n[5/5] Saving project..."
 # ════════════════════════════════════════════════════════════════════════════════
 project.save
 puts "  Saved: #{XCODEPROJ}"

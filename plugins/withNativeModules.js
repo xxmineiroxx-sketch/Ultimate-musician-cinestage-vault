@@ -154,6 +154,15 @@ end
       SH
     end
 
+    installer.target_installation_results.pod_target_installation_results.each_value do |pod_installation_result|
+      pod_installation_result.resource_bundle_targets.each do |resource_bundle_target|
+        resource_bundle_target.build_configurations.each do |build_config|
+          build_config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+          build_config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+        end
+      end
+    end
+
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |build_config|
         build_config.build_settings['RCT_METRO_PORT'] = metro_port
@@ -172,12 +181,18 @@ end
 
     installer.aggregate_targets.each do |aggregate_target|
       user_project = aggregate_target.user_project
+      app_target = user_project.native_targets.find { |target| target.name == 'UltimatePlayback' }
+      development_team = app_target&.build_configurations
+        &.map { |build_config| build_config.build_settings['DEVELOPMENT_TEAM'] }
+        &.find { |value| value && !value.empty? }
 
       user_project.native_targets.each do |target|
-        next unless target.name == 'UltimatePlayback'
+        next unless ['UltimatePlayback', 'UltimatePlaybackWatch', 'UltimatePlaybackWidget'].include?(target.name)
 
         target.build_configurations.each do |build_config|
           build_config.build_settings['RCT_METRO_PORT'] = metro_port
+          build_config.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
+          build_config.build_settings['DEVELOPMENT_TEAM'] = development_team if development_team
         end
       end
 
