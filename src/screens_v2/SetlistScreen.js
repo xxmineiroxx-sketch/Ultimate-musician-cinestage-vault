@@ -128,12 +128,108 @@ const INSTRUMENT_ICON = {
   'Drums': '🥁',
 };
 
+const PRESET_TYPE_TO_PATCH_KEY = {
+  'Worship Keys': 'worship_keys',
+  'Ambient Pad': 'ambient_pad',
+  Strings: 'strings',
+  'Organ B3': 'organ_b3',
+  'Synth Lead': 'synth_lead',
+};
+
 function normalizeLookupText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 function normalizeLookupCompact(value) {
   return normalizeLookupText(value).replace(/[^a-z0-9]/g, '');
+}
+
+function toFiniteInteger(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.trunc(numeric);
+}
+
+function normalizePresetKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'C';
+  const match = raw.match(/[A-G](?:#|b)?m?/i);
+  if (!match) return 'C';
+  const token = match[0];
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+function normalizePresetTempo(value) {
+  const match = String(value ?? '').match(/\d+/);
+  return match ? Number.parseInt(match[0], 10) : 72;
+}
+
+function buildPresetPatchEntries(song) {
+  const sources = [
+    ...(Array.isArray(song?.role_content?.keyboard?.patches) ? song.role_content.keyboard.patches : []),
+    ...(Array.isArray(song?.keyboard?.patches) ? song.keyboard.patches : []),
+    ...(Array.isArray(song?.patches) ? song.patches : []),
+  ];
+  const seen = new Set();
+
+  return sources.reduce((acc, patch) => {
+    const program = toFiniteInteger(
+      patch?.program ??
+      patch?.program_number ??
+      patch?.programNumber ??
+      patch?.performance ??
+      patch?.performance_number ??
+      patch?.performanceNumber ??
+      patch?.preset ??
+      patch?.preset_number ??
+      patch?.presetNumber
+    );
+    if (program === null) return acc;
+
+    const bank = toFiniteInteger(patch?.bank ?? patch?.bank_msb ?? patch?.bankMsb);
+    const channel = toFiniteInteger(patch?.channel ?? patch?.midi_channel ?? patch?.midiChannel);
+    const name = String(
+      patch?.preset_name ||
+      patch?.presetName ||
+      patch?.name ||
+      ''
+    ).trim();
+    const dedupeKey = [program, bank ?? '', channel ?? '', name].join(':');
+    if (seen.has(dedupeKey)) return acc;
+    seen.add(dedupeKey);
+
+    const entry = { program };
+    if (bank !== null) entry.bank = bank;
+    if (channel !== null) entry.channel = channel;
+    if (name) entry.name = name;
+    acc.push(entry);
+    return acc;
+  }, []);
+}
+
+function buildPresetPayload(song, presetType) {
+  const patchKey = PRESET_TYPE_TO_PATCH_KEY[presetType] || normalizeLookupCompact(presetType) || 'main';
+  return {
+    song_title: String(song?.title || 'Untitled Song').trim() || 'Untitled Song',
+    key: normalizePresetKey(song?.transposedKey || song?.key),
+    tempo: normalizePresetTempo(song?.tempo ?? song?.bpm),
+    patches: {
+      [patchKey]: buildPresetPatchEntries(song),
+    },
+  };
+}
+
+function getPresetErrorMessage(status, payload) {
+  if (Array.isArray(payload?.detail) && payload.detail.length) {
+    const detail = payload.detail.map((item) => {
+      const location = Array.isArray(item?.loc) ? item.loc.slice(1).join('.') : '';
+      return location ? `${location}: ${item.msg}` : item?.msg;
+    }).filter(Boolean).join('\n');
+    if (detail) return detail;
+  }
+
+  return payload?.message || payload?.error || `AI Preset ${status}`;
 }
 
 function normalizeLookupEmail(value) {
@@ -689,21 +785,17 @@ export default function SetlistScreen({ navigation, route }) {
     const id = song.id;
     setKeysPresetLoading(prev => ({ ...prev, [id]: true }));
     try {
+      const payload = buildPresetPayload(song, keysPresetType);
       const res = await fetch(`${CINESTAGE_URL}/ai/midi-presets/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instrument_type: keysPresetType,
-          song_title: song.title || '',
-          genre: 'worship',
-          style: keysPresetType.toLowerCase().replace(/\s+/g, '_'),
-        }),
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`AI Preset ${res.status}`);
-      const preset = await res.json();
+      const preset = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(getPresetErrorMessage(res.status, preset));
       setKeysPreset(prev => ({ ...prev, [id]: preset }));
     } catch (e) {
-      Alert.alert('Preset Error', e.message);
+      Alert.alert('Preset Error', e?.message || 'Could not generate preset.');
     } finally {
       setKeysPresetLoading(prev => ({ ...prev, [id]: false }));
     }
@@ -1037,9 +1129,9 @@ export default function SetlistScreen({ navigation, route }) {
                         Program: {result.program_number} · Bank: {result.bank || 0}
                       </Text>
                     )}
-                    {(result.description || result.content) && (
+                    {(result.message || result.description || result.content) && (
                       <Text style={{ color:'#94a3b8', fontSize:11, marginTop:4 }}>
-                        {result.description || result.content}
+                        {result.message || result.description || result.content}
                       </Text>
                     )}
                   </View>
