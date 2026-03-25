@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, getAssignments } from '../services/storage';
@@ -21,6 +22,14 @@ import { ROLE_LABELS } from '../models_v2/models';
 // WaveformBar removed — audio handled in PersonalPractice screen
 
 import { SYNC_URL, CINESTAGE_URL, syncHeaders } from '../../config/syncConfig';
+import {
+  classifySongMediaStatus,
+  getSongLookupId,
+  getSongMediaReferenceUrl,
+  getSongStatusKey,
+  isYouTubeUrl,
+  mergeSetlistWithLibrary,
+} from '../utils/songMedia';
 
 function normalizeRoleKey(role) {
   const raw = String(role || '').trim();
@@ -567,7 +576,7 @@ export default function SetlistScreen({ navigation, route }) {
   const [serviceAssignments, setServiceAssignments] = useState([]);
   // guitarCapo[songId] = capo fret chosen for that song (guitar roles only)
   const [guitarCapo, setGuitarCapo] = useState({});
-  // stems status per songId: null=unchecked, 'available'=processed, 'none'=not processed
+  // stems/media status per row key: null=unchecked, 'available' | 'media' | 'processing' | 'none'
   const [stemsStatus, setStemsStatus] = useState({});
   const [stemsSubmitting, setStemsSubmitting] = useState({});
   const [keysPreset, setKeysPreset]               = useState({});
@@ -667,12 +676,14 @@ export default function SetlistScreen({ navigation, route }) {
         ]);
         if (!songsRes.ok) throw new Error('Server error');
         const songs = await songsRes.json();
-        setSetlist(songs);
         if (pullRes.ok) {
           const lib = await pullRes.json();
+          const librarySongs = lib?.songs || lib?.library || [];
+          setSetlist(mergeSetlistWithLibrary(songs, librarySongs));
           setVocalAssignments(lib.vocalAssignments?.[serviceId] || {});
           setPeopleById(buildPeopleById(lib.people || []));
         } else {
+          setSetlist(mergeSetlistWithLibrary(songs, []));
           setPeopleById({});
         }
       } finally {
@@ -721,24 +732,84 @@ export default function SetlistScreen({ navigation, route }) {
     return null;
   }, [vocalAssignments, peopleById]);
 
-  const checkStemsStatus = useCallback(async (songId) => {
-    if (!songId || stemsStatus[songId]) return;
+  const getSongVocalLineup = useCallback((songId) => {
+    const parts = vocalAssignments[songId];
+    if (!parts) return [];
+
+    const order = [
+      'lead_vocal', 'lead', 'voice1', 'soprano',
+      'voice2', 'alto', 'bgv_1', 'bgv1',
+      'voice3', 'tenor', 'bgv_2', 'bgv2',
+      'voice4', 'baritone', 'bgv_3', 'bgv3',
+      'voice5', 'bass',
+    ];
+    const sortRank = new Map(order.map((key, index) => [key, index]));
+
+    return Object.entries(parts)
+      .map(([partKey, part]) => {
+        const person = peopleById[part?.personId] || null;
+        const name = part?.name || person?.name || '';
+        if (!name) return null;
+        return {
+          partKey,
+          name,
+          key: part?.key || '',
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftRank = sortRank.get(left.partKey) ?? 999;
+        const rightRank = sortRank.get(right.partKey) ?? 999;
+        return leftRank - rightRank;
+      });
+  }, [vocalAssignments, peopleById]);
+
+  const openMediaReference = useCallback(async (song) => {
+    const mediaUrl = getSongMediaReferenceUrl(song, song?.stems, song?.harmonies);
+    if (!mediaUrl) {
+      Alert.alert('No Media Link', 'This song does not have a media reference link yet.');
+      return;
+    }
+
     try {
-      const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${songId}`, { headers: syncHeaders() });
+      const supported = await Linking.canOpenURL(mediaUrl);
+      if (!supported) throw new Error('unsupported');
+      await Linking.openURL(mediaUrl);
+    } catch {
+      Alert.alert('Open Media Failed', 'Could not open the song media link on this device.');
+    }
+  }, []);
+
+  const checkStemsStatus = useCallback(async (song) => {
+    const statusKey = getSongStatusKey(song);
+    const lookupId = getSongLookupId(song);
+    if (!statusKey || stemsStatus[statusKey]) return;
+
+    if (!lookupId) {
+      const fallbackStatus = getSongMediaReferenceUrl(song) ? 'media' : 'none';
+      setStemsStatus(prev => ({ ...prev, [statusKey]: fallbackStatus }));
+      return;
+    }
+
+    try {
+      const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${encodeURIComponent(lookupId)}`, { headers: syncHeaders() });
       if (res.ok) {
         const data = await res.json();
-        const has = data?.stems && Object.keys(data.stems).length > 0;
-        setStemsStatus(prev => ({ ...prev, [songId]: has ? 'available' : 'none' }));
+        const nextStatus = classifySongMediaStatus(song, data);
+        setStemsStatus(prev => ({ ...prev, [statusKey]: nextStatus }));
       } else {
-        setStemsStatus(prev => ({ ...prev, [songId]: 'none' }));
+        const fallbackStatus = getSongMediaReferenceUrl(song) ? 'media' : 'none';
+        setStemsStatus(prev => ({ ...prev, [statusKey]: fallbackStatus }));
       }
     } catch {
-      setStemsStatus(prev => ({ ...prev, [songId]: 'none' }));
+      const fallbackStatus = getSongMediaReferenceUrl(song) ? 'media' : 'none';
+      setStemsStatus(prev => ({ ...prev, [statusKey]: fallbackStatus }));
     }
   }, [stemsStatus]);
 
   const submitStemsJob = useCallback(async (song, urlOverride) => {
     const sourceUrl = urlOverride || song.youtubeLink || song.youtubeUrl || song.youtube || song.sourceUrl || '';
+    const targetSongId = getSongLookupId(song) || song.id;
     if (!sourceUrl) {
       // Prompt for a URL
       Alert.prompt(
@@ -761,15 +832,15 @@ export default function SetlistScreen({ navigation, route }) {
       );
       return;
     }
-    setStemsSubmitting(prev => ({ ...prev, [song.id]: true }));
+    setStemsSubmitting(prev => ({ ...prev, [getSongStatusKey(song)]: true }));
     try {
       const res = await fetch(`${SYNC_URL}/sync/stems/submit`, {
         method: 'POST',
         headers: { ...syncHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileUrl: sourceUrl, title: song.title || 'Song', songId: song.id }),
+        body: JSON.stringify({ fileUrl: sourceUrl, title: song.title || 'Song', songId: targetSongId }),
       });
       if (res.ok) {
-        setStemsStatus(prev => ({ ...prev, [song.id]: 'processing' }));
+        setStemsStatus(prev => ({ ...prev, [getSongStatusKey(song)]: 'processing' }));
         Alert.alert('✅ Submitted', 'Stem separation started. Pull to refresh in a few minutes.');
       } else {
         Alert.alert('Submit Failed', 'Could not submit stems job. Try again later.');
@@ -777,7 +848,7 @@ export default function SetlistScreen({ navigation, route }) {
     } catch {
       Alert.alert('Error', 'Network error submitting stems.');
     } finally {
-      setStemsSubmitting(prev => ({ ...prev, [song.id]: false }));
+      setStemsSubmitting(prev => ({ ...prev, [getSongStatusKey(song)]: false }));
     }
   }, []);
 
@@ -813,8 +884,12 @@ export default function SetlistScreen({ navigation, route }) {
       ? null
       : (ROLE_TO_INSTRUMENT[normalizedRole] || selectedInstrument || null);
     const isGuitar = GUITAR_INSTRUMENTS.has(primaryInstrument);
-    const myPart = !isSoundTech ? getMyVocalPart(song.id) : null;
-    const leadVocal = isSoundTech ? getSongLeadVocal(song.id) : null;
+    const lookupSongId = getSongLookupId(song) || song.id;
+    const myPart = !isSoundTech ? getMyVocalPart(lookupSongId) : null;
+    const vocalLineup = (isSoundTech || isMediaTech) ? getSongVocalLineup(lookupSongId) : [];
+    const statusKey = getSongStatusKey(song);
+    const mediaUrl = getSongMediaReferenceUrl(song, song?.stems, song?.harmonies);
+    const tempoValue = song.tempo || song.bpm || null;
 
     // Resolve base chart: instrument-specific first, then master
     const instrChart = primaryInstrument ? (song.instrumentNotes?.[primaryInstrument] || '') : '';
@@ -857,8 +932,8 @@ export default function SetlistScreen({ navigation, route }) {
                   <Text style={styles.keyChipText}>{song.key}</Text>
                 </View>
               ) : null}
-              {song.tempo ? (
-                <Text style={styles.tempoText}>{song.tempo} BPM</Text>
+              {tempoValue ? (
+                <Text style={styles.tempoText}>{tempoValue} BPM</Text>
               ) : null}
               {song.duration ? (
                 <Text style={styles.durationText}>{song.duration}</Text>
@@ -1037,37 +1112,48 @@ export default function SetlistScreen({ navigation, route }) {
           ) : null}
 
           {/* Lead vocalist — for sound techs */}
-          {isSoundTech && leadVocal ? (
+          {(isSoundTech || isMediaTech) && vocalLineup.length > 0 ? (
             <View style={styles.lineupCard}>
-              <Text style={styles.lineupTitle}>🎤 LEAD VOCAL</Text>
-              <View style={styles.lineupRow}>
-                <Text style={styles.lineupPart}>Lead</Text>
-                <Text style={styles.lineupName}>{leadVocal.name}</Text>
-                {leadVocal.key ? (
-                  <View style={styles.lineupKeyChip}>
-                    <Text style={styles.lineupKeyText}>{leadVocal.key}</Text>
-                  </View>
-                ) : null}
-              </View>
+              <Text style={styles.lineupTitle}>🎤 VOCAL LINEUP</Text>
+              {vocalLineup.map((entry) => (
+                <View key={`${song.id}_${entry.partKey}_${entry.name}`} style={styles.lineupRow}>
+                  <Text style={styles.lineupPart}>{PART_LABELS[entry.partKey] || entry.partKey}</Text>
+                  <Text style={styles.lineupName}>{entry.name}</Text>
+                  {entry.key ? (
+                    <View style={styles.lineupKeyChip}>
+                      <Text style={styles.lineupKeyText}>{entry.key}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
             </View>
           ) : null}
 
-          {isSoundTech && !leadVocal ? (
+          {(isSoundTech || isMediaTech) && vocalLineup.length === 0 ? (
             <View style={styles.noLyricsRow}>
-              <Text style={styles.noLyricsText}>🎚️ No lead vocal assigned for this song</Text>
+              <Text style={styles.noLyricsText}>🎚️ No vocal assignments for this song yet</Text>
             </View>
           ) : null}
 
           {/* ── Stems row ── */}
           {(() => {
             if (isSoundTech) return null;
-            const status = stemsStatus[song.id];
+            const status = stemsStatus[statusKey];
             // Trigger check on first render of this song
-            if (!status) checkStemsStatus(song.id);
+            if (!status) checkStemsStatus(song);
             if (status === 'available') {
               return (
                 <View style={styles.stemsRow}>
                   <Text style={styles.stemsAvailableText}>🎚️ Stems ready</Text>
+                </View>
+              );
+            }
+            if (status === 'media') {
+              return (
+                <View style={styles.stemsRow}>
+                  <Text style={styles.stemsMediaText}>
+                    {mediaUrl && isYouTubeUrl(mediaUrl) ? '▶ Media reference ready' : '🎧 Audio reference ready'}
+                  </Text>
                 </View>
               );
             }
@@ -1083,10 +1169,10 @@ export default function SetlistScreen({ navigation, route }) {
                 <TouchableOpacity
                   style={styles.stemsSubmitBtn}
                   onPress={() => submitStemsJob(song)}
-                  disabled={!!stemsSubmitting[song.id]}
+                  disabled={!!stemsSubmitting[statusKey]}
                 >
                   <Text style={styles.stemsSubmitText}>
-                    {stemsSubmitting[song.id] ? '⏳ Submitting…' : '🎚️ Request Stems'}
+                    {stemsSubmitting[statusKey] ? '⏳ Submitting…' : '🎚️ Request Stems'}
                   </Text>
                 </TouchableOpacity>
               );
@@ -1175,7 +1261,7 @@ export default function SetlistScreen({ navigation, route }) {
               onPress={() =>
                 navigation.navigate('PersonalPractice', {
                   serviceId: selectedAssignment?.service_id,
-                  songId: song.id,
+                  songId: getSongLookupId(song) || song.id,
                   userRole: selectedAssignment?.role,
                 })
               }
@@ -1185,24 +1271,47 @@ export default function SetlistScreen({ navigation, route }) {
             </TouchableOpacity>
           )}
 
+          {!isSoundTech && !isMediaTech && mediaUrl ? (
+            <TouchableOpacity
+              style={[styles.practiceBtn, { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}
+              onPress={() => openMediaReference(song)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.practiceBtnText, { color: '#93c5fd' }]}>
+                {isYouTubeUrl(mediaUrl) ? '▶  Open Song Media' : '▶  Play Song Audio'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* ── Play Setlist button (Sound Tech + Media only) ── */}
           {(isSoundTech || isMediaTech) && (() => {
-            const ytUrl = song.youtubeLink || song.youtubeUrl || song.youtube || song.sourceUrl || null;
+            const startIndex = Math.max(
+              0,
+              setlist.findIndex((entry) => getSongStatusKey(entry) === statusKey)
+            );
             return (
               <TouchableOpacity
                 style={[styles.practiceBtn, { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}
-                onPress={() => navigation.navigate('SetlistRunner', {
-                  serviceId: selectedAssignment?.service_id,
-                  songId: song.id,
-                  userRole: selectedAssignment?.role,
-                  userProfile: profile,
-                  vocalAssignments,
-                  youtubeUrl: ytUrl,
-                })}
+                onPress={() => {
+                  if (mediaUrl) {
+                    openMediaReference(song);
+                    return;
+                  }
+                  navigation.navigate('SetlistRunner', {
+                    serviceId: selectedAssignment?.service_id,
+                    songs: setlist,
+                    startIndex,
+                    songId: getSongLookupId(song) || song.id,
+                    userRole: selectedAssignment?.role,
+                    userRoles: serviceAssignments.map((assignment) => assignment?.role).filter(Boolean),
+                    userProfile: profile,
+                    vocalAssignments,
+                  });
+                }}
                 activeOpacity={0.8}
               >
                 <Text style={[styles.practiceBtnText, { color: '#93c5fd' }]}>
-                  {ytUrl ? '▶  Play Song (YouTube)' : '▶  Play Setlist'}
+                  {mediaUrl ? (isYouTubeUrl(mediaUrl) ? '▶  Open Song Media' : '▶  Play Song Audio') : '▶  Play Setlist'}
                 </Text>
               </TouchableOpacity>
             );
@@ -1697,6 +1806,7 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
   },
   stemsAvailableText: { color: '#34D399', fontSize: 12, fontWeight: '600' },
+  stemsMediaText: { color: '#60A5FA', fontSize: 12, fontWeight: '600' },
   stemsProcessingText: { color: '#FBBF24', fontSize: 12, fontWeight: '600' },
   stemsNoneText: { color: '#475569', fontSize: 12 },
   stemsSubmitBtn: {

@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
 import { SYNC_URL, CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
 import { sendPlaybackState, onWatchCommand, IS_WATCH_SUPPORTED } from '../services/watchBridge';
+import { getSongLookupId } from '../utils/songMedia';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SWIPE_THRESHOLD   = 60;
@@ -139,13 +140,29 @@ function getMyPartForSong(songId, va, profile) {
   return null;
 }
 
-function getSongLeadVocal(songId, va) {
-  if (!va || !songId) return null;
+function getSongVocalLineup(songId, va) {
+  if (!va || !songId) return [];
   const parts = va[songId] || {};
-  for (const key of ['lead_vocal', 'lead', 'voice1', 'soprano']) {
-    if (parts[key]?.name) return { partKey: key, ...parts[key] };
-  }
-  return null;
+  const order = [
+    'lead_vocal', 'lead', 'voice1', 'soprano',
+    'voice2', 'alto', 'bgv_1', 'bgv1',
+    'voice3', 'tenor', 'bgv_2', 'bgv2',
+    'voice4', 'baritone', 'bgv_3', 'bgv3',
+    'voice5', 'bass',
+  ];
+  const sortRank = new Map(order.map((key, index) => [key, index]));
+
+  return Object.entries(parts)
+    .map(([partKey, data]) => {
+      if (!data?.name) return null;
+      return { partKey, ...data };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftRank = sortRank.get(left.partKey) ?? 999;
+      const rightRank = sortRank.get(right.partKey) ?? 999;
+      return leftRank - rightRank;
+    });
 }
 
 const INSTRUMENT_ICON = {
@@ -602,18 +619,27 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     if (!song) return { type: 'none', text: '' };
 
     if (activeRoleType === 'vocal') {
-      if (song.hasLyrics && song.lyrics) return { type: 'lyrics', text: song.lyrics };
+      const lyricText = (song.lyrics || '').trim();
+      if (lyricText) return { type: 'lyrics', text: lyricText };
       return { type: 'no_content', label: '🎤 No lyrics available for this song.' };
     }
 
     if (activeRoleType === 'sound_tech') {
       if (song.notes) return { type: 'notes', text: song.notes };
-      return { type: 'no_content', label: '🎚️ Lead vocal shown above for this song.' };
+      return { type: 'no_content', label: '🎚️ Vocal lineup shown above for this song.' };
     }
 
     if (activeRoleType === 'media') {
+      const lyricText = (song.lyrics || '').trim();
       const mediaNotes = song.mediaNotes || song.notes || '';
-      return { type: 'media_cues', text: mediaNotes };
+      if (lyricText || mediaNotes) {
+        return {
+          type: 'media_lyrics',
+          lyrics: lyricText,
+          cues: mediaNotes,
+        };
+      }
+      return { type: 'no_content', label: '📺 No lyrics or media cues available for this song.' };
     }
 
     if (activeRoleType === 'instrument') {
@@ -628,7 +654,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         return { type: 'drum_notes', text: instrChart || '', lyrics: song.lyrics || '' };
       }
 
-      const masterChart = song.chordChart || '';
+      const masterChart = song.chordChart || song.lyricsChordChart || '';
       const chartText   = instrChart || masterChart;
       if (chartText) {
         return {
@@ -649,10 +675,12 @@ export default function SetlistRunnerScreen({ navigation, route }) {
 
   const normalizedActiveRole = normalizeRoleKey(activeRole);
   const content        = song ? getContent() : { type: 'none', text: '' };
-  const canAutoScroll  = content.type === 'lyrics' || content.type === 'chord_chart' || content.type === 'drum_notes';
+  const canAutoScroll  = content.type === 'lyrics' || content.type === 'media_lyrics' || content.type === 'chord_chart' || content.type === 'drum_notes';
+  const songLookupId   = song ? (getSongLookupId(song) || song.id) : '';
   const isSoundTech    = SOUND_TECH_ROLES.has(normalizedActiveRole);
-  const myPart         = song && !isSoundTech ? getMyPartForSong(song.id, vocalAssignments, userProfile) : null;
-  const leadVocal      = song && isSoundTech ? getSongLeadVocal(song.id, vocalAssignments) : null;
+  const isMediaTech    = activeRoleType === 'media';
+  const myPart         = song && activeRoleType === 'vocal' ? getMyPartForSong(songLookupId, vocalAssignments, userProfile) : null;
+  const vocalLineup    = song && (isSoundTech || isMediaTech) ? getSongVocalLineup(songLookupId, vocalAssignments) : [];
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
@@ -745,21 +773,22 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        {/* Lead vocal reference — sound techs */}
-        {isSoundTech && leadVocal ? (
-          <View style={styles.runnerLeadBadge}>
-            <Text style={styles.runnerLeadLabel}>LEAD VOCAL</Text>
-            <Text style={styles.runnerLeadName}>{leadVocal.name}</Text>
-            {leadVocal.key ? <Text style={styles.runnerLeadKey}>{leadVocal.key}</Text> : null}
+        {(isSoundTech || isMediaTech) && (
+          <View style={styles.runnerLineupCard}>
+            <Text style={styles.runnerLineupLabel}>VOCAL LINEUP</Text>
+            {vocalLineup.length > 0 ? (
+              vocalLineup.map((entry) => (
+                <View key={`${songLookupId}_${entry.partKey}_${entry.name}`} style={styles.runnerLineupRow}>
+                  <Text style={styles.runnerLineupPart}>{PART_LABELS[entry.partKey] || entry.partKey}</Text>
+                  <Text style={styles.runnerLineupName}>{entry.name}</Text>
+                  {entry.key ? <Text style={styles.runnerLineupKey}>{entry.key}</Text> : null}
+                </View>
+              ))
+            ) : (
+              <Text style={styles.runnerLineupEmpty}>No vocal assignments for this song yet</Text>
+            )}
           </View>
-        ) : null}
-
-        {isSoundTech && !leadVocal ? (
-          <View style={styles.runnerLeadBadge}>
-            <Text style={styles.runnerLeadLabel}>LEAD VOCAL</Text>
-            <Text style={styles.runnerLeadName}>No lead assigned</Text>
-          </View>
-        ) : null}
+        )}
 
         {/* Role tabs — shown when person has multiple roles */}
         {allRoles.length > 1 ? (
@@ -982,32 +1011,58 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        {/* ── MEDIA CUES ── */}
-        {content.type === 'media_cues' ? (
-          <View style={styles.notesCard}>
-            <Text style={[styles.notesLabel, { color: '#818CF8' }]}>📺 MEDIA / SLIDES</Text>
+        {/* ── MEDIA LYRICS + CUES ── */}
+        {content.type === 'media_lyrics' ? (
+          <View>
+            <View style={styles.instrBadgeRow}>
+              <View style={[styles.instrBadge, { backgroundColor: '#1E1B4B', borderColor: '#6366F150' }]}>
+                <Text style={[styles.instrBadgeText, { color: '#A5B4FC' }]}>📺 Media / Slides</Text>
+              </View>
+            </View>
             <TouchableOpacity
               style={styles.editBtn}
               onPress={() => navigation.navigate('ContentEditor', {
                 song,
                 serviceId: '',
-                type: 'notes',
-                existing: content.text,
+                type: 'lyrics',
+                existing: content.lyrics || '',
                 instrument: 'Media',
                 isAdmin: false,
               })}
             >
-              <Text style={styles.editBtnText}>✏️ Edit Slide Cues</Text>
+              <Text style={styles.editBtnText}>✏️ Edit Lyrics</Text>
             </TouchableOpacity>
-            {content.text ? (
-              <Text style={styles.notesText}>{content.text}</Text>
+            {content.lyrics ? (
+              <Text style={styles.lyricsText}>{content.lyrics}</Text>
             ) : (
-              <View style={{ alignItems: 'center', paddingTop: 24 }}>
-                <Text style={{ fontSize: 36, marginBottom: 8 }}>📺</Text>
-                <Text style={[styles.noContentTitle, { textAlign: 'center' }]}>{song.title}</Text>
-                <Text style={[styles.noContentHint, { textAlign: 'center' }]}>No slide cues for this song.{'\n'}Tap ✏️ to add media/projection notes.</Text>
-              </View>
+              <Text style={[styles.noContentHint, { textAlign: 'center', marginTop: 12 }]}>
+                No lyrics available for this song yet.
+              </Text>
             )}
+
+            <View style={[styles.notesCard, { marginTop: 14 }]}>
+              <Text style={[styles.notesLabel, { color: '#818CF8' }]}>📺 MEDIA / SLIDES</Text>
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => navigation.navigate('ContentEditor', {
+                  song,
+                  serviceId: '',
+                  type: 'notes',
+                  existing: content.cues || '',
+                  instrument: 'Media',
+                  isAdmin: false,
+                })}
+              >
+                <Text style={styles.editBtnText}>✏️ Edit Slide Cues</Text>
+              </TouchableOpacity>
+              {content.cues ? (
+                <Text style={styles.notesText}>{content.cues}</Text>
+              ) : (
+                <Text style={[styles.noContentHint, { textAlign: 'center' }]}>
+                  No slide cues for this song yet. Tap ✏️ to add media/projection notes.
+                </Text>
+              )}
+            </View>
           </View>
         ) : null}
 
@@ -1388,4 +1443,25 @@ const styles = StyleSheet.create({
   runnerLeadLabel: { fontSize: 10, fontWeight: '800', color: '#A78BFA', letterSpacing: 0.7 },
   runnerLeadName: { fontSize: 12, fontWeight: '700', color: '#F3F4F6' },
   runnerLeadKey: { fontSize: 11, fontWeight: '700', color: '#DDD6FE' },
+  runnerLineupCard: {
+    alignSelf: 'stretch',
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#1A0F2E',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6D28D9',
+    gap: 6,
+  },
+  runnerLineupLabel: { fontSize: 10, fontWeight: '800', color: '#A78BFA', letterSpacing: 0.7 },
+  runnerLineupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  runnerLineupPart: { minWidth: 88, fontSize: 11, fontWeight: '700', color: '#C4B5FD' },
+  runnerLineupName: { flex: 1, fontSize: 12, fontWeight: '700', color: '#F3F4F6' },
+  runnerLineupKey: { fontSize: 11, fontWeight: '700', color: '#DDD6FE' },
+  runnerLineupEmpty: { fontSize: 12, color: '#C4B5FD' },
 });

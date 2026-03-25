@@ -1,7 +1,7 @@
 /**
  * Personal Practice Screen - Ultimate Playback
  * Each member gets their own personalized practice experience based on role:
- *   - Vocalists   → Lead Vocals track + their harmony part
+ *   - Vocalists   → Instrument bed + their harmony part
  *   - Instruments → Full Mix track    + their isolated stem
  *   - Non-performers (sound/media/tech) → single playback reference track
  */
@@ -17,11 +17,20 @@ import {
   Alert,
   Dimensions,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import audioEngine from '../services/audioEngine';
 import { getUserProfile, getAssignments } from '../services/storage';
 import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
 import WaveformBar from '../components_v2/WaveformBar';
+import {
+  getDirectSongMediaUrl,
+  getPlayableMediaUrl,
+  getSongLookupId,
+  getSongMediaReferenceUrl,
+  isYouTubeUrl,
+  mergeSetlistWithLibrary,
+} from '../utils/songMedia';
 
 const { width } = Dimensions.get('window');
 
@@ -131,19 +140,78 @@ function isPlaybackOnlyRole(role) {
   return PLAYBACK_ONLY_ROLES.has(role) || (!VOCAL_ROLES.has(role) && !INSTRUMENT_ROLES.has(role));
 }
 
-function resolvePlaybackUri(song, stems = {}, harmonies = {}) {
-  return (
-    song?.assets?.guide_track ||
-    stems.mix ||
-    stems.full_mix ||
-    stems.other ||
-    stems.vocals ||
-    harmonies.lead_vocal ||
-    harmonies.lead ||
-    harmonies.voice1 ||
-    harmonies.soprano ||
-    null
-  );
+function resolveReferenceAudioUri(song, stems = {}, harmonies = {}, excludedUri = null) {
+  const candidates = [
+    getDirectSongMediaUrl(song),
+    getPlayableMediaUrl(stems.mix),
+    getPlayableMediaUrl(stems.full_mix),
+    getPlayableMediaUrl(stems.other),
+    getPlayableMediaUrl(stems.vocals),
+    getPlayableMediaUrl(harmonies.lead_vocal),
+    getPlayableMediaUrl(harmonies.lead),
+    getPlayableMediaUrl(harmonies.voice1),
+    getPlayableMediaUrl(harmonies.soprano),
+  ].filter(Boolean);
+
+  return candidates.find((uri) => uri !== excludedUri) || null;
+}
+
+function resolveVocalBedUri(song, stems = {}, harmonies = {}, excludedUri = null) {
+  const candidates = [
+    getPlayableMediaUrl(stems.other),
+    getDirectSongMediaUrl(song),
+    getPlayableMediaUrl(stems.mix),
+    getPlayableMediaUrl(stems.full_mix),
+    getPlayableMediaUrl(stems.drums),
+    getPlayableMediaUrl(stems.bass),
+    getPlayableMediaUrl(harmonies.lead_vocal),
+    getPlayableMediaUrl(harmonies.lead),
+  ].filter(Boolean);
+
+  return candidates.find((uri) => uri !== excludedUri) || null;
+}
+
+function resolveHarmonyTrack(role, harmonies = {}) {
+  for (const key of (HARMONY_CANDIDATES[role] || ['voice1'])) {
+    const uri = getPlayableMediaUrl(harmonies[key]);
+    if (uri) {
+      return {
+        uri,
+        label: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+      };
+    }
+  }
+
+  return {
+    uri: null,
+    label: 'Your Harmony',
+  };
+}
+
+function resolveInstrumentTrack(role, stems = {}) {
+  const stemKey = INSTRUMENT_STEM_MAP[role] || 'other';
+  const candidates = [stemKey];
+
+  if ((stemKey === 'keys' || stemKey === 'guitar') && !candidates.includes('other')) {
+    candidates.push('other');
+  }
+
+  for (const key of candidates) {
+    const uri = getPlayableMediaUrl(stems[key]);
+    if (uri) {
+      return {
+        key,
+        uri,
+        isFallback: key !== stemKey,
+      };
+    }
+  }
+
+  return {
+    key: stemKey,
+    uri: null,
+    isFallback: false,
+  };
 }
 
 function detectPrimaryRole(roles = []) {
@@ -163,14 +231,17 @@ function detectPrimaryRole(roles = []) {
 function buildPersonalTracks(role, song) {
   const stems = song?.stems || {};
   const harmonies = song?.harmonies || {};
+  const mediaUrl = getSongMediaReferenceUrl(song, stems, harmonies);
 
   if (isPlaybackOnlyRole(role)) {
     const roleLabel = ROLE_DISPLAY[role] || 'Playback';
+    const referenceUri = resolveReferenceAudioUri(song, stems, harmonies);
     const trackA = {
       id: 'playback',
-      label: 'Playback',
-      sublabel: `${roleLabel} reference mix`,
-      uri: resolvePlaybackUri(song, stems, harmonies),
+      label: referenceUri ? 'Playback' : 'Song Media',
+      sublabel: referenceUri ? `${roleLabel} reference mix` : 'Open media below',
+      uri: referenceUri,
+      externalUrl: referenceUri ? null : mediaUrl,
       color: '#3B82F6',
       icon: '🎧',
     };
@@ -178,30 +249,22 @@ function buildPersonalTracks(role, song) {
   }
 
   if (VOCAL_ROLES.has(role)) {
-    // Track A: lead vocals stem
+    const harmonyTrack = resolveHarmonyTrack(role, harmonies);
+    const instrumentalUri = resolveVocalBedUri(song, stems, harmonies, harmonyTrack.uri);
     const trackA = {
-      id: 'vocals',
-      label: 'Lead Vocals',
-      sublabel: 'Full vocal track',
-      uri: stems.vocals || null,
-      color: '#8B5CF6',
-      icon: '🎤',
+      id: 'instrument_bed',
+      label: instrumentalUri ? 'Full Instruments' : 'Song Media',
+      sublabel: instrumentalUri ? 'Band bed for vocal practice' : 'Open media below',
+      uri: instrumentalUri,
+      externalUrl: instrumentalUri ? null : mediaUrl,
+      color: '#3B82F6',
+      icon: '🎧',
     };
-    // Track B: their specific harmony
-    let harmonyUri = null;
-    let harmonyLabel = 'Your Harmony';
-    for (const key of (HARMONY_CANDIDATES[role] || ['voice1'])) {
-      if (harmonies[key]) {
-        harmonyUri = harmonies[key];
-        harmonyLabel = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-        break;
-      }
-    }
     const trackB = {
       id: 'my_harmony',
-      label: harmonyLabel,
-      sublabel: 'Your part',
-      uri: harmonyUri,
+      label: harmonyTrack.label,
+      sublabel: harmonyTrack.uri ? 'Your part' : 'Not available yet',
+      uri: harmonyTrack.uri,
       color: '#10B981',
       icon: '🎵',
     };
@@ -209,24 +272,28 @@ function buildPersonalTracks(role, song) {
   }
 
   // Instrument
-  const stemKey = INSTRUMENT_STEM_MAP[role] || 'other';
-  const stemLabel = stemKey.charAt(0).toUpperCase() + stemKey.slice(1);
+  const stemTrack = resolveInstrumentTrack(role, stems);
+  const stemLabel = stemTrack.key === 'other' && stemTrack.isFallback
+    ? 'Instrument Bed'
+    : stemTrack.key.charAt(0).toUpperCase() + stemTrack.key.slice(1);
+  const referenceUri = resolveReferenceAudioUri(song, stems, harmonies, stemTrack.uri);
 
   const trackA = {
     id: 'full_mix',
-    label: 'Full Mix',
-    sublabel: 'Everyone playing',
-    uri: song?.assets?.guide_track || stems.mix || stems.other || null,
+    label: referenceUri ? 'Full Song' : 'Song Media',
+    sublabel: referenceUri ? 'Everyone playing' : 'Open media below',
+    uri: referenceUri,
+    externalUrl: referenceUri ? null : mediaUrl,
     color: '#3B82F6',
     icon: '🎸',
   };
   const trackB = {
     id: 'my_stem',
     label: stemLabel,
-    sublabel: 'Your isolated track',
-    uri: stems[stemKey] || null,
+    sublabel: stemTrack.isFallback ? 'Closest available track' : 'Your isolated track',
+    uri: stemTrack.uri,
     color: '#F59E0B',
-    icon: stemKey === 'bass' ? '🎸' : stemKey === 'drums' ? '🥁' : stemKey === 'keys' ? '🎹' : '🎵',
+    icon: stemTrack.key === 'bass' ? '🎸' : stemTrack.key === 'drums' ? '🥁' : stemTrack.key === 'keys' ? '🎹' : '🎵',
   };
   return [trackA, trackB];
 }
@@ -369,11 +436,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
           // Endpoint returns plain array (not {songs:[...]})
           const setlistSongs = Array.isArray(sdata) ? sdata : (sdata?.songs || []);
           if (setlistSongs.length > 0) {
-            // Merge setlist order with full library metadata
-            songList = setlistSongs.map((ss) => {
-              const full = library.find((l) => l.id === ss.id || l.id === ss.songId);
-              return full ? { ...full, ...ss } : ss;
-            });
+            songList = mergeSetlistWithLibrary(setlistSongs, library);
           } else {
             // No setlist found for this service — show nothing, not the whole library
             songList = [];
@@ -391,11 +454,12 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   }
 
   // Fetch stems separately — library-pull doesn't include them
-  async function fetchSongStems(songId) {
-    if (!songId) return {};
+  async function fetchSongStems(song) {
+    const lookupId = typeof song === 'string' ? song : getSongLookupId(song);
+    if (!lookupId) return {};
     try {
       const headers = { 'x-org-id': SYNC_ORG_ID, 'x-secret-key': SYNC_SECRET_KEY };
-      const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${songId}`, { headers });
+      const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${encodeURIComponent(lookupId)}`, { headers });
       if (!res.ok) return {};
       const data = await res.json();
       return {
@@ -427,9 +491,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     setTrackDefs(buildPersonalTracks(r, enriched));
 
     // Second pass — fetch stems from KV (library-pull doesn't include them)
-    const songId = song.id || song.songId;
-    if (songId) {
-      const { stems, harmonies } = await fetchSongStems(songId);
+    const lookupId = getSongLookupId(song);
+    if (lookupId) {
+      const { stems, harmonies } = await fetchSongStems(song);
       if (Object.keys(stems).length > 0 || Object.keys(harmonies).length > 0) {
         enriched = { ...song, stems, harmonies };
         setSelectedSong(enriched);
@@ -438,14 +502,34 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     }
   }
 
+  const openMediaReference = useCallback(async (url) => {
+    if (!url) {
+      Alert.alert('No Media Link', 'This song does not have a media reference link yet.');
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) throw new Error('unsupported');
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Open Media Failed', 'Could not open the song media link on this device.');
+    }
+  }, []);
+
   // ── stem loading ──────────────────────────────────────────────────────────
 
   async function handleLoadStems() {
     if (!selectedSong) return;
     const [defA, defB] = trackDefs;
     const playbackOnlyMode = isPlaybackOnlyRole(roleRef.current || role);
+    const mediaReferenceUrl = getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies);
 
     if (!defA?.uri && !defB?.uri) {
+      if (mediaReferenceUrl) {
+        await openMediaReference(mediaReferenceUrl);
+        return;
+      }
       Alert.alert(
         playbackOnlyMode ? 'No Playback Available' : 'No Stems Available',
         playbackOnlyMode
@@ -483,6 +567,11 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   async function handlePlayPause() {
     if (!stemsReady) {
+      const mediaReferenceUrl = getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies);
+      if (!defA?.uri && !defB?.uri && mediaReferenceUrl) {
+        await openMediaReference(mediaReferenceUrl);
+        return;
+      }
       await handleLoadStems();
       return;
     }
@@ -546,6 +635,11 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const progressPct = duration > 0 ? (position / duration) * 100 : 0;
   const [defA, defB] = trackDefs;
   const playbackOnlyMode = isPlaybackOnlyRole(role);
+  const mediaReferenceUrl = selectedSong
+    ? getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies)
+    : null;
+  const hasDirectPracticeAudio = !!defA?.uri || !!defB?.uri;
+  const hasExternalMediaOnly = !!mediaReferenceUrl && !hasDirectPracticeAudio;
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -671,7 +765,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
               ) : null}
 
               {/* Stems status inline */}
-              {!defA?.uri && !defB?.uri ? (
+              {!hasDirectPracticeAudio && !mediaReferenceUrl ? (
                 <View style={styles.noStemsInline}>
                   <Text style={styles.noStemsInlineText}>
                     {playbackOnlyMode
@@ -679,24 +773,34 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                       : '🔬 Stems not processed yet — ask your admin to run CineStage on this song.'}
                   </Text>
                 </View>
-              ) : !stemsReady ? (
+              ) : !stemsReady && hasDirectPracticeAudio ? (
                 <TouchableOpacity style={styles.loadBigBtn} onPress={handleLoadStems} disabled={loadingStems}>
                   {loadingStems
                     ? <ActivityIndicator color="#FFF" />
                     : <Text style={styles.loadBigBtnText}>{playbackOnlyMode ? '📥 Load Playback' : '📥 Load My Tracks'}</Text>}
+                </TouchableOpacity>
+              ) : hasExternalMediaOnly ? (
+                <TouchableOpacity style={styles.loadBigBtn} onPress={() => openMediaReference(mediaReferenceUrl)}>
+                  <Text style={styles.loadBigBtnText}>
+                    {isYouTubeUrl(mediaReferenceUrl) ? '▶ Open Song Media' : '▶ Play Song Audio'}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
 
               {playbackOnlyMode ? (
                 <View style={styles.tipBox}>
                   <Text style={styles.tipText}>
-                    🎧 Playback-only mode for non-performing roles.
+                    {hasExternalMediaOnly
+                      ? '🎧 Playback-only mode. Open the song media while stems are being repaired.'
+                      : '🎧 Playback-only mode for non-performing roles.'}
                   </Text>
                 </View>
               ) : (
                 <View style={styles.tipBox}>
                   <Text style={styles.tipText}>
-                    💡 Mute <Text style={styles.tipBold}>your track</Text> to practice along with the rest of the band.
+                    {hasExternalMediaOnly
+                      ? '💡 Use the song media as a temporary reference until the role stems are fixed.'
+                      : '💡 Mute <Text style={styles.tipBold}>your track</Text> to practice along with the rest of the band.'}
                   </Text>
                 </View>
               )}
@@ -723,12 +827,14 @@ export default function PersonalPracticeScreen({ route, navigation }) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.transpBtn, stemsReady && styles.transpBtnDone]}
-                onPress={handleLoadStems}
-                disabled={loadingStems || !defA?.uri && !defB?.uri}
+                onPress={hasDirectPracticeAudio ? handleLoadStems : () => openMediaReference(mediaReferenceUrl)}
+                disabled={loadingStems || (!hasDirectPracticeAudio && !mediaReferenceUrl)}
               >
                 {loadingStems
                   ? <ActivityIndicator color="#8B5CF6" size="small" />
-                  : <Text style={styles.transpBtnText}>{stemsReady ? '✓' : '📥'}</Text>}
+                  : <Text style={styles.transpBtnText}>
+                      {stemsReady ? '✓' : hasExternalMediaOnly ? '🌐' : '📥'}
+                    </Text>}
               </TouchableOpacity>
             </View>
           </>
@@ -744,6 +850,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 function TrackStrip({ def, muted, onMuteToggle, isLoaded, isPlaying, isMine }) {
   if (!def) return null;
   const hasUri = !!def.uri;
+  const hasSource = hasUri || !!def.externalUrl;
 
   return (
     <View style={[styles.trackStrip, isMine && styles.trackStripMine]}>
@@ -756,7 +863,7 @@ function TrackStrip({ def, muted, onMuteToggle, isLoaded, isPlaying, isMine }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.trackLabel}>{def.label}</Text>
           <Text style={styles.trackSublabel}>
-            {!hasUri ? 'Not available' : isLoaded ? (isPlaying ? '▶ Playing' : '⏸ Paused') : def.sublabel}
+            {!hasSource ? 'Not available' : !hasUri && def.externalUrl ? 'Open media below' : isLoaded ? (isPlaying ? '▶ Playing' : '⏸ Paused') : def.sublabel}
           </Text>
         </View>
         {isMine && (
