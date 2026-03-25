@@ -22,6 +22,7 @@ APP_TARGET    = 'UltimatePlayback'
 BUNDLE_ID     = 'com.ultimatemusician.playback'
 APP_GROUP     = 'group.com.ultimatemusician.playback'
 NATIVE_DIR    = File.join(PROJECT_ROOT, 'native')
+ICON_SOURCE   = File.join(PROJECT_ROOT, 'assets', 'icon.png')
 SWIFT_VERSION = '5.0'
 APP_CONFIG    = JSON.parse(File.read(File.join(PROJECT_ROOT, 'app.json')))
 APP_VERSION   = APP_CONFIG.dig('expo', 'version') || '1.0'
@@ -49,6 +50,19 @@ def add_source(project, group, target, file_path, display_name = nil)
   return if target.source_build_phase.files_references.include?(ref)
   target.source_build_phase.add_file_reference(ref)
   puts "  + #{display_name}"
+end
+
+def add_resource(group, target, file_path, display_name = nil)
+  display_name ||= File.basename(file_path)
+  ref = group.children.find { |child| child.display_name == display_name }
+  unless ref
+    ref = group.new_reference(file_path)
+    ref.name = display_name
+    ref.source_tree = '<group>'
+  end
+  return if target.resources_build_phase.files_references.include?(ref)
+  target.resources_build_phase.add_file_reference(ref)
+  puts "  + resource: #{display_name}"
 end
 
 # ── Helper: set Swift version + bridging header on a target ──────────────────
@@ -166,6 +180,191 @@ def write_watch_extension_info_plist(path, watch_bundle_id)
   puts "  ~ watch extension Info.plist"
 end
 
+WATCH_ICON_VARIANTS = [
+  {
+    filename: 'AppIcon24x24@2x.png',
+    pixels: 48,
+    size: '24x24',
+    scale: '2x',
+    role: 'notificationCenter',
+    subtype: '38mm',
+  },
+  {
+    filename: 'AppIcon27.5x27.5@2x.png',
+    pixels: 55,
+    size: '27.5x27.5',
+    scale: '2x',
+    role: 'notificationCenter',
+    subtype: '42mm',
+  },
+  {
+    filename: 'AppIcon29x29@2x.png',
+    pixels: 58,
+    size: '29x29',
+    scale: '2x',
+    role: 'companionSettings',
+  },
+  {
+    filename: 'AppIcon29x29@3x.png',
+    pixels: 87,
+    size: '29x29',
+    scale: '3x',
+    role: 'companionSettings',
+  },
+  {
+    filename: 'AppIcon40x40@2x.png',
+    pixels: 80,
+    size: '40x40',
+    scale: '2x',
+    role: 'appLauncher',
+  },
+  {
+    filename: 'AppIcon40x40@2x.png',
+    pixels: 80,
+    size: '40x40',
+    scale: '2x',
+    role: 'longLook',
+    subtype: '38mm',
+  },
+  {
+    filename: 'AppIcon44x44@2x.png',
+    pixels: 88,
+    size: '44x44',
+    scale: '2x',
+    role: 'longLook',
+    subtype: '42mm',
+  },
+  {
+    filename: 'AppIcon86x86@2x.png',
+    pixels: 172,
+    size: '86x86',
+    scale: '2x',
+    role: 'quickLook',
+    subtype: '38mm',
+  },
+  {
+    filename: 'AppIcon98x98@2x.png',
+    pixels: 196,
+    size: '98x98',
+    scale: '2x',
+    role: 'quickLook',
+    subtype: '42mm',
+  },
+  {
+    filename: 'AppIcon1024x1024.png',
+    pixels: 1024,
+    size: '1024x1024',
+    scale: '1x',
+    idiom: 'watch-marketing',
+  },
+].freeze
+
+def write_watch_app_info_plist(path)
+  icon_files = WATCH_ICON_VARIANTS
+    .map { |variant| File.basename(variant[:filename], '.png') }
+    .uniq
+    .reject { |name| name == 'AppIcon1024x1024' }
+
+  Xcodeproj::Plist.write_to_path({
+    'CFBundleDevelopmentRegion' => '$(DEVELOPMENT_LANGUAGE)',
+    'CFBundleDisplayName' => 'Ultimate Playback',
+    'CFBundleExecutable' => '$(EXECUTABLE_NAME)',
+    'CFBundleIdentifier' => '$(PRODUCT_BUNDLE_IDENTIFIER)',
+    'CFBundleInfoDictionaryVersion' => '6.0',
+    'CFBundleName' => '$(PRODUCT_NAME)',
+    'CFBundlePackageType' => '$(PRODUCT_BUNDLE_PACKAGE_TYPE)',
+    'CFBundleShortVersionString' => '$(MARKETING_VERSION)',
+    'CFBundleVersion' => '$(CURRENT_PROJECT_VERSION)',
+    'CFBundleIconName' => 'AppIcon',
+    'CFBundleIconFiles' => icon_files,
+    'CFBundleIcons' => {
+      'CFBundlePrimaryIcon' => {
+        'CFBundleIconFiles' => icon_files,
+        'CFBundleIconName' => 'AppIcon',
+      },
+    },
+    'WKCompanionAppBundleIdentifier' => BUNDLE_ID,
+    'WKWatchKitApp' => true,
+  }, path)
+  puts "  ~ watch app Info.plist"
+end
+
+def ensure_watch_asset_catalog(watch_dir)
+  abort "Watch icon source not found at #{ICON_SOURCE}" unless File.exist?(ICON_SOURCE)
+
+  asset_catalog_dir = File.join(watch_dir, 'Assets.xcassets')
+  accent_color_dir = File.join(asset_catalog_dir, 'AccentColor.colorset')
+  app_icon_dir = File.join(asset_catalog_dir, 'AppIcon.appiconset')
+
+  FileUtils.mkdir_p(accent_color_dir)
+  FileUtils.mkdir_p(app_icon_dir)
+
+  File.write(
+    File.join(asset_catalog_dir, 'Contents.json'),
+    JSON.pretty_generate({
+      info: {
+        author: 'xcode',
+        version: 1,
+      },
+    }) + "\n"
+  )
+
+  File.write(
+    File.join(accent_color_dir, 'Contents.json'),
+    JSON.pretty_generate({
+      colors: [
+        {
+          idiom: 'universal',
+        },
+      ],
+      info: {
+        author: 'xcode',
+        version: 1,
+      },
+    }) + "\n"
+  )
+
+  watch_icon_images = WATCH_ICON_VARIANTS.map do |variant|
+    destination = File.join(app_icon_dir, variant[:filename])
+    success = system(
+      'sips',
+      '-z',
+      variant[:pixels].to_s,
+      variant[:pixels].to_s,
+      ICON_SOURCE,
+      '--out',
+      destination,
+      out: File::NULL,
+      err: File::NULL
+    )
+    abort "Failed to generate watch icon #{variant[:filename]}" unless success
+
+    image = {
+      filename: variant[:filename],
+      idiom: variant.fetch(:idiom, 'watch'),
+      scale: variant[:scale],
+      size: variant[:size],
+    }
+    image[:role] = variant[:role] if variant[:role]
+    image[:subtype] = variant[:subtype] if variant[:subtype]
+    image
+  end
+
+  File.write(
+    File.join(app_icon_dir, 'Contents.json'),
+    JSON.pretty_generate({
+      images: watch_icon_images,
+      info: {
+        author: 'xcode',
+        version: 1,
+      },
+    }) + "\n"
+  )
+
+  puts "  ~ watch app icon assets"
+  asset_catalog_dir
+end
+
 # ════════════════════════════════════════════════════════════════════════════════
 puts "\n[1/4] Adding native RN modules to iOS app target..."
 # ════════════════════════════════════════════════════════════════════════════════
@@ -212,6 +411,9 @@ WATCH_DEPLOY      = '7.0'
 
 watch_dir = File.join(IOS_DIR, WATCH_TARGET_NAME)
 FileUtils.mkdir_p(watch_dir)
+watch_info_path = File.join(watch_dir, 'Info.plist')
+write_watch_app_info_plist(watch_info_path)
+watch_assets_dir = ensure_watch_asset_catalog(watch_dir)
 
 watch_target = find_target(project, WATCH_TARGET_NAME)
 unless watch_target
@@ -241,9 +443,10 @@ watch_target.build_configurations.each do |cfg|
   cfg.build_settings['TARGETED_DEVICE_FAMILY']    = '4'
   cfg.build_settings['SDKROOT']                   = 'watchos'
   cfg.build_settings['SUPPORTED_PLATFORMS']       = 'watchos watchsimulator'
-  cfg.build_settings['GENERATE_INFOPLIST_FILE']   = 'YES'
-  cfg.build_settings['INFOPLIST_KEY_CFBundleDisplayName'] = 'Ultimate Playback'
-  cfg.build_settings['INFOPLIST_KEY_WKCompanionAppBundleIdentifier'] = BUNDLE_ID
+  cfg.build_settings['GENERATE_INFOPLIST_FILE']   = 'NO'
+  cfg.build_settings['INFOPLIST_FILE']            = "#{WATCH_TARGET_NAME}/Info.plist"
+  cfg.build_settings['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
+  cfg.build_settings['ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME'] = 'AccentColor'
   cfg.build_settings['MARKETING_VERSION']         = APP_VERSION
   cfg.build_settings['CURRENT_PROJECT_VERSION']   = APP_BUILD
   cfg.build_settings['SKIP_INSTALL']              = 'YES'
@@ -252,6 +455,7 @@ end
 # Source/resources group
 watch_group = project.main_group.find_subpath(WATCH_TARGET_NAME) ||
               project.main_group.new_group(WATCH_TARGET_NAME, WATCH_TARGET_NAME)
+add_resource(watch_group, watch_target, watch_assets_dir, 'Assets.xcassets')
 
 # App Groups entitlements
 ent_path = File.join(watch_dir, "#{WATCH_TARGET_NAME}.entitlements")

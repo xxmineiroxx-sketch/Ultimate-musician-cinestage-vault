@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ultimatemusician.playback",
-      "buildNumber": "25",
+      "buildNumber": "26",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.ultimatemusician.playback"
