@@ -8,6 +8,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 
 // ── Inline Calendar (pure RN, no external package) ──────────────────────────
@@ -1980,41 +1981,53 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
       {/* ── Edit Member Modal (Admin + Manager) ────────────────────── */}
       <Modal visible={!!showEditMember} animationType="slide" transparent onRequestClose={() => setShowEditMember(null)}>
-        <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
-          <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
-            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Edit Member</Text>
-            <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
-            <Text style={s.formLabel}>Name *</Text>
-            <TextInput style={s.formInput} value={editName} onChangeText={setEditName}
-              placeholder="Full name" placeholderTextColor="#6B7280" />
-            <Text style={s.formLabel}>Email</Text>
-            <TextInput style={s.formInput} value={editEmail} onChangeText={setEditEmail}
-              placeholder="email@example.com" placeholderTextColor="#6B7280"
-              keyboardType="email-address" autoCapitalize="none" />
-            <Text style={s.formLabel}>Primary Role</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-              <View style={s.chipRow}>
-                {ROLE_CHIPS.map(r => (
-                  <TouchableOpacity key={r}
-                    style={[s.roleChipBtn, editRole === r && s.roleChipBtnActive]}
-                    onPress={() => setEditRole(editRole === r ? '' : r)}>
-                    <Text style={[s.roleChipBtnText, editRole === r && s.roleChipBtnTextActive]}>{r}</Text>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Math.max(insets.bottom, 12)}
+        >
+          <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
+            <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', paddingHorizontal: 20, paddingTop: 20, maxHeight: '82%' }}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 12) }}
+              >
+                <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Edit Member</Text>
+                <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
+                <Text style={s.formLabel}>Name *</Text>
+                <TextInput style={s.formInput} value={editName} onChangeText={setEditName}
+                  placeholder="Full name" placeholderTextColor="#6B7280" />
+                <Text style={s.formLabel}>Email</Text>
+                <TextInput style={s.formInput} value={editEmail} onChangeText={setEditEmail}
+                  placeholder="email@example.com" placeholderTextColor="#6B7280"
+                  keyboardType="email-address" autoCapitalize="none" />
+                <Text style={s.formLabel}>Primary Role</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} keyboardShouldPersistTaps="handled">
+                  <View style={s.chipRow}>
+                    {ROLE_CHIPS.map(r => (
+                      <TouchableOpacity key={r}
+                        style={[s.roleChipBtn, editRole === r && s.roleChipBtnActive]}
+                        onPress={() => setEditRole(editRole === r ? '' : r)}>
+                        <Text style={[s.roleChipBtnText, editRole === r && s.roleChipBtnTextActive]}>{r}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+                <View style={{ flexDirection: 'row', gap: 10, paddingBottom: 4 }}>
+                  <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowEditMember(null)}>
+                    <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowEditMember(null)}>
-                <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{ flex: 2, backgroundColor: '#4F46E5', borderRadius: 10, paddingVertical: 12, alignItems: 'center', opacity: (savingEdit || !editName.trim()) ? 0.5 : 1 }}
-                onPress={handleEditMember} disabled={savingEdit || !editName.trim()}>
-                {savingEdit ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Save Changes</Text>}
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 2, backgroundColor: '#4F46E5', borderRadius: 10, paddingVertical: 12, alignItems: 'center', opacity: (savingEdit || !editName.trim()) ? 0.5 : 1 }}
+                    onPress={handleEditMember} disabled={savingEdit || !editName.trim()}>
+                    {savingEdit ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Save Changes</Text>}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Vocal Part Picker Modal ───────────────────────────────── */}
