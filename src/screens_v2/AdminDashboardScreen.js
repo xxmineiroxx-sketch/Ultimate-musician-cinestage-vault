@@ -2040,9 +2040,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
               <Text style={s.formLabel}>Name *</Text>
               <TextInput ref={editNameInputRef} style={s.formInput} value={editName} onChangeText={setEditName}
+                showSoftInputOnFocus={true}
                 placeholder="Full name" placeholderTextColor="#6B7280" />
               <Text style={s.formLabel}>Email</Text>
               <TextInput ref={editEmailInputRef} style={s.formInput} value={editEmail} onChangeText={setEditEmail}
+                showSoftInputOnFocus={true}
                 placeholder="email@example.com" placeholderTextColor="#6B7280"
                 keyboardType="email-address" autoCapitalize="none" />
               <Text style={s.formLabel}>Primary Role</Text>
