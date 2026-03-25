@@ -2021,10 +2021,15 @@ export default function AdminDashboardScreen({ navigation, route }) {
         <View
           style={[
             s.modalOverlay,
-            { paddingBottom: editMemberKeyboardHeight },
+            {
+              justifyContent: 'flex-start',
+              paddingTop: Math.max(insets.top, 16) + 12,
+              paddingHorizontal: 12,
+              paddingBottom: Math.max(insets.bottom, 12) + editMemberKeyboardHeight,
+            },
           ]}
         >
-          <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', paddingHorizontal: 20, paddingTop: 20, maxHeight: '82%' }}>
+          <View style={{ width: '100%', maxWidth: 460, alignSelf: 'center', backgroundColor: '#0B1120', borderRadius: 20, borderWidth: 1, borderColor: '#1E2A40', paddingHorizontal: 20, paddingTop: 20, maxHeight: '72%' }}>
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="always"
