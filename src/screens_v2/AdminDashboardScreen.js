@@ -2017,7 +2017,17 @@ export default function AdminDashboardScreen({ navigation, route }) {
       </Modal>
 
       {/* ── Edit Member Modal (Admin + Manager) ────────────────────── */}
-      <Modal visible={!!showEditMember} animationType="slide" transparent onRequestClose={() => setShowEditMember(null)}>
+      <Modal
+        visible={!!showEditMember}
+        animationType="slide"
+        transparent
+        onShow={() => {
+          setTimeout(() => {
+            editNameInputRef.current?.focus?.();
+          }, 80);
+        }}
+        onRequestClose={() => setShowEditMember(null)}
+      >
         <View
           style={[
             s.modalOverlay,
@@ -2040,13 +2050,17 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>Update {showEditMember?.name}</Text>
               <Text style={s.formLabel}>Name *</Text>
               <TextInput ref={editNameInputRef} style={s.formInput} value={editName} onChangeText={setEditName}
+                autoFocus={true}
                 showSoftInputOnFocus={true}
+                returnKeyType="next"
+                onSubmitEditing={() => editEmailInputRef.current?.focus?.()}
                 placeholder="Full name" placeholderTextColor="#6B7280" />
               <Text style={s.formLabel}>Email</Text>
               <TextInput ref={editEmailInputRef} style={s.formInput} value={editEmail} onChangeText={setEditEmail}
                 showSoftInputOnFocus={true}
                 placeholder="email@example.com" placeholderTextColor="#6B7280"
-                keyboardType="email-address" autoCapitalize="none" />
+                keyboardType="email-address" autoCapitalize="none"
+                returnKeyType="done" />
               <Text style={s.formLabel}>Primary Role</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} keyboardShouldPersistTaps="always">
                 <View style={s.chipRow}>
