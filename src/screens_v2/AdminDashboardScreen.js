@@ -137,6 +137,91 @@ const VOCAL_TEAM_ROLES = new Set([
   'bgv', 'background_vocal', 'soprano', 'alto', 'tenor', 'baritone',
 ]);
 
+const TEAM_STATUS_ORDER = {
+  pending: 0,
+  declined: 1,
+  accepted: 2,
+  registered: 3,
+};
+
+function normalizeTeamStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'registered') return 'registered';
+  if (normalized === 'accepted') return 'accepted';
+  if (normalized === 'declined') return 'declined';
+  return 'pending';
+}
+
+function getEffectiveInviteTeamStatus(person) {
+  const inviteStatus = normalizeTeamStatus(person?.inviteStatus);
+  const isRegistered =
+    person?.playbackRegistered === true
+    || Boolean(person?.playbackRegisteredAt)
+    || Boolean(person?.inviteRegisteredAt);
+
+  if (isRegistered || inviteStatus === 'registered') return 'registered';
+  if (person?.inviteAcceptedAt) {
+    return TEAM_STATUS_ORDER[inviteStatus] >= TEAM_STATUS_ORDER.accepted
+      ? inviteStatus
+      : 'accepted';
+  }
+  return inviteStatus;
+}
+
+function findAssignedPerson(people, assignment) {
+  const personId = String(assignment?.personId || '').trim();
+  const email = String(assignment?.email || '').trim().toLowerCase();
+  const name = String(assignment?.name || '').trim().toLowerCase();
+
+  return (
+    (Array.isArray(people) ? people : []).find((person) => {
+      const id = String(person?.id || '').trim();
+      const sharedId = String(person?._sharedId || '').trim();
+      const personEmail = String(person?.email || '').trim().toLowerCase();
+      const personName = String(person?.name || '').trim().toLowerCase();
+      return (
+        (personId && (id === personId || sharedId === personId))
+        || (email && personEmail === email)
+        || (name && personName === name)
+      );
+    }) || null
+  );
+}
+
+function resolveServiceTeamResponse(svcId, assignment, person, responseMap) {
+  const keys = [
+    person?.id,
+    person?._sharedId,
+    assignment?.personId,
+    person?.email,
+    assignment?.email,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  let bestStatus = normalizeTeamStatus(assignment?.status);
+  let bestRank = TEAM_STATUS_ORDER[bestStatus] ?? 0;
+
+  for (const key of keys) {
+    const response = responseMap?.[`${svcId}_${key}`];
+    if (!response) continue;
+    const status = normalizeTeamStatus(response.status || response.response);
+    const rank = TEAM_STATUS_ORDER[status] ?? 0;
+    if (rank >= bestRank) {
+      bestStatus = status;
+      bestRank = rank;
+    }
+  }
+
+  const personStatus = getEffectiveInviteTeamStatus(person);
+  const personRank = TEAM_STATUS_ORDER[personStatus] ?? 0;
+  if (personRank >= bestRank) {
+    bestStatus = personStatus;
+  }
+
+  return bestStatus;
+}
+
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();
   const tid  = setTimeout(() => ctrl.abort(), 8000);
@@ -1014,13 +1099,16 @@ export default function AdminDashboardScreen({ navigation, route }) {
         {team.length === 0
           ? <Text style={s.planEmpty}>No team assigned yet</Text>
           : team.map((tm, i) => {
-            const assignId = `${svc.id}_${tm.personId}`;
-            const assignIdEmail = tm.email ? `${svc.id}_${tm.email}` : null;
-            const resp     = assignmentResponses[assignId] || (assignIdEmail ? assignmentResponses[assignIdEmail] : null);
-            const respStatus = resp?.status || tm.status || 'pending';
+            const person = findAssignedPerson(people, tm);
+            const respStatus = resolveServiceTeamResponse(
+              svc.id,
+              tm,
+              person,
+              assignmentResponses,
+            );
             return (
               <View key={`${tm.personId}_${i}`} style={s.planTeamRow}>
-                <View style={[s.planTeamAvatar, respStatus === 'accepted' && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
+                <View style={[s.planTeamAvatar, (respStatus === 'accepted' || respStatus === 'registered') && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
                   <Text style={s.planTeamAvatarText}>{(tm.name || '?')[0]}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -1028,14 +1116,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <View style={s.roleChipSmall}><Text style={s.roleChipSmallText}>{tm.role}</Text></View>
                     <View style={[s.respBadge,
-                      respStatus === 'accepted' && s.respBadgeAccepted,
+                      (respStatus === 'accepted' || respStatus === 'registered') && s.respBadgeAccepted,
                       respStatus === 'declined' && s.respBadgeDeclined,
                     ]}>
                       <Text style={[s.respBadgeText,
-                        respStatus === 'accepted' && s.respTextAccepted,
+                        (respStatus === 'accepted' || respStatus === 'registered') && s.respTextAccepted,
                         respStatus === 'declined' && s.respTextDeclined,
                       ]}>
-                        {respStatus === 'accepted' ? '✓ Accepted' : respStatus === 'declined' ? '✗ Declined' : '? Pending'}
+                        {respStatus === 'registered' ? '✓ Registered' : respStatus === 'accepted' ? '✓ Accepted' : respStatus === 'declined' ? '✗ Declined' : '? Pending'}
                       </Text>
                     </View>
                   </View>
