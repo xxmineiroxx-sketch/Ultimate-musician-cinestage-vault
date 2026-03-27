@@ -144,9 +144,22 @@ const TEAM_STATUS_ORDER = {
   registered: 3,
 };
 
+const ASSIGNMENT_STATUS_ORDER = {
+  pending: 0,
+  declined: 2,
+  accepted: 2,
+};
+
 function normalizeTeamStatus(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'registered') return 'registered';
+  if (normalized === 'accepted') return 'accepted';
+  if (normalized === 'declined') return 'declined';
+  return 'pending';
+}
+
+function normalizeAssignmentStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'accepted') return 'accepted';
   if (normalized === 'declined') return 'declined';
   return 'pending';
@@ -220,6 +233,106 @@ function resolveServiceTeamResponse(svcId, assignment, person, responseMap) {
   }
 
   return bestStatus;
+}
+
+function responseTimestampValue(entry) {
+  const raw =
+    entry?.respondedAt
+    || entry?.responded_at
+    || entry?.timestamp
+    || null;
+  const parsed = Date.parse(raw || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function shouldPreferAssignmentEntry(currentEntry, nextEntry) {
+  const currentStatus = normalizeAssignmentStatus(currentEntry?.status || currentEntry?.response);
+  const nextStatus = normalizeAssignmentStatus(nextEntry?.status || nextEntry?.response);
+  const currentRank = ASSIGNMENT_STATUS_ORDER[currentStatus] ?? 0;
+  const nextRank = ASSIGNMENT_STATUS_ORDER[nextStatus] ?? 0;
+
+  if (nextRank !== currentRank) return nextRank > currentRank;
+
+  const currentTs = responseTimestampValue(currentEntry);
+  const nextTs = responseTimestampValue(nextEntry);
+  if (nextTs !== currentTs) return nextTs > currentTs;
+
+  return Boolean(nextEntry?.respondedAt || nextEntry?.responded_at)
+    && !Boolean(currentEntry?.respondedAt || currentEntry?.responded_at);
+}
+
+function resolveServiceTeamAssignmentResponse(svcId, assignment, person, responseMap) {
+  const keys = [
+    person?.id,
+    person?._sharedId,
+    assignment?.personId,
+    person?.email,
+    assignment?.email,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  let bestEntry = {
+    status: normalizeAssignmentStatus(assignment?.status),
+    declineReason: String(assignment?.declineReason || '').trim(),
+    respondedAt: assignment?.responded_at || assignment?.respondedAt || null,
+  };
+
+  for (const key of keys) {
+    const response = responseMap?.[`${svcId}_${key}`];
+    if (!response) continue;
+    const nextEntry = {
+      status: normalizeAssignmentStatus(response.status || response.response),
+      declineReason: String(response.declineReason || '').trim(),
+      respondedAt: response.respondedAt || response.responded_at || response.timestamp || null,
+    };
+    if (shouldPreferAssignmentEntry(bestEntry, nextEntry)) {
+      bestEntry = nextEntry;
+    }
+  }
+
+  return bestEntry;
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function membershipStatusLabel(status) {
+  if (status === 'registered') return 'Registered';
+  if (status === 'accepted') return 'Invite Accepted';
+  return 'Invite Pending';
+}
+
+function assignmentStatusLabel(status) {
+  if (status === 'accepted') return 'Accepted';
+  if (status === 'declined') return 'Declined';
+  return 'Pending';
+}
+
+function assignmentResponseMetaText(response) {
+  const status = normalizeAssignmentStatus(response?.status || response?.response);
+  const stamp = formatDateTime(response?.respondedAt || response?.responded_at || response?.timestamp);
+  if (!stamp || status === 'pending') return '';
+  return `${status === 'declined' ? 'Declined' : 'Accepted'} ${stamp}`;
+}
+
+function assignmentMessageMetaText(message) {
+  if (message?.messageType !== 'assignment_response') return '';
+  const status = normalizeAssignmentStatus(message?.metadata?.status);
+  const statusLabel = assignmentStatusLabel(status);
+  const serviceName = String(message?.metadata?.serviceName || '').trim();
+  const stamp = formatDateTime(message?.metadata?.respondedAt || message?.timestamp);
+  return [statusLabel, serviceName, stamp].filter(Boolean).join(' • ');
 }
 
 async function fetchJson(url, opts = {}) {
@@ -474,7 +587,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
       Object.entries(lib.plans || {}).forEach(([svcId, plan]) => {
         (plan.team || []).forEach(tm => {
           if (tm.status && tm.status !== 'pending') {
-            const obj = { status: tm.status, declineReason: tm.declineReason || '' };
+            const obj = {
+              status: tm.status,
+              declineReason: tm.declineReason || '',
+              respondedAt: tm.responded_at || tm.respondedAt || null,
+            };
             if (tm.personId) rDict[`${svcId}_${tm.personId}`] = obj;
             if (tm.email) rDict[`${svcId}_${tm.email.toLowerCase()}`] = obj;
           }
@@ -496,7 +613,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
           // Server returns { email: { status, declineReason } }
           const entries = Array.isArray(res) ? res.map(r => [r.email || '', r]) : Object.entries(res);
           entries.forEach(([emailKey, val]) => {
-            const statusObj = { status: val.status || val.response || 'pending', declineReason: val.declineReason || '' };
+            const statusObj = {
+              status: val.status || val.response || 'pending',
+              declineReason: val.declineReason || '',
+              respondedAt: val.responded_at || val.respondedAt || val.timestamp || null,
+            };
             const pid = emailToPid[emailKey.toLowerCase()];
             if (pid) rDict[`${svcId}_${pid}`] = statusObj;         // match by UUID (tm.personId)
             rDict[`${svcId}_${emailKey.toLowerCase()}`] = statusObj; // match by email (tm.email)
@@ -1100,15 +1221,18 @@ export default function AdminDashboardScreen({ navigation, route }) {
           ? <Text style={s.planEmpty}>No team assigned yet</Text>
           : team.map((tm, i) => {
             const person = findAssignedPerson(people, tm);
-            const respStatus = resolveServiceTeamResponse(
+            const memberStatus = getEffectiveInviteTeamStatus(person);
+            const assignmentResponse = resolveServiceTeamAssignmentResponse(
               svc.id,
               tm,
               person,
               assignmentResponses,
             );
+            const respStatus = assignmentResponse.status;
+            const assignmentMeta = assignmentResponseMetaText(assignmentResponse);
             return (
               <View key={`${tm.personId}_${i}`} style={s.planTeamRow}>
-                <View style={[s.planTeamAvatar, (respStatus === 'accepted' || respStatus === 'registered') && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
+                <View style={[s.planTeamAvatar, respStatus === 'accepted' && s.avatarAccepted, respStatus === 'declined' && s.avatarDeclined]}>
                   <Text style={s.planTeamAvatarText}>{(tm.name || '?')[0]}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -1116,17 +1240,36 @@ export default function AdminDashboardScreen({ navigation, route }) {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <View style={s.roleChipSmall}><Text style={s.roleChipSmallText}>{tm.role}</Text></View>
                     <View style={[s.respBadge,
-                      (respStatus === 'accepted' || respStatus === 'registered') && s.respBadgeAccepted,
+                      memberStatus === 'registered' && s.memberBadgeRegistered,
+                      memberStatus === 'accepted' && s.memberBadgeAccepted,
+                      memberStatus === 'pending' && s.memberBadgePending,
+                    ]}>
+                      <Text style={[s.respBadgeText,
+                        memberStatus === 'registered' && s.memberTextRegistered,
+                        memberStatus === 'accepted' && s.memberTextAccepted,
+                        memberStatus === 'pending' && s.memberTextPending,
+                      ]}>
+                        {membershipStatusLabel(memberStatus)}
+                      </Text>
+                    </View>
+                    <View style={[s.respBadge,
+                      respStatus === 'accepted' && s.respBadgeAccepted,
                       respStatus === 'declined' && s.respBadgeDeclined,
                     ]}>
                       <Text style={[s.respBadgeText,
-                        (respStatus === 'accepted' || respStatus === 'registered') && s.respTextAccepted,
+                        respStatus === 'accepted' && s.respTextAccepted,
                         respStatus === 'declined' && s.respTextDeclined,
                       ]}>
-                        {respStatus === 'registered' ? '✓ Registered' : respStatus === 'accepted' ? '✓ Accepted' : respStatus === 'declined' ? '✗ Declined' : '? Pending'}
+                        {assignmentStatusLabel(respStatus)}
                       </Text>
                     </View>
                   </View>
+                  {assignmentMeta ? (
+                    <Text style={s.planTeamMeta}>{assignmentMeta}</Text>
+                  ) : null}
+                  {respStatus === 'declined' && assignmentResponse.declineReason ? (
+                    <Text style={s.planTeamMetaMuted}>Reason: {assignmentResponse.declineReason}</Text>
+                  ) : null}
                 </View>
                 <TouchableOpacity style={s.removeBtn}
                   onPress={() => handleRemoveFromService(svc.id, tm.personId, tm.role)}>
@@ -1872,7 +2015,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <View style={s.msgHeader}>
                 {!item.read && <View style={s.unreadDot} />}
                 <Text style={s.msgFrom}>{item.fromName || item.from_name || item.fromEmail || item.from_email}</Text>
-                <Text style={s.msgTime}>{timeAgo(item.timestamp)}</Text>
+                <Text style={s.msgTime}>
+                  {item.messageType === 'assignment_response'
+                    ? formatDateTime(item.metadata?.respondedAt || item.timestamp)
+                    : timeAgo(item.timestamp)}
+                </Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                 <Text style={s.msgSubject}>{item.subject}</Text>
@@ -1881,6 +2028,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 )}
               </View>
               <Text style={s.msgPreview} numberOfLines={2}>{item.message}</Text>
+              {assignmentMessageMetaText(item) ? (
+                <Text style={s.msgMeta}>{assignmentMessageMetaText(item)}</Text>
+              ) : null}
               {(item.replies || []).length > 0 && (
                 <Text style={s.repliedBadge}>✓ {item.replies.length} repl{item.replies.length > 1 ? 'ies' : 'y'} sent</Text>
               )}
@@ -1914,7 +2064,16 @@ export default function AdminDashboardScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
         <ScrollView style={{ flex: 1, padding: 16 }} keyboardShouldPersistTaps="handled">
-          <Text style={s.threadFrom}>{selectedMsg.fromName || selectedMsg.from_name || selectedMsg.fromEmail || selectedMsg.from_email} · {timeAgo(selectedMsg.timestamp)}</Text>
+          <Text style={s.threadFrom}>
+            {selectedMsg.fromName || selectedMsg.from_name || selectedMsg.fromEmail || selectedMsg.from_email}
+            {' · '}
+            {selectedMsg.messageType === 'assignment_response'
+              ? formatDateTime(selectedMsg.metadata?.respondedAt || selectedMsg.timestamp)
+              : timeAgo(selectedMsg.timestamp)}
+          </Text>
+          {assignmentMessageMetaText(selectedMsg) ? (
+            <Text style={s.threadMeta}>{assignmentMessageMetaText(selectedMsg)}</Text>
+          ) : null}
           <View style={s.threadBubble}><Text style={s.threadText}>{selectedMsg.message}</Text></View>
           {(selectedMsg.replies || []).map(r => (
             <View key={r.id} style={s.adminBubble}>
@@ -2407,8 +2566,16 @@ const s = StyleSheet.create({
   respBadgeAccepted: { backgroundColor: '#065F4620', borderColor: '#10B981' },
   respBadgeDeclined: { backgroundColor: '#7F1D1D20', borderColor: '#EF4444' },
   respBadgeText: { fontSize: 9, fontWeight: '700', color: '#6B7280' },
+  memberBadgeRegistered: { backgroundColor: '#1D4ED820', borderColor: '#60A5FA' },
+  memberBadgeAccepted: { backgroundColor: '#5B21B620', borderColor: '#A78BFA' },
+  memberBadgePending: { backgroundColor: '#78350F20', borderColor: '#F59E0B' },
   respTextAccepted: { color: '#10B981' },
   respTextDeclined: { color: '#EF4444' },
+  memberTextRegistered: { color: '#60A5FA' },
+  memberTextAccepted: { color: '#C4B5FD' },
+  memberTextPending: { color: '#FBBF24' },
+  planTeamMeta: { fontSize: 11, color: '#9CA3AF', marginTop: 4 },
+  planTeamMetaMuted: { fontSize: 11, color: '#6B7280', marginTop: 2, fontStyle: 'italic' },
   roleChipSmall: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 2, backgroundColor: '#8B5CF620', borderRadius: 6, borderWidth: 1, borderColor: '#8B5CF6' },
   roleChipSmallText: { fontSize: 10, fontWeight: '700', color: '#A78BFA' },
   removeBtn: { padding: 6 },
@@ -2573,6 +2740,7 @@ const s = StyleSheet.create({
   msgTime: { fontSize: 11, color: '#6B7280' },
   msgSubject: { fontSize: 15, fontWeight: '700', color: '#F9FAFB', marginBottom: 4 },
   msgPreview: { fontSize: 13, color: '#9CA3AF', lineHeight: 18, marginBottom: 6 },
+  msgMeta: { fontSize: 11, color: '#A5B4FC', fontWeight: '600', marginBottom: 6 },
   repliedBadge: { fontSize: 11, color: '#22C55E', fontWeight: '600' },
   msgHint: { fontSize: 11, color: '#4B5563', marginTop: 8 },
   broadcastBadge: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#064E3B', borderRadius: 6, borderWidth: 1, borderColor: '#10B981' },
@@ -2580,6 +2748,7 @@ const s = StyleSheet.create({
 
   // Thread
   threadFrom: { fontSize: 12, color: '#9CA3AF', marginBottom: 8 },
+  threadMeta: { fontSize: 12, color: '#A5B4FC', marginBottom: 8, fontWeight: '600' },
   threadBubble: { backgroundColor: '#0B1120', borderRadius: 10, borderWidth: 1, borderColor: '#374151', padding: 14, marginBottom: 16 },
   threadText: { fontSize: 15, color: '#E5E7EB', lineHeight: 24 },
   adminBubble: { backgroundColor: '#1E1B4B', borderRadius: 10, borderWidth: 1, borderColor: '#4F46E5', padding: 12, marginBottom: 10 },
