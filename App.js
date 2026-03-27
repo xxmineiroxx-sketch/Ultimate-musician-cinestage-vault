@@ -48,6 +48,17 @@ const linking = {
   prefixes: ['ultimateplayback://'],
   config: {
     screens: {
+      Main: {
+        screens: {
+          AssignmentsTab: {
+            path: 'assignments',
+            parse: {
+              serviceId: (value) => String(value || '').trim(),
+              decision: (value) => String(value || '').trim().toLowerCase(),
+            },
+          },
+        },
+      },
       Login: 'login',
       Register: 'invite',
       Verify: 'verify',

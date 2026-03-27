@@ -3,7 +3,7 @@
  * View and respond to service assignments
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -97,6 +97,18 @@ function groupByService(list) {
   return merged;
 }
 
+function sortGroupsByTarget(groups, targetServiceId) {
+  const target = String(targetServiceId || '').trim();
+  if (!target) return groups;
+
+  return [...groups].sort((left, right) => {
+    const leftMatch = String(left?.[0]?.service_id || left?.[0]?.id || '').trim() === target;
+    const rightMatch = String(right?.[0]?.service_id || right?.[0]?.id || '').trim() === target;
+    if (leftMatch === rightMatch) return 0;
+    return leftMatch ? -1 : 1;
+  });
+}
+
 // ── Local response persistence ────────────────────────────────────────────────
 // Stores { [service_id]: { status, respondedAt } } in AsyncStorage.
 // This key is NEVER overwritten by sync — once a user responds, it sticks.
@@ -134,13 +146,15 @@ function groupStatus(group) {
   return 'declined';
 }
 
-export default function AssignmentsScreen({ navigation }) {
+export default function AssignmentsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [assignments, setAssignments] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [syncEmail, setSyncEmail] = useState(null); // email being used for sync
   const [syncError, setSyncError] = useState(null);
+  const requestedServiceId = String(route?.params?.serviceId || '').trim();
+  const requestedDecision = String(route?.params?.decision || '').trim().toLowerCase();
 
   const loadAssignments = useCallback(async () => {
     const data = await getAssignments();
@@ -222,6 +236,11 @@ export default function AssignmentsScreen({ navigation }) {
       syncFromServer();
     }, [loadAssignments, syncFromServer])
   );
+
+  useEffect(() => {
+    if (!requestedServiceId) return;
+    syncFromServer();
+  }, [requestedServiceId, syncFromServer]);
 
   const pushResponse = (assignment, status, declineReason = '') => {
     getUserProfile().then(prof => {
@@ -373,6 +392,9 @@ export default function AssignmentsScreen({ navigation }) {
 
   const renderServiceGroup = (group) => {
     const first = group[0];
+    const isTargeted =
+      requestedServiceId
+      && String(first?.service_id || first?.id || '').trim() === requestedServiceId;
     // Guest invites rendered separately
     if (first.type === 'guest_invite') return renderGuestInviteCard(first);
     const status = groupStatus(group);
@@ -382,8 +404,20 @@ export default function AssignmentsScreen({ navigation }) {
 
     return (
       <View key={first.service_id || first.id} style={styles.assignmentCard}>
+        {isTargeted && (
+          <View style={styles.deepLinkInlineBanner}>
+            <Text style={styles.deepLinkInlineText}>
+              {requestedDecision === 'decline'
+                ? 'Opened from email. Review this assignment and tap Decline below.'
+                : requestedDecision === 'accept'
+                  ? 'Opened from email. Review this assignment and tap Accept below.'
+                  : 'Opened from email. Review this assignment below.'}
+            </Text>
+          </View>
+        )}
+
         {/* Header */}
-        <View style={styles.assignmentHeader}>
+        <View style={[styles.assignmentHeader, isTargeted && styles.assignmentHeaderHighlighted]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.serviceName}>{first.service_name}</Text>
             {getOrgLabel(first) ? (
@@ -537,12 +571,28 @@ export default function AssignmentsScreen({ navigation }) {
           </Text>
         </View>
       ) : (() => {
-        const allGroups = groupByService(assignments);
+        const hasTargetAssignment = requestedServiceId
+          ? assignments.some((assignment) => String(assignment?.service_id || assignment?.id || '').trim() === requestedServiceId)
+          : false;
+        const allGroups = sortGroupsByTarget(groupByService(assignments), requestedServiceId);
         const pending  = allGroups.filter(g => groupStatus(g) === 'pending');
         const accepted = allGroups.filter(g => groupStatus(g) === 'accepted');
         const declined = allGroups.filter(g => groupStatus(g) === 'declined');
         return (
           <>
+            {requestedServiceId ? (
+              <View style={styles.deepLinkBanner}>
+                <Text style={styles.deepLinkBannerText}>
+                  {hasTargetAssignment
+                    ? requestedDecision === 'decline'
+                      ? 'This link opened Ultimate Playback on Assignments so you can decline this service in the app.'
+                      : requestedDecision === 'accept'
+                        ? 'This link opened Ultimate Playback on Assignments so you can accept this service in the app.'
+                        : 'This link opened Ultimate Playback on Assignments so you can review this service.'
+                    : 'This link opened Ultimate Playback on Assignments. Pull to sync if the service is not visible yet.'}
+                </Text>
+              </View>
+            ) : null}
             {pending.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Pending ({pending.length})</Text>
@@ -605,6 +655,20 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     marginBottom: 12,
   },
+  deepLinkBanner: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+    backgroundColor: '#1E1B4B',
+  },
+  deepLinkBannerText: {
+    color: '#C7D2FE',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
   assignmentCard: {
     padding: 16,
     backgroundColor: '#0B1120',
@@ -613,11 +677,28 @@ const styles = StyleSheet.create({
     borderColor: '#374151',
     marginBottom: 12,
   },
+  deepLinkInlineBanner: {
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#1E1B4B',
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+  },
+  deepLinkInlineText: {
+    color: '#C7D2FE',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
   assignmentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 12,
+  },
+  assignmentHeaderHighlighted: {
+    marginBottom: 10,
   },
   serviceName: {
     fontSize: 18,
