@@ -8,7 +8,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "testflight:status": "node scripts/sync-testflight-groups.js --check",
+    "testflight:share-latest": "node scripts/sync-testflight-groups.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
