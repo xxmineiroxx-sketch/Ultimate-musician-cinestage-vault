@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native';
 import { getUserProfile, saveUserProfile } from '../services/storage';
 
-import { SYNC_URL } from '../../config/syncConfig';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
 async function serverBlockout(method, params = {}, body = null) {
   try {
@@ -15,11 +15,19 @@ async function serverBlockout(method, params = {}, body = null) {
     const tid  = setTimeout(() => ctrl.abort(), 5000);
     const qs   = new URLSearchParams(params).toString();
     const url  = `${SYNC_URL}/sync/blockout${qs ? '?' + qs : ''}`;
-    const opts = { method, signal: ctrl.signal };
-    if (body) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+    const opts = {
+      method,
+      signal: ctrl.signal,
+      headers: syncHeaders(),
+    };
+    if (body) {
+      opts.body = JSON.stringify(body);
+    }
     const res = await fetch(url, opts);
     clearTimeout(tid);
-    return await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: data?.error || `HTTP ${res.status}` };
+    return data;
   } catch (_) { return null; }
 }
 
@@ -99,7 +107,10 @@ export default function BlockoutCalendarScreen({ navigation }) {
         const tid  = setTimeout(() => ctrl.abort(), 4000);
         const res  = await fetch(
           `${SYNC_URL}/sync/blockouts?email=${encodeURIComponent(userProfile.email.trim().toLowerCase())}`,
-          { signal: ctrl.signal }
+          {
+            signal: ctrl.signal,
+            headers: syncHeaders(),
+          }
         );
         clearTimeout(tid);
         if (res.ok) {
@@ -156,14 +167,20 @@ export default function BlockoutCalendarScreen({ navigation }) {
     try {
       const updatedProfile = { ...profile, blockout_dates: updatedDates };
       await saveUserProfile(updatedProfile);
+      setProfile(updatedProfile);
 
       // Sync to server so admin can see blockouts when assigning
       if (profile?.email) {
-        await serverBlockout('POST', {}, {
+        const syncResult = await serverBlockout('POST', {}, {
           ...newBlockout,
           email: profile.email.trim().toLowerCase(),
           name:  profile.name || profile.email,
+          phone: profile.phone || '',
+          personId: profile.id || '',
         });
+        if (syncResult?.error) {
+          Alert.alert('Saved locally', 'Blockout saved on this device, but cloud sync failed. Pull to refresh and try again.');
+        }
       }
 
       Alert.alert('Success', 'Blockout date added');
@@ -242,10 +259,17 @@ export default function BlockoutCalendarScreen({ navigation }) {
             try {
               const updatedProfile = { ...profile, blockout_dates: updatedDates };
               await saveUserProfile(updatedProfile);
+              setProfile(updatedProfile);
 
               // Remove from server
               if (profile?.email) {
-                await serverBlockout('DELETE', { id: blockoutId, email: profile.email.trim().toLowerCase() });
+                const syncResult = await serverBlockout('DELETE', {
+                  id: blockoutId,
+                  email: profile.email.trim().toLowerCase(),
+                });
+                if (syncResult?.error) {
+                  Alert.alert('Removed locally', 'Blockout was removed on this device, but cloud sync failed. Pull to refresh and try again.');
+                }
               }
 
               Alert.alert('Success', 'Blockout date removed');

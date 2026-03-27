@@ -146,6 +146,30 @@ function groupStatus(group) {
   return 'declined';
 }
 
+function formatConflictDate(dateStr) {
+  if (!dateStr) return 'that date';
+  const parsed = new Date(String(dateStr).includes('T') ? dateStr : `${dateStr}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return dateStr;
+  return parsed.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+function buildAcceptConflictMessage(error) {
+  const conflict = error?.conflict;
+  if (conflict) {
+    const serviceName = conflict.serviceName || 'another service';
+    const orgName = conflict.orgName || 'another organization';
+    const serviceDate = formatConflictDate(conflict.serviceDate);
+    const serviceTime = conflict.serviceTime ? ` at ${conflict.serviceTime}` : '';
+    return `You already accepted "${serviceName}" in ${orgName} on ${serviceDate}${serviceTime}. Decline one assignment before accepting the other.`;
+  }
+  return error?.message || 'Failed to accept assignment';
+}
+
 export default function AssignmentsScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [assignments, setAssignments] = useState([]);
@@ -242,25 +266,34 @@ export default function AssignmentsScreen({ navigation, route }) {
     syncFromServer();
   }, [requestedServiceId, syncFromServer]);
 
-  const pushResponse = (assignment, status, declineReason = '') => {
-    getUserProfile().then(prof => {
-      if (!prof?.email) return;
-      const fullName = [prof.name, prof.lastName].filter(Boolean).join(' ').trim() || prof.email;
-      fetch(`${SYNC_URL}/sync/assignment/respond`, {
-        method: 'POST',
-        headers: syncHeaders(),
-        body: JSON.stringify({
-          serviceId:     assignment.service_id,
-          personId:      prof.email.trim().toLowerCase(),
-          name:          fullName,
-          response:      status,
-          status,
-          role:          assignment.role,
-          serviceName:   assignment.service_name || assignment.service_id,
-          declineReason: declineReason || undefined,
-        }),
-      }).catch(() => {});
-    }).catch(() => {});
+  const pushResponse = async (assignment, status, declineReason = '') => {
+    const prof = await getUserProfile();
+    if (!prof?.email) {
+      throw new Error('No email set in your profile');
+    }
+    const fullName = [prof.name, prof.lastName].filter(Boolean).join(' ').trim() || prof.email;
+    const res = await fetch(`${SYNC_URL}/sync/assignment/respond`, {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify({
+        serviceId:     assignment.service_id,
+        personId:      prof.email.trim().toLowerCase(),
+        name:          fullName,
+        response:      status,
+        status,
+        role:          assignment.role,
+        serviceName:   assignment.service_name || assignment.service_id,
+        declineReason: declineReason || undefined,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.ok === false) {
+      const error = new Error(data?.error || `HTTP ${res.status}`);
+      error.status = res.status;
+      error.conflict = data?.conflict || null;
+      throw error;
+    }
+    return data;
   };
 
   const applyStatusToGroup = (group, status) => {
@@ -271,14 +304,17 @@ export default function AssignmentsScreen({ navigation, route }) {
   const handleAcceptGroup = async (group) => {
     applyStatusToGroup(group, 'accepted');
     try {
+      await Promise.all(group.map(a => pushResponse(a, 'accepted')));
       await Promise.all(group.map(a => updateAssignment(a.id, { status: 'accepted' })));
       // Persist so sync can never reset this decision
       const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
       await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'accepted')));
-      group.forEach(a => pushResponse(a, 'accepted'));
-    } catch {
+    } catch (error) {
       applyStatusToGroup(group, 'pending');
-      Alert.alert('Error', 'Failed to accept assignment');
+      await Promise.all(
+        group.map(a => updateAssignment(a.id, { status: 'pending' }).catch(() => null))
+      );
+      Alert.alert('Assignment conflict', buildAcceptConflictMessage(error));
     }
   };
 
@@ -327,13 +363,16 @@ export default function AssignmentsScreen({ navigation, route }) {
   const doDecline = async (group, declineReason = '') => {
     applyStatusToGroup(group, 'declined');
     try {
+      await Promise.all(group.map(a => pushResponse(a, 'declined', declineReason)));
       await Promise.all(group.map(a => updateAssignment(a.id, { status: 'declined' })));
       // Persist so sync can never reset this decision
       const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
       await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'declined')));
-      group.forEach(a => pushResponse(a, 'declined', declineReason));
     } catch {
       applyStatusToGroup(group, 'pending');
+      await Promise.all(
+        group.map(a => updateAssignment(a.id, { status: 'pending' }).catch(() => null))
+      );
       Alert.alert('Error', 'Failed to decline assignment');
     }
   };
