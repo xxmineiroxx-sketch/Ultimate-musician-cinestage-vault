@@ -23,6 +23,7 @@ class AudioEngine {
     this.syncInterval = null;
     this.onProgressUpdate = null;
     this.onPlaybackStatusChange = null;
+    this.onPlaybackEnded = null;
   }
 
   /**
@@ -395,8 +396,12 @@ class AudioEngine {
       });
 
       // Check if playback finished
-      if (status.position >= status.duration - 100) {
+      if (status.duration && status.position >= status.duration - 100) {
         await this.stop();
+        this.onPlaybackEnded?.({
+          position: status.position,
+          duration: status.duration,
+        });
       }
     }, 100); // Update every 100ms
   }

@@ -452,6 +452,29 @@ function buildPersonalTracks(role, song) {
   return [trackA, trackB];
 }
 
+function isSamePracticeSong(a, b) {
+  if (!a || !b) return false;
+  const keysA = [
+    a.serviceItemId,
+    a.id,
+    a.songId,
+    a.librarySongId,
+    getSongLookupId(a),
+  ].filter(Boolean);
+  const keysB = new Set([
+    b.serviceItemId,
+    b.id,
+    b.songId,
+    b.librarySongId,
+    getSongLookupId(b),
+  ].filter(Boolean));
+  return keysA.some((value) => keysB.has(value));
+}
+
+function findSongIndex(list = [], song) {
+  return (list || []).findIndex((candidate) => isSamePracticeSong(candidate, song));
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function PersonalPracticeScreen({ route, navigation }) {
@@ -465,6 +488,8 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const [selectedSong, setSelectedSong] = useState(null);
   const [pageLoading, setPageLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [autoAdvanceEnabled, setAutoAdvanceEnabled] = useState(true);
+  const [repeatCurrentSong, setRepeatCurrentSong] = useState(false);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -487,6 +512,11 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const [trackDefs, setTrackDefs] = useState([null, null]);
 
   const roleRef = useRef(null);
+  const songsRef = useRef([]);
+  const selectedSongRef = useRef(null);
+  const trackDefsRef = useRef([null, null]);
+  const handleSongFinishedRef = useRef(null);
+  const queueAdvanceLockRef = useRef(false);
 
   // ── Audio engine init (once) ──────────────────────────────────────────────
 
@@ -497,13 +527,29 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       if (dur) setDuration(dur);
     };
     audioEngine.onPlaybackStatusChange = ({ isPlaying: p }) => setIsPlaying(!!p);
+    audioEngine.onPlaybackEnded = () => {
+      handleSongFinishedRef.current?.();
+    };
     return () => {
       audioEngine.stop().catch(() => {});
       audioEngine.unloadAll().catch(() => {});
       audioEngine.onProgressUpdate = null;
       audioEngine.onPlaybackStatusChange = null;
+      audioEngine.onPlaybackEnded = null;
     };
   }, []);
+
+  useEffect(() => {
+    songsRef.current = songs;
+  }, [songs]);
+
+  useEffect(() => {
+    selectedSongRef.current = selectedSong;
+  }, [selectedSong]);
+
+  useEffect(() => {
+    trackDefsRef.current = trackDefs;
+  }, [trackDefs]);
 
   // ── Reload on focus (handles tab tap + navigate-with-new-params) ──────────
 
@@ -556,6 +602,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
       const fetchedSongs = await fetchSetlist(resolvedServiceId);
       setSongs(fetchedSongs);
+      songsRef.current = fetchedSongs;
 
       // Auto-select: prefer initSongId param, else first song
       const initSongId = paramsRef.current.songId;
@@ -625,9 +672,97 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     }
   }
 
+  function applySongSelection(song, defs) {
+    selectedSongRef.current = song;
+    trackDefsRef.current = defs;
+    setSelectedSong(song);
+    setTrackDefs(defs);
+  }
+
+  function getSongPlaybackState(song, defs) {
+    const [trackA, trackB] = defs || [null, null];
+    const mediaReferenceUrl = getSongMediaReferenceUrl(song, song?.stems, song?.harmonies);
+    const hasDirectPracticeAudio =
+      getTrackSources(trackA).length > 0 || getTrackSources(trackB).length > 0;
+    return {
+      mediaReferenceUrl,
+      hasDirectPracticeAudio,
+      hasExternalMediaOnly: !!mediaReferenceUrl && !hasDirectPracticeAudio,
+    };
+  }
+
+  async function loadPracticeAudio(song, defs, options = {}) {
+    const {
+      openExternalOnMissing = false,
+      suppressMissingAlert = false,
+      resetTransport = true,
+    } = options;
+
+    const [trackA, trackB] = defs || [null, null];
+    const playbackOnlyMode = isPlaybackOnlyRole(roleRef.current || role);
+    const { mediaReferenceUrl } = getSongPlaybackState(song, defs);
+
+    if (!trackA?.uri && !trackB?.uri) {
+      if (openExternalOnMissing && mediaReferenceUrl) {
+        await openMediaReference(mediaReferenceUrl);
+        return { loaded: false, openedExternal: true };
+      }
+      if (!suppressMissingAlert) {
+        Alert.alert(
+          playbackOnlyMode ? 'No Playback Available' : 'No Stems Available',
+          playbackOnlyMode
+            ? 'This song does not have playback audio available yet. Ask your admin to upload or publish the song audio.'
+            : 'This song has no playable role stems or audio reference yet.',
+          [{ text: 'OK' }]
+        );
+      }
+      return { loaded: false };
+    }
+
+    setLoadingStems(true);
+    try {
+      await audioEngine.stop().catch(() => {});
+      await audioEngine.unloadAll();
+      let loaded = 0;
+      for (const source of getTrackSources(trackA)) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await audioEngine.loadStem(source.id, source.uri);
+        if (ok) loaded++;
+      }
+      for (const source of getTrackSources(trackB)) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await audioEngine.loadStem(source.id, source.uri);
+        if (ok) loaded++;
+      }
+      setStemsReady(loaded > 0);
+      setMuteA(false);
+      setMuteB(false);
+      if (resetTransport) {
+        setPosition(0);
+        setDuration(0);
+      }
+      return { loaded: loaded > 0 };
+    } catch (e) {
+      if (!suppressMissingAlert) {
+        Alert.alert('Load Error', 'Could not load audio tracks. Check your connection.');
+      }
+      console.error('loadPracticeAudio error:', e);
+      return { loaded: false, error: e };
+    } finally {
+      setLoadingStems(false);
+    }
+  }
+
   // ── song selection ────────────────────────────────────────────────────────
 
-  async function selectSong(song, currentRole) {
+  async function selectSong(song, currentRole, options = {}) {
+    const {
+      autoLoad = false,
+      autoPlay = false,
+      openExternalOnMissing = false,
+      suppressMissingAlert = false,
+    } = options;
+
     setStemsReady(false);
     setIsPlaying(false);
     setPosition(0);
@@ -641,8 +776,8 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
     // First pass — use whatever metadata the song already has
     let enriched = song;
-    setSelectedSong(enriched);
-    setTrackDefs(buildPersonalTracks(r, enriched));
+    let defs = buildPersonalTracks(r, enriched);
+    applySongSelection(enriched, defs);
 
     // Second pass — fetch stems from KV (library-pull doesn't include them)
     const lookupId = getSongLookupId(song);
@@ -650,10 +785,23 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       const { stems, harmonies } = await fetchSongStems(song);
       if (Object.keys(stems).length > 0 || Object.keys(harmonies).length > 0) {
         enriched = { ...song, stems, harmonies };
-        setSelectedSong(enriched);
-        setTrackDefs(buildPersonalTracks(r, enriched));
+        defs = buildPersonalTracks(r, enriched);
+        applySongSelection(enriched, defs);
       }
     }
+
+    if (autoLoad || autoPlay) {
+      const loadResult = await loadPracticeAudio(enriched, defs, {
+        openExternalOnMissing,
+        suppressMissingAlert,
+      });
+      if (loadResult.loaded && autoPlay) {
+        await audioEngine.play();
+      }
+      return { song: enriched, defs, ...loadResult };
+    }
+
+    return { song: enriched, defs, loaded: false };
   }
 
   const openMediaReference = useCallback(async (url) => {
@@ -675,60 +823,21 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   async function handleLoadStems() {
     if (!selectedSong) return;
-    const [defA, defB] = trackDefs;
-    const playbackOnlyMode = isPlaybackOnlyRole(roleRef.current || role);
-    const mediaReferenceUrl = getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies);
-
-    if (!defA?.uri && !defB?.uri) {
-      if (mediaReferenceUrl) {
-        await openMediaReference(mediaReferenceUrl);
-        return;
-      }
-      Alert.alert(
-        playbackOnlyMode ? 'No Playback Available' : 'No Stems Available',
-        playbackOnlyMode
-          ? 'This song does not have playback audio available yet. Ask your admin to upload or publish the song audio.'
-          : 'This song hasn\'t been processed by CineStage yet. Ask your admin to run stem separation.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    setLoadingStems(true);
-    try {
-      await audioEngine.unloadAll();
-      let loaded = 0;
-      for (const source of getTrackSources(defA)) {
-        // eslint-disable-next-line no-await-in-loop
-        const ok = await audioEngine.loadStem(source.id, source.uri);
-        if (ok) loaded++;
-      }
-      for (const source of getTrackSources(defB)) {
-        // eslint-disable-next-line no-await-in-loop
-        const ok = await audioEngine.loadStem(source.id, source.uri);
-        if (ok) loaded++;
-      }
-      setStemsReady(loaded > 0);
-      setMuteA(false);
-      setMuteB(false);
-    } catch (e) {
-      Alert.alert('Load Error', 'Could not load audio tracks. Check your connection.');
-      console.error('loadStems error:', e);
-    } finally {
-      setLoadingStems(false);
-    }
+    await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current, {
+      openExternalOnMissing: true,
+    });
   }
 
   // ── playback ──────────────────────────────────────────────────────────────
 
   async function handlePlayPause() {
     if (!stemsReady) {
-      const mediaReferenceUrl = getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies);
-      if (!defA?.uri && !defB?.uri && mediaReferenceUrl) {
-        await openMediaReference(mediaReferenceUrl);
-        return;
+      const result = await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current, {
+        openExternalOnMissing: true,
+      });
+      if (result.loaded) {
+        await audioEngine.play();
       }
-      await handleLoadStems();
       return;
     }
     try {
@@ -765,6 +874,34 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     } catch (e) {}
   }
 
+  async function jumpSong(delta) {
+    const currentIndex = findSongIndex(songsRef.current, selectedSongRef.current);
+    if (currentIndex < 0) return;
+    const nextIndex = currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= songsRef.current.length) return;
+
+    await selectSong(songsRef.current[nextIndex], roleRef.current || role, {
+      autoPlay: isPlaying,
+      suppressMissingAlert: !isPlaying,
+    });
+  }
+
+  function toggleAutoAdvance() {
+    setAutoAdvanceEnabled((prev) => {
+      const next = !prev;
+      if (next) setRepeatCurrentSong(false);
+      return next;
+    });
+  }
+
+  function toggleRepeatCurrentSong() {
+    setRepeatCurrentSong((prev) => {
+      const next = !prev;
+      if (next) setAutoAdvanceEnabled(false);
+      return next;
+    });
+  }
+
   async function toggleMuteA() {
     const next = !muteA;
     setMuteA(next);
@@ -787,6 +924,38 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     }
   }
 
+  handleSongFinishedRef.current = async () => {
+    if (queueAdvanceLockRef.current) return;
+    queueAdvanceLockRef.current = true;
+    try {
+      if (repeatCurrentSong && selectedSongRef.current) {
+        const result = await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current, {
+          suppressMissingAlert: true,
+        });
+        if (result.loaded) {
+          await audioEngine.play();
+        }
+        return;
+      }
+
+      if (!autoAdvanceEnabled) return;
+      const currentIndex = findSongIndex(songsRef.current, selectedSongRef.current);
+      if (currentIndex < 0 || currentIndex >= songsRef.current.length - 1) return;
+      for (let idx = currentIndex + 1; idx < songsRef.current.length; idx += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await selectSong(songsRef.current[idx], roleRef.current || role, {
+          autoPlay: true,
+          suppressMissingAlert: true,
+        });
+        if (result?.loaded) return;
+      }
+    } catch (error) {
+      console.warn('practice queue advance error:', error);
+    } finally {
+      queueAdvanceLockRef.current = false;
+    }
+  };
+
   // ── helpers ───────────────────────────────────────────────────────────────
 
   const formatTime = (ms) => {
@@ -797,11 +966,16 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const progressPct = duration > 0 ? (position / duration) * 100 : 0;
   const [defA, defB] = trackDefs;
   const playbackOnlyMode = isPlaybackOnlyRole(role);
-  const mediaReferenceUrl = selectedSong
-    ? getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies)
-    : null;
-  const hasDirectPracticeAudio = getTrackSources(defA).length > 0 || getTrackSources(defB).length > 0;
-  const hasExternalMediaOnly = !!mediaReferenceUrl && !hasDirectPracticeAudio;
+  const {
+    mediaReferenceUrl,
+    hasDirectPracticeAudio,
+    hasExternalMediaOnly,
+  } = selectedSong
+    ? getSongPlaybackState(selectedSong, trackDefs)
+    : { mediaReferenceUrl: null, hasDirectPracticeAudio: false, hasExternalMediaOnly: false };
+  const selectedSongIndex = findSongIndex(songs, selectedSong);
+  const hasPrevSong = selectedSongIndex > 0;
+  const hasNextSong = selectedSongIndex >= 0 && selectedSongIndex < songs.length - 1;
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -962,7 +1136,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                   <Text style={styles.tipText}>
                     {hasExternalMediaOnly
                       ? '💡 Use the song media as a temporary reference until the role stems are fixed.'
-                      : '💡 Mute <Text style={styles.tipBold}>your track</Text> to practice along with the rest of the band.'}
+                      : '💡 Mute your track to practice along with the rest of the band.'}
                   </Text>
                 </View>
               )}
@@ -970,6 +1144,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
             {/* Transport */}
             <View style={styles.transport}>
+              <TouchableOpacity style={styles.transpBtn} onPress={() => jumpSong(-1)} disabled={!hasPrevSong || loadingStems}>
+                <Text style={[styles.transpBtnText, (!hasPrevSong || loadingStems) && styles.transpDisabled]}>⏮︎♫</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={styles.transpBtn} onPress={handleRestart} disabled={!stemsReady}>
                 <Text style={[styles.transpBtnText, !stemsReady && styles.transpDisabled]}>⏮</Text>
               </TouchableOpacity>
@@ -998,7 +1175,38 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                       {stemsReady ? '✓' : hasExternalMediaOnly ? '🌐' : '📥'}
                     </Text>}
               </TouchableOpacity>
+              <TouchableOpacity style={styles.transpBtn} onPress={() => jumpSong(1)} disabled={!hasNextSong || loadingStems}>
+                <Text style={[styles.transpBtnText, (!hasNextSong || loadingStems) && styles.transpDisabled]}>♫⏭︎</Text>
+              </TouchableOpacity>
             </View>
+
+            <View style={styles.modeRow}>
+              <TouchableOpacity
+                style={[styles.modeChip, autoAdvanceEnabled && styles.modeChipActive]}
+                onPress={toggleAutoAdvance}
+              >
+                <Text style={[styles.modeChipText, autoAdvanceEnabled && styles.modeChipTextActive]}>
+                  {autoAdvanceEnabled ? 'Auto Next On' : 'Auto Next Off'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeChip, repeatCurrentSong && styles.modeChipActive]}
+                onPress={toggleRepeatCurrentSong}
+              >
+                <Text style={[styles.modeChipText, repeatCurrentSong && styles.modeChipTextActive]}>
+                  {repeatCurrentSong ? 'Repeat Song On' : 'Repeat Song Off'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modeHint}>
+              {repeatCurrentSong
+                ? 'The current song will restart automatically when it ends.'
+                : autoAdvanceEnabled
+                  ? 'The next playable song in this setlist will start automatically when the current song finishes.'
+                  : 'Manual song selection mode.'}
+              {hasExternalMediaOnly ? ' External media links still open outside the app.' : ''}
+            </Text>
           </>
         )}
 
@@ -1185,6 +1393,40 @@ const styles = StyleSheet.create({
   },
   transpDisabled: { opacity: 0.25 },
   playBtnLoad: { backgroundColor: '#374151' },
+  modeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 14,
+  },
+  modeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0F172A',
+  },
+  modeChipActive: {
+    backgroundColor: '#312E81',
+    borderColor: '#6366F1',
+  },
+  modeChipText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modeChipTextActive: {
+    color: '#EDE9FE',
+  },
+  modeHint: {
+    marginTop: 10,
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
 
   // No stems
   noStemsBox: {

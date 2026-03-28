@@ -41,6 +41,19 @@ const SONG_LIBRARY_FALLBACK_FIELDS = [
   'routing',
 ];
 
+const DIRECT_AUDIO_PATH_RE = /\.(mp3|wav|m4a|aac|flac|ogg|opus|caf|aif|aiff|mp4)(?:$|[?#])/i;
+const KNOWN_EXTERNAL_MEDIA_HOSTS = [
+  'youtube.com',
+  'youtu.be',
+  'spotify.com',
+  'music.apple.com',
+  'music.amazon.com',
+  'deezer.com',
+  'tidal.com',
+  'soundcloud.com',
+  'pandora.com',
+];
+
 function hasMeaningfulValue(value) {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
@@ -73,9 +86,46 @@ export function isYouTubeUrl(value) {
   }
 }
 
+export function isExternalStreamingUrl(value) {
+  const url = normalizeUrl(value);
+  if (!url) return false;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return KNOWN_EXTERNAL_MEDIA_HOSTS.some(
+      (candidate) => host === candidate || host.endsWith(`.${candidate}`)
+    );
+  } catch {
+    return KNOWN_EXTERNAL_MEDIA_HOSTS.some((candidate) => url.includes(candidate));
+  }
+}
+
 export function getPlayableMediaUrl(value) {
   const url = normalizeUrl(value);
-  return url && !isYouTubeUrl(url) ? url : null;
+  if (!url) return null;
+  if (/^(file|content|ph):\/\//i.test(url)) return url;
+  if (isExternalStreamingUrl(url)) return null;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+    if (
+      DIRECT_AUDIO_PATH_RE.test(path)
+      || path.includes('/storage/')
+      || path.includes('/stems/')
+      || path.includes('/uploads/')
+      || host.endsWith('workers.dev')
+      || host.endsWith('pages.dev')
+      || host.endsWith('r2.dev')
+    ) {
+      return url;
+    }
+    return null;
+  } catch {
+    return DIRECT_AUDIO_PATH_RE.test(url) ? url : null;
+  }
 }
 
 function getSongMediaCandidates(song, stems = {}, harmonies = {}) {
