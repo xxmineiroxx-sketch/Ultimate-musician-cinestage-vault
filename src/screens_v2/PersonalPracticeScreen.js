@@ -85,6 +85,31 @@ const ROLE_DISPLAY = {
   stage_manager: 'Stage Manager',
 };
 
+const STEM_ALIAS_MAP = {
+  keys: ['keys', 'keyboard', 'piano', 'synth', 'teclas'],
+  guitar: ['guitar', 'guitars', 'electric_guitar', 'acoustic_guitar', 'rhythm_guitar', 'violao', 'gtr'],
+  bass: ['bass', 'baixo'],
+  drums: ['drums', 'drum', 'percussion', 'bateria'],
+  vocals: ['vocals', 'vocal', 'lead_vocal', 'lead', 'voz'],
+  lead_vocal: ['lead_vocal', 'lead', 'vocals', 'vocal_lead'],
+  voice1: ['voice1', 'soprano', 'bgv1'],
+  voice2: ['voice2', 'alto', 'contralto', 'bgv2'],
+  voice3: ['voice3', 'tenor', 'bgv3'],
+  soprano: ['soprano', 'voice1', 'bgv1'],
+  alto: ['alto', 'contralto', 'voice2', 'bgv2'],
+  tenor: ['tenor', 'voice3', 'bgv3'],
+  other: ['other', 'instrumental', 'band'],
+};
+
+const NON_PRACTICE_STEM_KEYS = new Set([
+  'mix',
+  'full_mix',
+  'full_song',
+  'click',
+  'guide',
+  'pad',
+]);
+
 // Maps UM title-case role strings → internal snake_case keys
 const ROLE_NORMALIZE_MAP = {
   leader: 'worship_leader',
@@ -134,6 +159,129 @@ function normalizeRole(role) {
 }
 
 const INSTRUMENT_ROLES = new Set(Object.keys(INSTRUMENT_STEM_MAP));
+
+function normalizeStemToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function extractPlayableStemUri(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return getPlayableMediaUrl(value);
+  if (typeof value !== 'object') return null;
+  return getPlayableMediaUrl(
+    value.url ||
+    value.uri ||
+    value.localUri ||
+    value.file_url ||
+    value.fileUrl ||
+    value.downloadUrl ||
+    value.streamUrl ||
+    null
+  );
+}
+
+function collectPracticeStemEntries(stems = {}, harmonies = {}) {
+  const entries = [];
+  const seenUris = new Set();
+
+  const pushEntry = (kind, key, value) => {
+    const uri = extractPlayableStemUri(value);
+    if (!uri || seenUris.has(uri)) return;
+
+    const normalizedKey = normalizeStemToken(key);
+    const normalizedType = normalizeStemToken(value?.type || key);
+    if (NON_PRACTICE_STEM_KEYS.has(normalizedKey) || NON_PRACTICE_STEM_KEYS.has(normalizedType)) {
+      return;
+    }
+
+    seenUris.add(uri);
+    entries.push({
+      id: `${kind}:${normalizedKey || normalizedType || entries.length}`,
+      key: normalizedKey,
+      type: normalizedType,
+      label: String(value?.label || key || '').trim(),
+      uri,
+      kind,
+    });
+  };
+
+  Object.entries(stems || {}).forEach(([key, value]) => pushEntry('stem', key, value));
+  Object.entries(harmonies || {}).forEach(([key, value]) => pushEntry('harmony', key, value));
+
+  return entries;
+}
+
+function getStemEntryAliases(entry) {
+  const tokens = new Set();
+  [entry?.key, entry?.type, entry?.label]
+    .map(normalizeStemToken)
+    .filter(Boolean)
+    .forEach((token) => tokens.add(token));
+  return tokens;
+}
+
+function entryMatchesStem(entry, canonical) {
+  const aliases = STEM_ALIAS_MAP[canonical] || [canonical];
+  const tokens = getStemEntryAliases(entry);
+  return aliases.map(normalizeStemToken).some((alias) => tokens.has(alias));
+}
+
+function findStemEntry(entries, candidates = []) {
+  for (const candidate of candidates) {
+    const match = entries.find((entry) => entryMatchesStem(entry, candidate));
+    if (match) return match;
+  }
+  return null;
+}
+
+function isVocalEntry(entry) {
+  if (!entry) return false;
+  if (entry.kind === 'harmony') return true;
+  return ['vocals', 'lead_vocal', 'voice1', 'voice2', 'voice3', 'soprano', 'alto', 'tenor']
+    .some((candidate) => entryMatchesStem(entry, candidate));
+}
+
+function buildTrackSources(trackId, entries = []) {
+  const seenUris = new Set();
+  return (entries || [])
+    .filter(Boolean)
+    .map((entry, index) => {
+      if (!entry?.uri || seenUris.has(entry.uri)) return null;
+      seenUris.add(entry.uri);
+      const suffix = normalizeStemToken(entry.id || entry.key || entry.type || entry.label || `source_${index}`) || `source_${index}`;
+      return {
+        id: `${trackId}:${suffix}`,
+        uri: entry.uri,
+        label: entry.label,
+        type: entry.type,
+      };
+    })
+    .filter(Boolean);
+}
+
+function makeTrackDef({ id, label, sublabel, entries = [], externalUrl = null, color, icon }) {
+  const sources = buildTrackSources(id, entries);
+  return {
+    id,
+    label,
+    sublabel,
+    uri: sources[0]?.uri || null,
+    sources,
+    externalUrl,
+    color,
+    icon,
+  };
+}
+
+function getTrackSources(def) {
+  if (!def) return [];
+  if (Array.isArray(def.sources) && def.sources.length > 0) return def.sources;
+  return def.uri ? [{ id: def.id, uri: def.uri }] : [];
+}
 
 function isPlaybackOnlyRole(role) {
   if (!role) return false;
@@ -188,32 +336,6 @@ function resolveHarmonyTrack(role, harmonies = {}) {
   };
 }
 
-function resolveInstrumentTrack(role, stems = {}) {
-  const stemKey = INSTRUMENT_STEM_MAP[role] || 'other';
-  const candidates = [stemKey];
-
-  if ((stemKey === 'keys' || stemKey === 'guitar') && !candidates.includes('other')) {
-    candidates.push('other');
-  }
-
-  for (const key of candidates) {
-    const uri = getPlayableMediaUrl(stems[key]);
-    if (uri) {
-      return {
-        key,
-        uri,
-        isFallback: key !== stemKey,
-      };
-    }
-  }
-
-  return {
-    key: stemKey,
-    uri: null,
-    isFallback: false,
-  };
-}
-
 function detectPrimaryRole(roles = []) {
   const normalizedRoles = roles.map(normalizeRole).filter(Boolean);
   // Return first musical role found
@@ -232,69 +354,101 @@ function buildPersonalTracks(role, song) {
   const stems = song?.stems || {};
   const harmonies = song?.harmonies || {};
   const mediaUrl = getSongMediaReferenceUrl(song, stems, harmonies);
+  const stemEntries = collectPracticeStemEntries(stems, harmonies);
 
   if (isPlaybackOnlyRole(role)) {
     const roleLabel = ROLE_DISPLAY[role] || 'Playback';
     const referenceUri = resolveReferenceAudioUri(song, stems, harmonies);
-    const trackA = {
+    const trackA = makeTrackDef({
       id: 'playback',
       label: referenceUri ? 'Playback' : 'Song Media',
       sublabel: referenceUri ? `${roleLabel} reference mix` : 'Open media below',
-      uri: referenceUri,
+      entries: referenceUri
+        ? [{ key: 'playback', type: 'reference', label: 'Playback', uri: referenceUri }]
+        : [],
       externalUrl: referenceUri ? null : mediaUrl,
       color: '#3B82F6',
       icon: '🎧',
-    };
+    });
     return [trackA, null];
   }
 
   if (VOCAL_ROLES.has(role)) {
-    const harmonyTrack = resolveHarmonyTrack(role, harmonies);
+    const harmonyEntry = findStemEntry(
+      stemEntries,
+      HARMONY_CANDIDATES[role] || ['voice1']
+    );
+    const harmonyTrack = harmonyEntry || resolveHarmonyTrack(role, harmonies);
+    const instrumentalEntries = stemEntries.filter((entry) => !isVocalEntry(entry));
     const instrumentalUri = resolveVocalBedUri(song, stems, harmonies, harmonyTrack.uri);
-    const trackA = {
+    const trackA = makeTrackDef({
       id: 'instrument_bed',
-      label: instrumentalUri ? 'Full Instruments' : 'Song Media',
-      sublabel: instrumentalUri ? 'Band bed for vocal practice' : 'Open media below',
-      uri: instrumentalUri,
-      externalUrl: instrumentalUri ? null : mediaUrl,
+      label: instrumentalEntries.length > 0 || instrumentalUri ? 'Full Instruments' : 'Song Media',
+      sublabel: instrumentalEntries.length > 0 || instrumentalUri ? 'Band bed for vocal practice' : 'Open media below',
+      entries: instrumentalEntries.length > 0
+        ? instrumentalEntries
+        : (
+          instrumentalUri
+            ? [{ key: 'instrument_bed', type: 'reference', label: 'Full Instruments', uri: instrumentalUri }]
+            : []
+        ),
+      externalUrl: instrumentalEntries.length > 0 || instrumentalUri ? null : mediaUrl,
       color: '#3B82F6',
       icon: '🎧',
-    };
-    const trackB = {
+    });
+    const trackB = makeTrackDef({
       id: 'my_harmony',
-      label: harmonyTrack.label,
+      label: harmonyTrack.label || 'Your Harmony',
       sublabel: harmonyTrack.uri ? 'Your part' : 'Not available yet',
-      uri: harmonyTrack.uri,
+      entries: harmonyTrack.uri
+        ? [{ key: harmonyTrack.label || 'my_harmony', type: 'harmony', label: harmonyTrack.label || 'Your Harmony', uri: harmonyTrack.uri }]
+        : [],
       color: '#10B981',
       icon: '🎵',
-    };
+    });
     return [trackA, trackB];
   }
 
-  // Instrument
-  const stemTrack = resolveInstrumentTrack(role, stems);
-  const stemLabel = stemTrack.key === 'other' && stemTrack.isFallback
-    ? 'Instrument Bed'
-    : stemTrack.key.charAt(0).toUpperCase() + stemTrack.key.slice(1);
-  const referenceUri = resolveReferenceAudioUri(song, stems, harmonies, stemTrack.uri);
+  const canonicalStem = INSTRUMENT_STEM_MAP[role] || 'other';
+  const myStemEntry = findStemEntry(stemEntries, [canonicalStem]);
+  const stemLabel = ROLE_DISPLAY[role] || myStemEntry?.label || 'Your Part';
+  const accompanimentEntries = stemEntries.filter((entry) =>
+    myStemEntry ? entry.uri !== myStemEntry.uri : true
+  );
+  const referenceUri = resolveReferenceAudioUri(
+    song,
+    stems,
+    harmonies,
+    myStemEntry?.uri || null
+  );
 
-  const trackA = {
+  const trackA = makeTrackDef({
     id: 'full_mix',
-    label: referenceUri ? 'Full Song' : 'Song Media',
-    sublabel: referenceUri ? 'Everyone playing' : 'Open media below',
-    uri: referenceUri,
-    externalUrl: referenceUri ? null : mediaUrl,
+    label: accompanimentEntries.length > 0 || referenceUri ? 'Full Song' : 'Song Media',
+    sublabel: accompanimentEntries.length > 0 || referenceUri
+      ? `Everyone except ${stemLabel}`
+      : 'Open media below',
+    entries: accompanimentEntries.length > 0
+      ? accompanimentEntries
+      : (
+        referenceUri
+          ? [{ key: 'reference', type: 'reference', label: 'Full Song', uri: referenceUri }]
+          : []
+      ),
+    externalUrl: accompanimentEntries.length > 0 || referenceUri ? null : mediaUrl,
     color: '#3B82F6',
     icon: '🎸',
-  };
-  const trackB = {
+  });
+  const trackB = makeTrackDef({
     id: 'my_stem',
     label: stemLabel,
-    sublabel: stemTrack.isFallback ? 'Closest available track' : 'Your isolated track',
-    uri: stemTrack.uri,
+    sublabel: myStemEntry?.uri ? 'Your isolated track' : 'Not available yet',
+    entries: myStemEntry?.uri
+      ? [{ key: myStemEntry.key || canonicalStem, type: myStemEntry.type || canonicalStem, label: stemLabel, uri: myStemEntry.uri }]
+      : [],
     color: '#F59E0B',
-    icon: stemTrack.key === 'bass' ? '🎸' : stemTrack.key === 'drums' ? '🥁' : stemTrack.key === 'keys' ? '🎹' : '🎵',
-  };
+    icon: canonicalStem === 'bass' ? '🎸' : canonicalStem === 'drums' ? '🥁' : canonicalStem === 'keys' ? '🎹' : '🎵',
+  });
   return [trackA, trackB];
 }
 
@@ -544,15 +698,17 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     try {
       await audioEngine.unloadAll();
       let loaded = 0;
-      if (defA?.uri) {
-        await audioEngine.loadStem(defA.id, defA.uri);
-        loaded++;
+      for (const source of getTrackSources(defA)) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await audioEngine.loadStem(source.id, source.uri);
+        if (ok) loaded++;
       }
-      if (defB?.uri) {
-        await audioEngine.loadStem(defB.id, defB.uri);
-        loaded++;
+      for (const source of getTrackSources(defB)) {
+        // eslint-disable-next-line no-await-in-loop
+        const ok = await audioEngine.loadStem(source.id, source.uri);
+        if (ok) loaded++;
       }
-      setStemsReady(true);
+      setStemsReady(loaded > 0);
       setMuteA(false);
       setMuteB(false);
     } catch (e) {
@@ -612,16 +768,22 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   async function toggleMuteA() {
     const next = !muteA;
     setMuteA(next);
-    if (stemsReady && trackDefs[0]?.id) {
-      await audioEngine.setTrackMute(trackDefs[0].id, next);
+    if (stemsReady) {
+      for (const source of getTrackSources(trackDefs[0])) {
+        // eslint-disable-next-line no-await-in-loop
+        await audioEngine.setTrackMute(source.id, next);
+      }
     }
   }
 
   async function toggleMuteB() {
     const next = !muteB;
     setMuteB(next);
-    if (stemsReady && trackDefs[1]?.id) {
-      await audioEngine.setTrackMute(trackDefs[1].id, next);
+    if (stemsReady) {
+      for (const source of getTrackSources(trackDefs[1])) {
+        // eslint-disable-next-line no-await-in-loop
+        await audioEngine.setTrackMute(source.id, next);
+      }
     }
   }
 
@@ -638,7 +800,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const mediaReferenceUrl = selectedSong
     ? getSongMediaReferenceUrl(selectedSong, selectedSong?.stems, selectedSong?.harmonies)
     : null;
-  const hasDirectPracticeAudio = !!defA?.uri || !!defB?.uri;
+  const hasDirectPracticeAudio = getTrackSources(defA).length > 0 || getTrackSources(defB).length > 0;
   const hasExternalMediaOnly = !!mediaReferenceUrl && !hasDirectPracticeAudio;
 
   // ── render ────────────────────────────────────────────────────────────────
