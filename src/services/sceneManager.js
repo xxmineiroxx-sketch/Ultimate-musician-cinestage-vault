@@ -11,6 +11,7 @@ class SceneManager {
     this.currentScene = null;
     this.songStructure = [];
     this.autoTransition = true;
+    this.unsubscribeProgress = null;
   }
 
   /**
@@ -83,8 +84,9 @@ class SceneManager {
    */
   startAutoTransition() {
     this.autoTransition = true;
+    this.unsubscribeProgress?.();
 
-    audioEngine.onProgressUpdate = ({ position }) => {
+    const handleProgress = ({ position }) => {
       if (this.autoTransition) {
         const scene = this.getSceneForPosition(position);
         if (scene && (!this.currentScene || scene.id !== this.currentScene.id)) {
@@ -92,6 +94,20 @@ class SceneManager {
         }
       }
     };
+
+    if (typeof audioEngine.addProgressListener === 'function') {
+      this.unsubscribeProgress = audioEngine.addProgressListener(handleProgress);
+    } else {
+      const previous = audioEngine.onProgressUpdate;
+      audioEngine.onProgressUpdate = (payload) => {
+        previous?.(payload);
+        handleProgress(payload);
+      };
+      this.unsubscribeProgress = () => {
+        if (audioEngine.onProgressUpdate === previous || !audioEngine.onProgressUpdate) return;
+        audioEngine.onProgressUpdate = previous || null;
+      };
+    }
 
     console.log('Auto-transition enabled');
   }
@@ -101,6 +117,8 @@ class SceneManager {
    */
   stopAutoTransition() {
     this.autoTransition = false;
+    this.unsubscribeProgress?.();
+    this.unsubscribeProgress = null;
     console.log('Auto-transition disabled');
   }
 
@@ -187,6 +205,8 @@ class SceneManager {
     this.currentScene = null;
     this.songStructure = [];
     this.autoTransition = false;
+    this.unsubscribeProgress?.();
+    this.unsubscribeProgress = null;
   }
 }
 

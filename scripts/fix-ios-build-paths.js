@@ -80,6 +80,149 @@ function ensureReactCoreHeadersSymlink(reactCoreRoot) {
   );
 }
 
+function ensureReactNativeDependenciesHeaders(reactDependenciesRoot) {
+  const headersTarget = path.join(
+    reactDependenciesRoot,
+    'framework',
+    'packages',
+    'react-native',
+    'ReactNativeDependencies.xcframework',
+    'Headers'
+  );
+
+  if (!fs.existsSync(headersTarget)) {
+    return;
+  }
+
+  const headersPath = path.join(reactDependenciesRoot, 'Headers');
+
+  try {
+    const stats = fs.lstatSync(headersPath);
+    if (stats.isSymbolicLink()) {
+      const currentTarget = path.resolve(
+        path.dirname(headersPath),
+        fs.readlinkSync(headersPath)
+      );
+      if (currentTarget === headersTarget) {
+        return;
+      }
+    }
+  } catch (error) {
+    // Fall through and rebuild the header link.
+  }
+
+  fs.rmSync(headersPath, { force: true, recursive: true });
+  fs.symlinkSync(
+    path.relative(path.dirname(headersPath), headersTarget),
+    headersPath,
+    'dir'
+  );
+  console.log(
+    `[fix-ios-build-paths] Rebuilt ${path.relative(projectRoot, headersPath)}`
+  );
+}
+
+function ensureReactNativeDependenciesNamespaces(reactDependenciesRoot) {
+  const headersPath = path.join(reactDependenciesRoot, 'Headers');
+
+  if (!fs.existsSync(headersPath)) {
+    return;
+  }
+
+  const headerEntries = fs
+    .readdirSync(headersPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .map((entry) => entry.name);
+
+  for (const entry of headerEntries) {
+    const namespacePath = path.join(reactDependenciesRoot, entry);
+    const namespaceTarget = path.join(headersPath, entry);
+
+    try {
+      const stats = fs.lstatSync(namespacePath);
+
+      if (stats.isSymbolicLink()) {
+        const currentTarget = path.resolve(
+          path.dirname(namespacePath),
+          fs.readlinkSync(namespacePath)
+        );
+
+        if (currentTarget === namespaceTarget) {
+          continue;
+        }
+      }
+
+      fs.rmSync(namespacePath, { force: true, recursive: true });
+    } catch (error) {
+      // Fall through and rebuild the namespace link.
+    }
+
+    fs.symlinkSync(
+      path.relative(path.dirname(namespacePath), namespaceTarget),
+      namespacePath,
+      'dir'
+    );
+    console.log(
+      `[fix-ios-build-paths] Rebuilt ${path.relative(projectRoot, namespacePath)}`
+    );
+  }
+}
+
+function ensurePublicReactNativeDependencyNamespaces(reactDependenciesRoot) {
+  const headersPath = path.join(reactDependenciesRoot, 'Headers');
+  const publicHeadersRoot = path.join(projectRoot, 'ios', 'Pods', 'Headers', 'Public');
+
+  if (!fs.existsSync(headersPath) || !fs.existsSync(publicHeadersRoot)) {
+    return;
+  }
+
+  const headerEntries = fs
+    .readdirSync(headersPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .map((entry) => entry.name);
+
+  for (const entry of headerEntries) {
+    const namespacePath = path.join(publicHeadersRoot, entry);
+    const namespaceTarget = path.join(headersPath, entry);
+
+    try {
+      const stats = fs.lstatSync(namespacePath);
+
+      if (stats.isSymbolicLink()) {
+        const currentTarget = path.resolve(
+          path.dirname(namespacePath),
+          fs.readlinkSync(namespacePath)
+        );
+
+        if (currentTarget === namespaceTarget) {
+          continue;
+        }
+      }
+
+      if (stats.isDirectory()) {
+        continue;
+      }
+
+      fs.rmSync(namespacePath, { force: true, recursive: true });
+    } catch (error) {
+      // Fall through and rebuild the public namespace link.
+    }
+
+    if (fs.existsSync(namespacePath)) {
+      continue;
+    }
+
+    fs.symlinkSync(
+      path.relative(path.dirname(namespacePath), namespaceTarget),
+      namespacePath,
+      'dir'
+    );
+    console.log(
+      `[fix-ios-build-paths] Rebuilt ${path.relative(projectRoot, namespacePath)}`
+    );
+  }
+}
+
 function patchPodsShellScriptPhase(relativePath) {
   updateFile(relativePath, (source) => {
     return source
@@ -91,6 +234,15 @@ function patchPodsShellScriptPhase(relativePath) {
         'bash -l -c "$PODS_TARGET_SRCROOT/../scripts/',
         'bash -l "$PODS_TARGET_SRCROOT/../scripts/'
       );
+  });
+}
+
+function patchReactNativeBundleScriptPhase(relativePath) {
+  updateFile(relativePath, (source) => {
+    return source.replaceAll(
+      '`\\"$NODE_BINARY\\" --print \\"require(\'path\').dirname(require.resolve(\'react-native/package.json\')) + \'/scripts/react-native-xcode.sh\'\\"`',
+      'RN_XCODE_SCRIPT=\\"$(\\"$NODE_BINARY\\" --print \\"require(\'path\').dirname(require.resolve(\'react-native/package.json\')) + \'/scripts/react-native-xcode.sh\'\\")\\"\\n/bin/sh \\"$RN_XCODE_SCRIPT\\"'
+    );
   });
 }
 
@@ -116,7 +268,7 @@ updateFile('node_modules/expo/ios/AppDelegates/RCTAppDelegateUmbrella.h', (sourc
     '#endif',
   ].join('\n');
 
-  const patchedImportBlock = [
+  const previousPatchedImportBlock = [
     '#if __has_include(<React-Core-prebuilt/React_RCTAppDelegate/React_RCTAppDelegate-umbrella.h>)',
     '#import <React-Core-prebuilt/React_RCTAppDelegate/React_RCTAppDelegate-umbrella.h>',
     '#elif __has_include(<React_RCTAppDelegate/React-RCTAppDelegate-umbrella.h>)',
@@ -126,8 +278,29 @@ updateFile('node_modules/expo/ios/AppDelegates/RCTAppDelegateUmbrella.h', (sourc
     '#endif',
   ].join('\n');
 
+  const patchedImportBlock = [
+    '#import <React-RCTAppDelegate/RCTAppDelegate.h>',
+    '#import <React-RCTAppDelegate/RCTAppSetupUtils.h>',
+    '#import <React-RCTAppDelegate/RCTArchConfiguratorProtocol.h>',
+    '#import <React-RCTAppDelegate/RCTDefaultReactNativeFactoryDelegate.h>',
+    '#import <React-RCTAppDelegate/RCTDependencyProvider.h>',
+    '#import <React-RCTAppDelegate/RCTJSRuntimeConfiguratorProtocol.h>',
+    '#import <React-RCTAppDelegate/RCTReactNativeFactory.h>',
+    '#import <React-RCTAppDelegate/RCTRootViewFactory.h>',
+    '#import <React-RCTAppDelegate/RCTUIConfiguratorProtocol.h>',
+  ].join('\n');
+
   if (source.includes(patchedImportBlock)) {
     return source;
+  }
+
+  if (source.includes(previousPatchedImportBlock)) {
+    return replaceOnce(
+      source,
+      previousPatchedImportBlock,
+      patchedImportBlock,
+      'previous Expo RCTAppDelegate umbrella import block'
+    );
   }
 
   return replaceOnce(
@@ -418,5 +591,15 @@ if (fs.existsSync(xcodeEnvLocalPath)) {
 ensureReactCoreHeadersSymlink(
   path.join(projectRoot, 'ios', 'Pods', 'React-Core-prebuilt')
 );
+ensureReactNativeDependenciesHeaders(
+  path.join(projectRoot, 'ios', 'Pods', 'ReactNativeDependencies')
+);
+ensureReactNativeDependenciesNamespaces(
+  path.join(projectRoot, 'ios', 'Pods', 'ReactNativeDependencies')
+);
+ensurePublicReactNativeDependencyNamespaces(
+  path.join(projectRoot, 'ios', 'Pods', 'ReactNativeDependencies')
+);
 patchPodsShellScriptPhase('ios/Pods/Local Podspecs/EXConstants.podspec.json');
 patchPodsShellScriptPhase('ios/Pods/Pods.xcodeproj/project.pbxproj');
+patchReactNativeBundleScriptPhase('ios/UltimatePlayback.xcodeproj/project.pbxproj');

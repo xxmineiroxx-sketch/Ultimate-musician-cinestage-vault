@@ -29,6 +29,16 @@ class AudioEngine {
     this.onPlaybackStatusChange = null;
     this.onPlaybackEnded = null;
     this.cachedAudioUris = {};
+    this.loopRegion = null;
+    this.lastLoopJumpAt = 0;
+    this.progressListeners = new Set();
+    this.statusListeners = new Set();
+    this.endedListeners = new Set();
+    this.conductorState = {
+      lastCommand: null,
+      mode: 'idle',
+      updatedAt: 0,
+    };
   }
 
   /**
@@ -48,6 +58,65 @@ class AudioEngine {
       console.error('Error initializing audio engine:', error);
       throw error;
     }
+  }
+
+  addProgressListener(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
+  }
+
+  addStatusListener(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  addEndedListener(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.endedListeners.add(listener);
+    return () => this.endedListeners.delete(listener);
+  }
+
+  _emitProgress(payload) {
+    this.onProgressUpdate?.(payload);
+    this.progressListeners.forEach((listener) => {
+      try {
+        listener(payload);
+      } catch (error) {
+        console.warn('Error in audio progress listener:', error);
+      }
+    });
+  }
+
+  _emitStatus(payload) {
+    this.onPlaybackStatusChange?.(payload);
+    this.statusListeners.forEach((listener) => {
+      try {
+        listener(payload);
+      } catch (error) {
+        console.warn('Error in audio status listener:', error);
+      }
+    });
+  }
+
+  _emitEnded(payload) {
+    this.onPlaybackEnded?.(payload);
+    this.endedListeners.forEach((listener) => {
+      try {
+        listener(payload);
+      } catch (error) {
+        console.warn('Error in audio ended listener:', error);
+      }
+    });
+  }
+
+  _setConductorState(lastCommand, mode) {
+    this.conductorState = {
+      lastCommand,
+      mode,
+      updatedAt: Date.now(),
+    };
   }
 
   /**
@@ -125,16 +194,25 @@ class AudioEngine {
     try {
       // Start all tracks simultaneously for sync
       const playPromises = Object.values(this.tracks).map(async (track) => {
-        if (track.isLoaded && !track.isMuted) {
-          await track.sound.playAsync();
+        if (track.isLoaded) {
+          await track.sound.setStatusAsync({
+            shouldPlay: true,
+            positionMillis: this.currentPosition || 0,
+          });
         }
       });
 
       await Promise.all(playPromises);
       this.isPlaying = true;
+      this._setConductorState('PLAY', this.loopRegion?.enabled ? 'looping' : 'playing');
       this._startSyncMonitor();
 
-      this.onPlaybackStatusChange?.({ isPlaying: true });
+      this._emitStatus({
+        isPlaying: true,
+        position: this.currentPosition,
+        duration: this.duration,
+        loopRegion: this.getLoopRegion(),
+      });
       console.log('Playback started');
     } catch (error) {
       console.error('Error starting playback:', error);
@@ -147,15 +225,23 @@ class AudioEngine {
    */
   async pause() {
     try {
+      const status = await this.getStatus();
       const pausePromises = Object.values(this.tracks).map((track) =>
         track.isLoaded ? track.sound.pauseAsync() : Promise.resolve()
       );
 
       await Promise.all(pausePromises);
       this.isPlaying = false;
+      this.currentPosition = status.position;
+      this._setConductorState('PAUSE', 'paused');
       this._stopSyncMonitor();
 
-      this.onPlaybackStatusChange?.({ isPlaying: false });
+      this._emitStatus({
+        isPlaying: false,
+        position: this.currentPosition,
+        duration: this.duration,
+        loopRegion: this.getLoopRegion(),
+      });
       console.log('Playback paused');
     } catch (error) {
       console.error('Error pausing playback:', error);
@@ -175,9 +261,16 @@ class AudioEngine {
       await Promise.all(stopPromises);
       this.isPlaying = false;
       this.currentPosition = 0;
+      this.lastLoopJumpAt = 0;
+      this._setConductorState('STOP', 'stopped');
       this._stopSyncMonitor();
 
-      this.onPlaybackStatusChange?.({ isPlaying: false, position: 0 });
+      this._emitStatus({
+        isPlaying: false,
+        position: 0,
+        duration: this.duration,
+        loopRegion: this.getLoopRegion(),
+      });
       console.log('Playback stopped');
     } catch (error) {
       console.error('Error stopping playback:', error);
@@ -190,20 +283,18 @@ class AudioEngine {
    */
   async seek(positionMillis) {
     try {
-      const seekPromises = Object.values(this.tracks).map((track) =>
-        track.isLoaded
-          ? track.sound.setPositionAsync(positionMillis)
-          : Promise.resolve()
+      const nextPosition = await this._setAllTrackPositions(
+        positionMillis,
+        this.isPlaying,
       );
+      this._setConductorState('SEEK', this.loopRegion?.enabled ? 'looping' : (this.isPlaying ? 'playing' : 'paused'));
 
-      await Promise.all(seekPromises);
-      this.currentPosition = positionMillis;
-
-      this.onProgressUpdate?.({
-        position: positionMillis,
+      this._emitProgress({
+        position: nextPosition,
         duration: this.duration,
+        loopRegion: this.getLoopRegion(),
       });
-      console.log(`Seeked to ${positionMillis}ms`);
+      console.log(`Seeked to ${nextPosition}ms`);
     } catch (error) {
       console.error('Error seeking:', error);
       throw error;
@@ -216,8 +307,8 @@ class AudioEngine {
   async setTrackVolume(trackId, volume) {
     const track = this.tracks[trackId];
     if (track && track.isLoaded) {
-      await track.sound.setVolumeAsync(volume);
       track.volume = volume;
+      await track.sound.setVolumeAsync(track.isMuted ? 0 : volume);
       console.log(`Set ${trackId} volume to ${volume}`);
     }
   }
@@ -336,23 +427,138 @@ class AudioEngine {
     }
   }
 
+  setLoopRegion(startMillis, endMillis, metadata = {}) {
+    const start = Math.max(0, Math.floor(Number(startMillis) || 0));
+    const end = Math.max(start, Math.floor(Number(endMillis) || 0));
+    if (end <= start + 50) {
+      this.loopRegion = null;
+      return null;
+    }
+    this.loopRegion = {
+      enabled: true,
+      startMillis: start,
+      endMillis: end,
+      label: metadata?.label || null,
+      metadata: { ...metadata },
+    };
+    this.lastLoopJumpAt = 0;
+    this._setConductorState('SET_LOOP_REGION', 'looping');
+    return this.getLoopRegion();
+  }
+
+  clearLoopRegion() {
+    this.loopRegion = null;
+    this.lastLoopJumpAt = 0;
+    this._setConductorState(
+      'CLEAR_LOOP',
+      this.isPlaying ? 'playing' : (this.currentPosition > 0 ? 'paused' : 'ready'),
+    );
+    return null;
+  }
+
+  getLoopRegion() {
+    return this.loopRegion ? { ...this.loopRegion } : null;
+  }
+
+  getConductorState() {
+    return { ...this.conductorState, loopRegion: this.getLoopRegion() };
+  }
+
+  async applyConductorCommand(command, context = {}) {
+    const payload = typeof command === 'string' ? { type: command } : { ...(command || {}) };
+    const type = String(payload.type || '').trim().toUpperCase();
+    const sections = Array.isArray(context.sections) ? context.sections : [];
+    const resolvedSection = payload.section
+      || context.section
+      || sections[payload.sectionIndex]
+      || null;
+    const sectionStart = resolvedSection?.start_ms ?? resolvedSection?.startMillis ?? null;
+    const sectionEnd = resolvedSection?.end_ms ?? resolvedSection?.endMillis ?? null;
+    const startMillis = payload.startMillis ?? payload.startMs ?? sectionStart
+      ?? (payload.startSec != null ? Number(payload.startSec) * 1000 : null);
+    const endMillis = payload.endMillis ?? payload.endMs ?? sectionEnd
+      ?? (payload.endSec != null ? Number(payload.endSec) * 1000 : null);
+
+    switch (type) {
+      case 'PLAY':
+        await this.play();
+        break;
+      case 'PAUSE':
+        await this.pause();
+        break;
+      case 'STOP':
+        await this.stop();
+        break;
+      case 'SEEK':
+        await this.seek(payload.positionMillis ?? payload.position ?? payload.positionMs ?? 0);
+        break;
+      case 'SEEK_SECTION':
+        if (startMillis == null) return { ok: false, reason: 'missing-section' };
+        await this.seek(startMillis);
+        break;
+      case 'LOOP_SECTION':
+      case 'SET_LOOP_REGION':
+        if (startMillis == null || endMillis == null) {
+          return { ok: false, reason: 'missing-loop-window' };
+        }
+        this.setLoopRegion(startMillis, endMillis, {
+          label: payload.label || resolvedSection?.section || resolvedSection?.label || null,
+        });
+        if (payload.seek !== false) {
+          await this.seek(startMillis);
+        }
+        break;
+      case 'CLEAR_LOOP':
+        this.clearLoopRegion();
+        break;
+      case 'CLICK_ONLY':
+        await this.clickOnlyMode();
+        this._setConductorState('CLICK_ONLY', 'click_only');
+        break;
+      case 'RESTORE_TRACKS':
+        await this.restoreAllTracks();
+        this._setConductorState('RESTORE_TRACKS', this.isPlaying ? 'playing' : 'paused');
+        break;
+      case 'PANIC_STOP':
+        await this.panicStop(payload.fadeDuration ?? payload.fadeMs ?? 1000);
+        this._setConductorState('PANIC_STOP', 'stopped');
+        break;
+      case 'APPLY_SCENE':
+        if (!payload.scene) return { ok: false, reason: 'missing-scene' };
+        await this.applyScene(payload.scene);
+        this._setConductorState('APPLY_SCENE', this.isPlaying ? 'playing' : 'paused');
+        break;
+      default:
+        return { ok: false, reason: `unsupported-command:${type || 'unknown'}` };
+    }
+
+    return {
+      ok: true,
+      type,
+      loopRegion: this.getLoopRegion(),
+      conductorState: this.getConductorState(),
+    };
+  }
+
   /**
    * Get current playback status
    */
   async getStatus() {
-    const firstTrack = Object.values(this.tracks)[0];
+    const firstTrack = this._getReferenceTrack();
     if (firstTrack && firstTrack.isLoaded) {
       const status = await firstTrack.sound.getStatusAsync();
       return {
         isPlaying: status.isPlaying,
         position: status.positionMillis,
         duration: status.durationMillis,
+        loopRegion: this.getLoopRegion(),
       };
     }
     return {
       isPlaying: false,
       position: 0,
       duration: 0,
+      loopRegion: this.getLoopRegion(),
     };
   }
 
@@ -380,6 +586,7 @@ class AudioEngine {
       this.tracks = {};
       this.isPlaying = false;
       this.currentPosition = 0;
+      this.clearLoopRegion();
 
       console.log('All tracks unloaded');
     } catch (error) {
@@ -396,18 +603,41 @@ class AudioEngine {
     this.syncInterval = setInterval(async () => {
       const status = await this.getStatus();
       this.currentPosition = status.position;
+      const loopRegion = this.loopRegion;
 
-      this.onProgressUpdate?.({
+      if (
+        status.isPlaying
+        && loopRegion?.enabled
+        && loopRegion.endMillis > loopRegion.startMillis + 50
+        && status.position >= loopRegion.endMillis - 110
+      ) {
+        const now = Date.now();
+        if (now - this.lastLoopJumpAt > 180) {
+          this.lastLoopJumpAt = now;
+          const loopStart = await this._setAllTrackPositions(loopRegion.startMillis, true);
+          this.currentPosition = loopStart;
+          this._emitProgress({
+            position: loopStart,
+            duration: status.duration,
+            loopRegion: this.getLoopRegion(),
+          });
+          return;
+        }
+      }
+
+      this._emitProgress({
         position: status.position,
         duration: status.duration,
+        loopRegion: this.getLoopRegion(),
       });
 
       // Check if playback finished
-      if (status.duration && status.position >= status.duration - 100) {
+      if (!loopRegion?.enabled && status.duration && status.position >= status.duration - 100) {
         await this.stop();
-        this.onPlaybackEnded?.({
+        this._emitEnded({
           position: status.position,
           duration: status.duration,
+          loopRegion: this.getLoopRegion(),
         });
       }
     }, 100); // Update every 100ms
@@ -428,12 +658,37 @@ class AudioEngine {
    */
   _onPlaybackStatusUpdate(status) {
     if (status.isLoaded) {
-      this.onPlaybackStatusChange?.({
+      this._emitStatus({
         isPlaying: status.isPlaying,
         position: status.positionMillis,
         duration: status.durationMillis,
+        loopRegion: this.getLoopRegion(),
       });
     }
+  }
+
+  _getReferenceTrack() {
+    return Object.values(this.tracks).find((track) => track?.isLoaded) || null;
+  }
+
+  async _setAllTrackPositions(positionMillis, shouldPlay = this.isPlaying) {
+    const nextPosition = Math.max(0, Math.floor(Number(positionMillis) || 0));
+    const status = shouldPlay
+      ? { shouldPlay: true, positionMillis: nextPosition }
+      : { positionMillis: nextPosition };
+
+    await Promise.all(
+      Object.values(this.tracks).map((track) => (
+        track.isLoaded
+          ? track.sound.setStatusAsync(status).catch(() => (
+            track.sound.setPositionAsync(nextPosition).catch(() => {})
+          ))
+          : Promise.resolve()
+      )),
+    );
+
+    this.currentPosition = nextPosition;
+    return nextPosition;
   }
 
   async _resolvePlayableUri(uri) {
