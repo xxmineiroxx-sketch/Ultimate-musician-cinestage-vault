@@ -9,8 +9,10 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "testflight:status": "node scripts/sync-testflight-groups.js --check",
-    "testflight:share-latest": "node scripts/sync-testflight-groups.js"
+    "testflight:status": "node scripts/sync-testflight-groups.js --check --warning-days 21",
+    "testflight:share-latest": "node scripts/sync-testflight-groups.js --warning-days 21",
+    "testflight:beta-lane": "node scripts/sync-testflight-groups.js --warning-days 21 --notify --text",
+    "testflight:install-monitor": "node scripts/install-testflight-beta-lane.js --hour 9 --minute 0 --warning-days 21"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

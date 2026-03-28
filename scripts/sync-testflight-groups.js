@@ -3,8 +3,10 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const https = require('https');
+const { spawnSync } = require('child_process');
 
 const DEFAULT_BUNDLE_ID = 'com.ultimatemusician.playback';
+const DEFAULT_WARNING_DAYS = 21;
 const LOCAL_FALLBACK_JSON = '/tmp/ultimateplayback_asc_api_key.json';
 
 function parseArgs(argv) {
@@ -13,6 +15,10 @@ function parseArgs(argv) {
     buildNumber: null,
     dryRun: false,
     groupIds: [],
+    warningDays: DEFAULT_WARNING_DAYS,
+    notify: false,
+    verboseBuilds: false,
+    output: 'json',
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -30,6 +36,20 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === '--check' || arg === '--dry-run') {
       out.dryRun = true;
+    } else if (arg === '--warning-days' || arg === '--require-days') {
+      const parsed = Number(argv[i + 1]);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        out.warningDays = parsed;
+      }
+      i += 1;
+    } else if (arg === '--notify') {
+      out.notify = true;
+    } else if (arg === '--all-valid-builds') {
+      out.verboseBuilds = true;
+    } else if (arg === '--text') {
+      out.output = 'text';
+    } else if (arg === '--json') {
+      out.output = 'json';
     }
   }
 
@@ -189,6 +209,26 @@ function byNewestUploaded(a, b) {
   return right - left;
 }
 
+function daysUntil(dateString) {
+  if (!dateString) return null;
+  const target = Date.parse(dateString);
+  if (!Number.isFinite(target)) return null;
+  return Math.ceil((target - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
+function summarizeBuild(build) {
+  const attrs = build.attributes || {};
+  return {
+    id: build.id,
+    buildNumber: String(attrs.version || ''),
+    uploadedDate: attrs.uploadedDate || null,
+    expirationDate: attrs.expirationDate || null,
+    daysRemaining: daysUntil(attrs.expirationDate),
+    processingState: attrs.processingState || null,
+    expired: Boolean(attrs.expired),
+  };
+}
+
 async function getApp(creds, bundleId) {
   const apps = await requestJson(
     creds,
@@ -201,7 +241,7 @@ async function getApp(creds, bundleId) {
   return apps.data[0];
 }
 
-async function getTargetBuild(creds, appId, buildNumber) {
+async function getValidBuilds(creds, appId) {
   const builds = await paginate(
     creds,
     `/v1/builds?filter[app]=${encodeURIComponent(
@@ -209,29 +249,27 @@ async function getTargetBuild(creds, appId, buildNumber) {
     )}&sort=-uploadedDate&limit=200`
   );
 
-  if (!builds.length) {
-    throw new Error('No builds found for this app');
-  }
-
-  const candidates = builds
+  return builds
     .filter((build) => build.attributes.processingState === 'VALID')
     .sort(byNewestUploaded);
+}
 
-  if (buildNumber) {
-    const exact = candidates.find(
-      (build) => String(build.attributes.version) === String(buildNumber)
-    );
-    if (!exact) {
-      throw new Error(`No VALID build ${buildNumber} found for this app`);
-    }
-    return exact;
-  }
-
-  if (!candidates.length) {
+function getTargetBuild(validBuilds, buildNumber) {
+  if (!validBuilds.length) {
     throw new Error('No VALID builds found for this app');
   }
 
-  return candidates[0];
+  if (!buildNumber) {
+    return validBuilds[0];
+  }
+
+  const exact = validBuilds.find(
+    (build) => String(build.attributes.version) === String(buildNumber)
+  );
+  if (!exact) {
+    throw new Error(`No VALID build ${buildNumber} found for this app`);
+  }
+  return exact;
 }
 
 async function getGroups(creds, appId, wantedIds) {
@@ -258,15 +296,62 @@ async function attachBuildToGroup(creds, groupId, buildId) {
   );
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+function notify(message) {
+  const safeMessage = String(message || '').replace(/"/g, '\\"');
+  spawnSync('osascript', [
+    '-e',
+    `display notification "${safeMessage}" with title "Ultimate Playback TestFlight"`,
+  ]);
+}
+
+function formatTextSummary(summary) {
+  const lines = [];
+  lines.push(`Bundle: ${summary.bundleId}`);
+  lines.push(`App ID: ${summary.appId}`);
+  lines.push(
+    `Latest VALID build: ${summary.targetBuild.buildNumber} (${summary.targetBuild.processingState})`
+  );
+  if (summary.targetBuild.uploadedDate) {
+    lines.push(`Uploaded: ${summary.targetBuild.uploadedDate}`);
+  }
+  if (summary.targetBuild.expirationDate) {
+    lines.push(
+      `Expires: ${summary.targetBuild.expirationDate} (${summary.targetBuild.daysRemaining} days remaining)`
+    );
+  }
+  lines.push(`Credentials: ${summary.credentialsSource}`);
+  lines.push(`Mode: ${summary.dryRun ? 'check-only' : 'share-latest'}`);
+  lines.push('Groups:');
+  for (const group of summary.groups) {
+    lines.push(
+      `- ${group.name}: ${group.action} (${group.isInternalGroup ? 'internal' : 'external'})`
+    );
+  }
+  if (summary.alerts.length) {
+    lines.push('Alerts:');
+    for (const alert of summary.alerts) {
+      lines.push(`- ${alert}`);
+    }
+  }
+  if (summary.validBuilds && summary.validBuilds.length) {
+    lines.push('Valid builds:');
+    for (const build of summary.validBuilds) {
+      lines.push(
+        `- ${build.buildNumber}: uploaded ${build.uploadedDate || 'n/a'}, expires ${
+          build.expirationDate || 'n/a'
+        }`
+      );
+    }
+  }
+  return lines.join('\n');
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const options = parseArgs(argv);
   const creds = readCredentials();
   const app = await getApp(creds, options.bundleId);
-  const targetBuild = await getTargetBuild(
-    creds,
-    app.id,
-    options.buildNumber
-  );
+  const validBuilds = await getValidBuilds(creds, app.id);
+  const targetBuild = getTargetBuild(validBuilds, options.buildNumber);
   const groups = await getGroups(creds, app.id, options.groupIds);
 
   if (!groups.length) {
@@ -292,25 +377,89 @@ async function main() {
       name: group.attributes.name,
       isInternalGroup: group.attributes.isInternalGroup,
       hasAccessToAllBuilds: group.attributes.hasAccessToAllBuilds ?? null,
-      action: alreadyShared ? 'already_shared' : options.dryRun ? 'would_share' : 'shared',
+      action: alreadyShared
+        ? 'already_shared'
+        : options.dryRun
+        ? 'would_share'
+        : 'shared',
     });
+  }
+
+  const targetSummary = summarizeBuild(targetBuild);
+  const alerts = [];
+
+  if (
+    targetSummary.daysRemaining !== null &&
+    targetSummary.daysRemaining <= options.warningDays
+  ) {
+    alerts.push(
+      `Latest VALID TestFlight build ${targetSummary.buildNumber} expires in ${targetSummary.daysRemaining} day(s). Cut a new beta build soon.`
+    );
+  }
+
+  const sharedGroups = results.filter((item) => item.action === 'shared');
+  if (sharedGroups.length && options.notify) {
+    notify(
+      `Shared build ${targetSummary.buildNumber} with ${sharedGroups.length} TestFlight group(s).`
+    );
+  }
+
+  if (alerts.length && options.notify) {
+    notify(alerts[0]);
   }
 
   const summary = {
     bundleId: options.bundleId,
     appId: app.id,
-    buildNumber: targetBuild.attributes.version,
-    uploadedDate: targetBuild.attributes.uploadedDate,
-    buildState: targetBuild.attributes.processingState,
+    buildNumber: targetSummary.buildNumber,
+    uploadedDate: targetSummary.uploadedDate,
+    expirationDate: targetSummary.expirationDate,
+    daysRemaining: targetSummary.daysRemaining,
+    buildState: targetSummary.processingState,
     credentialsSource: creds.source,
     dryRun: options.dryRun,
     groups: results,
+    alerts,
+    targetBuild: targetSummary,
+    latestValidBuild: summarizeBuild(validBuilds[0]),
+    validBuilds: (options.verboseBuilds ? validBuilds : validBuilds.slice(0, 5)).map(
+      summarizeBuild
+    ),
   };
 
-  console.log(JSON.stringify(summary, null, 2));
+  if (options.output === 'text') {
+    console.log(formatTextSummary(summary));
+  } else {
+    console.log(JSON.stringify(summary, null, 2));
+  }
+
+  if (alerts.length) {
+    process.exitCode = 2;
+  }
+
+  return summary;
 }
 
-main().catch((error) => {
-  console.error(error && error.stack ? error.stack : String(error));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  DEFAULT_BUNDLE_ID,
+  DEFAULT_WARNING_DAYS,
+  LOCAL_FALLBACK_JSON,
+  parseArgs,
+  readCredentials,
+  requestJson,
+  paginate,
+  summarizeBuild,
+  getApp,
+  getValidBuilds,
+  getTargetBuild,
+  getGroups,
+  attachBuildToGroup,
+  main,
+};
