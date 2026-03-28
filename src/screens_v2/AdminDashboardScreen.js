@@ -10,6 +10,7 @@ import {
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
   Keyboard, Platform,
 } from 'react-native';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 // ── Inline Calendar (pure RN, no external package) ──────────────────────────
 const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -402,6 +403,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const canApprove = isAdmin || isManager;
   // manager can add/edit members, add songs, create services
   const canManageMembers = isAdmin || isManager;
+  const canDeleteServices = isAdmin || isManager || mdRole === 'md';
 
   const [tab, setTab]         = useState('Calendar');
   const [loading, setLoading] = useState(false);
@@ -428,6 +430,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [savingSvc, setSavingSvc]           = useState(false);
   const [showArchivedServices, setShowArchivedServices] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [deletingServiceId, setDeletingServiceId] = useState(null);
+  const serviceSwipeRefs = useRef({});
+  const openServiceSwipeIdRef = useRef(null);
 
   // Expanded service plan (both Calendar + Services tabs share this)
   const [expandedSvc, setExpandedSvc] = useState(null);
@@ -649,6 +654,22 @@ export default function AdminDashboardScreen({ navigation, route }) {
     });
   };
 
+  const closeServiceSwipe = useCallback((serviceId) => {
+    if (!serviceId) return;
+    serviceSwipeRefs.current[serviceId]?.close?.();
+    if (openServiceSwipeIdRef.current === serviceId) {
+      openServiceSwipeIdRef.current = null;
+    }
+  }, []);
+
+  const handleServiceSwipeOpen = useCallback((serviceId) => {
+    const previousId = openServiceSwipeIdRef.current;
+    if (previousId && previousId !== serviceId) {
+      serviceSwipeRefs.current[previousId]?.close?.();
+    }
+    openServiceSwipeIdRef.current = serviceId;
+  }, []);
+
   // ── Reply to message ────────────────────────────────────────────────────
   const handleReply = async () => {
     if (!replyText.trim()) return;
@@ -763,6 +784,55 @@ export default function AdminDashboardScreen({ navigation, route }) {
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingSvc(false); }
   };
+
+  const handleDeleteService = useCallback(async (svc) => {
+    if (!svc?.id) return;
+    setDeletingServiceId(svc.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/service/delete`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({ serviceId: svc.id }),
+      });
+      setExpandedSvc((current) => (current?.id === svc.id ? null : current));
+      setServices((current) => current.filter((service) => service?.id !== svc.id));
+      setPlans((current) => {
+        const next = { ...current };
+        delete next[svc.id];
+        return next;
+      });
+      setVocalAssignments((current) => {
+        const next = { ...current };
+        delete next[svc.id];
+        return next;
+      });
+      closeServiceSwipe(svc.id);
+      await loadAll();
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setDeletingServiceId(null);
+    }
+  }, [closeServiceSwipe, loadAll]);
+
+  const confirmDeleteService = useCallback((svc) => {
+    if (!svc?.id) return;
+    closeServiceSwipe(svc.id);
+    Alert.alert(
+      'Delete service?',
+      `Delete "${svc.name || svc.title || 'this service'}"? This removes the service plan and team assignments from Ultimate Playback.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void handleDeleteService(svc);
+          },
+        },
+      ],
+    );
+  }, [closeServiceSwipe, handleDeleteService]);
 
   // ── Add song to service ─────────────────────────────────────────────────
   const handleAddSong = async (song) => {
@@ -1424,8 +1494,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
         const renderServiceCard = (svc) => {
           const plan = plans[svc.id] || {};
           const isOpen = expandedSvc?.id === svc.id;
-          return (
-            <View key={svc.id} style={[s.svcCard, isOpen && s.svcCardOpen]}>
+          const card = (
+            <View style={[s.svcCard, isOpen && s.svcCardOpen]}>
               <TouchableOpacity style={s.svcCardTap} onPress={() => setExpandedSvc(isOpen ? null : svc)}>
                 <View style={s.svcHeaderRow}>
                   <Text style={s.svcName}>{svc.name || svc.title}</Text>
@@ -1441,6 +1511,49 @@ export default function AdminDashboardScreen({ navigation, route }) {
               </TouchableOpacity>
               {isOpen && renderPlanSection(svc)}
             </View>
+          );
+          if (!canDeleteServices) {
+            return <View key={svc.id}>{card}</View>;
+          }
+          return (
+            <Swipeable
+              key={svc.id}
+              ref={(ref) => {
+                if (ref) serviceSwipeRefs.current[svc.id] = ref;
+                else delete serviceSwipeRefs.current[svc.id];
+              }}
+              overshootRight={false}
+              friction={2}
+              rightThreshold={40}
+              onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
+              onSwipeableClose={() => {
+                if (openServiceSwipeIdRef.current === svc.id) {
+                  openServiceSwipeIdRef.current = null;
+                }
+              }}
+              renderRightActions={() => (
+                <TouchableOpacity
+                  style={[
+                    s.serviceDeleteAction,
+                    deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
+                  ]}
+                  activeOpacity={0.9}
+                  disabled={deletingServiceId === svc.id}
+                  onPress={() => confirmDeleteService(svc)}
+                >
+                  {deletingServiceId === svc.id ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <>
+                      <Text style={s.serviceDeleteActionIcon}>🗑</Text>
+                      <Text style={s.serviceDeleteActionText}>Delete</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            >
+              {card}
+            </Swipeable>
           );
         };
 
@@ -2500,6 +2613,20 @@ const s = StyleSheet.create({
   svcMeta: { fontSize: 12, color: '#9CA3AF', marginBottom: 4 },
   svcExpandHint: { fontSize: 11, color: '#8B5CF6', fontWeight: '600' },
   svcCreatedBy: { fontSize: 11, color: '#4B5563', fontStyle: 'italic', marginTop: 2 },
+  serviceDeleteAction: {
+    width: 104,
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: '#991B1B',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  serviceDeleteActionDisabled: { opacity: 0.7 },
+  serviceDeleteActionIcon: { fontSize: 18 },
+  serviceDeleteActionText: { fontSize: 13, fontWeight: '800', color: '#FFF' },
   archiveSection: { marginTop: 4 },
   archiveCard: {
     backgroundColor: '#0A0F1F',
