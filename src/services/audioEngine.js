@@ -4,6 +4,10 @@
  */
 
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+
+const REMOTE_AUDIO_RE = /^https?:\/\//i;
+const AUDIO_CACHE_DIR = `${FileSystem.cacheDirectory || ''}up_practice_audio/`;
 
 class AudioEngine {
   constructor() {
@@ -24,6 +28,7 @@ class AudioEngine {
     this.onProgressUpdate = null;
     this.onPlaybackStatusChange = null;
     this.onPlaybackEnded = null;
+    this.cachedAudioUris = {};
   }
 
   /**
@@ -55,8 +60,9 @@ class AudioEngine {
       return false;
     }
     try {
+      const playableUri = await this._resolvePlayableUri(uri);
       const { sound } = await Audio.Sound.createAsync(
-        { uri },
+        { uri: playableUri },
         { shouldPlay: false, volume: 1.0 },
         this._onPlaybackStatusUpdate.bind(this)
       );
@@ -67,7 +73,8 @@ class AudioEngine {
         volume: 1.0,
         isMuted: false,
         type: trackType, // 'stem', 'click', 'guide'
-        uri,
+        uri: playableUri,
+        sourceUri: uri,
       };
 
       // Get duration from first loaded track
@@ -79,7 +86,7 @@ class AudioEngine {
       console.log(`Loaded ${trackType}: ${trackId}`);
       return true;
     } catch (error) {
-      console.error(`Error loading stem ${trackId}:`, error);
+      console.warn(`[AudioEngine] loadStem failed for "${trackId}": ${error?.message || error}`);
       return false;
     }
   }
@@ -427,6 +434,34 @@ class AudioEngine {
         duration: status.durationMillis,
       });
     }
+  }
+
+  async _resolvePlayableUri(uri) {
+    const trimmed = String(uri || '').trim();
+    if (!REMOTE_AUDIO_RE.test(trimmed) || !FileSystem.cacheDirectory) {
+      return trimmed;
+    }
+
+    if (this.cachedAudioUris[trimmed]) {
+      const cachedInfo = await FileSystem.getInfoAsync(this.cachedAudioUris[trimmed]).catch(() => null);
+      if (cachedInfo?.exists && cachedInfo.size > 0) {
+        return this.cachedAudioUris[trimmed];
+      }
+    }
+
+    await FileSystem.makeDirectoryAsync(AUDIO_CACHE_DIR, { intermediates: true }).catch(() => {});
+
+    const extensionMatch = trimmed.split('?')[0].match(/\.([a-z0-9]{2,8})$/i);
+    const extension = extensionMatch ? `.${extensionMatch[1].toLowerCase()}` : '.mp3';
+    const cacheKey = encodeURIComponent(trimmed).replace(/%/g, '_');
+    const localUri = `${AUDIO_CACHE_DIR}${cacheKey}${extension}`;
+    const info = await FileSystem.getInfoAsync(localUri).catch(() => null);
+    if (!info?.exists || !info.size) {
+      await FileSystem.downloadAsync(trimmed, localUri);
+    }
+
+    this.cachedAudioUris[trimmed] = localUri;
+    return localUri;
   }
 }
 
