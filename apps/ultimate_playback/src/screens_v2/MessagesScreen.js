@@ -1,685 +1,528 @@
 /**
  * Messages Screen - Ultimate Playback
- * Team communication with Admin and other members
+ * Team member → Admin messaging, via sync server.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  FlatList,
-  TextInput,
-  Alert,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  FlatList, TextInput, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getUserProfile } from '../services/storage';
+
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+
+async function fetchJson(url, opts = {}) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(url, { ...opts, signal: ctrl.signal });
+    clearTimeout(tid);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+function isPersonalInboxMessage(thread, email = '') {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!thread || typeof thread !== 'object') return false;
+  if (thread.visibility === 'admin_only' || thread.isSystemMsg) return false;
+  return (
+    (thread.fromEmail || '').toLowerCase() === normalizedEmail ||
+    thread.to === 'all_team' ||
+    (thread.to || '').toLowerCase() === normalizedEmail
+  );
+}
 
 export default function MessagesScreen({ navigation }) {
-  const [messages, setMessages] = useState([]);
-  const [conversations, setConversations] = useState([]);
-  const [selectedConversation, setSelectedConversation] = useState(null);
-  const [newMessage, setNewMessage] = useState('');
+  const insets = useSafeAreaInsets();
+  const [profile, setProfile]     = useState(null);
+  const [threads, setThreads]     = useState([]);
+  const [selected, setSelected]   = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [sending, setSending]     = useState(false);
+  const [deleting, setDeleting]   = useState(false);
   const [showCompose, setShowCompose] = useState(false);
-  const [composeRecipient, setComposeRecipient] = useState('manager'); // 'manager' or 'team'
-  const [composeSubject, setComposeSubject] = useState('');
-  const [composeMessage, setComposeMessage] = useState('');
+
+  const [subject, setSubject]   = useState('');
+  const [body, setBody]         = useState('');
 
   useEffect(() => {
-    loadMessages();
-    loadConversations();
+    loadProfile();
   }, []);
 
-  const loadMessages = async () => {
-    try {
-      const stored = await AsyncStorage.getItem('@up_messages');
-      if (stored) {
-        setMessages(JSON.parse(stored));
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error);
+  const loadProfile = async () => {
+    const p = await getUserProfile();
+    setProfile(p);
+    if (p?.email) {
+      refreshInbox(p.email);
     }
   };
 
-  const loadConversations = async () => {
+  const refreshInbox = useCallback(async (email) => {
+    if (!email) return;
+    setLoading(true);
     try {
-      const stored = await AsyncStorage.getItem('@up_conversations');
-      if (stored) {
-        setConversations(JSON.parse(stored));
-      }
-    } catch (error) {
-      console.error('Error loading conversations:', error);
-    }
-  };
-
-  const markAsRead = async (messageId) => {
-    try {
-      const updated = messages.map((msg) =>
-        msg.id === messageId ? { ...msg, read: true } : msg
+      const data = await fetchJson(
+        `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(email)}`,
+        { headers: syncHeaders() }
       );
-      setMessages(updated);
-      await AsyncStorage.setItem('@up_messages', JSON.stringify(updated));
-    } catch (error) {
-      console.error('Error marking message as read:', error);
+      const filtered = Array.isArray(data)
+        ? data.filter(thread => isPersonalInboxMessage(thread, email))
+        : [];
+      setThreads(filtered);
+    } catch (_) {
+      // server unreachable — keep existing
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
-  const sendMessage = async () => {
-    if (!newMessage.trim()) return;
+  // ── Compose & send ──────────────────────────────────────────────────────
 
-    try {
-      const message = {
-        id: `msg_${Date.now()}`,
-        conversation_id: selectedConversation?.id,
-        sender_id: 'current_user',
-        sender_name: 'You',
-        content: newMessage,
-        timestamp: new Date().toISOString(),
-        read: true,
-      };
-
-      const updated = [...messages, message];
-      setMessages(updated);
-      await AsyncStorage.setItem('@up_messages', JSON.stringify(updated));
-      setNewMessage('');
-
-      Alert.alert('Sent', 'Message sent successfully');
-    } catch (error) {
-      console.error('Error sending message:', error);
-      Alert.alert('Error', 'Failed to send message');
+  const handleSend = async () => {
+    if (!subject.trim() || !body.trim()) {
+      Alert.alert('Required', 'Please enter both subject and message.');
+      return;
     }
-  };
-
-  const sendNewMessage = async () => {
-    if (!composeSubject.trim() || !composeMessage.trim()) {
-      Alert.alert('Required', 'Please enter both subject and message');
+    if (!profile?.email) {
+      Alert.alert('No Profile', 'Set your email in Profile first.');
+      navigation.navigate('ProfileSetup');
       return;
     }
 
+    setSending(true);
     try {
-      const message = {
-        id: `msg_${Date.now()}`,
-        from: 'You',
-        sender_name: 'You',
-        to: composeRecipient === 'manager' ? 'Manager' : 'Team',
-        subject: composeSubject,
-        message: composeMessage,
-        content: composeMessage,
-        timestamp: new Date().toISOString(),
-        read: true,
-        type: composeRecipient === 'manager' ? 'admin' : 'team',
-      };
-
-      const updated = [...messages, message];
-      setMessages(updated);
-      await AsyncStorage.setItem('@up_messages', JSON.stringify(updated));
-
-      // Reset compose form
-      setComposeSubject('');
-      setComposeMessage('');
+      await fetchJson(`${SYNC_URL}/sync/message`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          fromEmail: profile.email,
+          fromName: `${profile.name || ''} ${profile.lastName || ''}`.trim() || profile.email,
+          subject: subject.trim(),
+          message: body.trim(),
+          to: 'admin',
+        }),
+      });
+      setSubject('');
+      setBody('');
       setShowCompose(false);
-
-      Alert.alert('Success', `Message sent to ${composeRecipient === 'manager' ? 'Manager' : 'Team'}`);
-    } catch (error) {
-      console.error('Error sending message:', error);
-      Alert.alert('Error', 'Failed to send message');
+      Alert.alert('Sent ✓', 'Your message was delivered to the admin.');
+      refreshInbox(profile.email);
+    } catch (e) {
+      Alert.alert('Error', `Could not send: ${e.message}`);
+    } finally {
+      setSending(false);
     }
   };
+  const hasAdminGrant = profile?.grantedRole === 'md' || profile?.grantedRole === 'admin';
 
-  const unreadCount = messages.filter((m) => !m.read).length;
+  const hideSelectedThread = useCallback(async () => {
+    if (!selected?.id || !profile?.email) return;
+    setDeleting(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(selected.id)}&scope=viewer&email=${encodeURIComponent(profile.email)}`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      setSelected(null);
+      await refreshInbox(profile.email);
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [profile?.email, refreshInbox, selected]);
 
-  // Compose Message Modal
+  const confirmHideSelectedThread = useCallback(() => {
+    if (!selected?.id) return;
+    Alert.alert(
+      'Delete from your inbox?',
+      'This removes the thread only from this Playback inbox. Admin records stay intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void hideSelectedThread();
+          },
+        },
+      ]
+    );
+  }, [hideSelectedThread, selected?.id]);
+
+  const hideInboxThread = useCallback(async (thread) => {
+    if (!thread?.id || !profile?.email) return;
+    setDeleting(true);
+    try {
+      await fetchJson(
+        `${SYNC_URL}/sync/message?messageId=${encodeURIComponent(thread.id)}&scope=viewer&email=${encodeURIComponent(profile.email)}`,
+        {
+          method: 'DELETE',
+          headers: syncHeaders(),
+        }
+      );
+      if (selected?.id === thread.id) setSelected(null);
+      await refreshInbox(profile.email);
+    } catch (e) {
+      Alert.alert('Error', `Could not delete message: ${e.message}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [profile?.email, refreshInbox, selected?.id]);
+
+  const confirmHideInboxThread = useCallback((thread) => {
+    if (!thread?.id) return;
+    Alert.alert(
+      'Delete from your inbox?',
+      'This removes the thread only from this Playback inbox. Admin records stay intact.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void hideInboxThread(thread);
+          },
+        },
+      ]
+    );
+  }, [hideInboxThread]);
+
+  // ── Compose view ─────────────────────────────────────────────────────────
+
   if (showCompose) {
     return (
-      <View style={styles.container}>
-        <View style={styles.composeHeader}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setShowCompose(false)}
-          >
-            <Text style={styles.backButtonText}>← Cancel</Text>
+      <View style={s.container}>
+        <View style={[s.topBar, { paddingTop: insets.top + 14 }]}>
+          <TouchableOpacity onPress={() => setShowCompose(false)}>
+            <Text style={s.cancelText}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={styles.composeTitle}>New Message</Text>
-          <View style={{ width: 60 }} />
+          <Text style={s.topBarTitle}>New Message</Text>
+          <TouchableOpacity onPress={handleSend} disabled={sending}>
+            {sending
+              ? <ActivityIndicator size="small" color="#8B5CF6" />
+              : <Text style={s.sendText}>Send</Text>}
+          </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.composeBody}>
-          <View style={styles.composeSection}>
-            <Text style={styles.composeLabel}>Send To:</Text>
-            <View style={styles.recipientButtons}>
-              <TouchableOpacity
-                style={[
-                  styles.recipientButton,
-                  composeRecipient === 'manager' && styles.recipientButtonActive,
-                ]}
-                onPress={() => setComposeRecipient('manager')}
-              >
-                <Text
-                  style={[
-                    styles.recipientButtonText,
-                    composeRecipient === 'manager' && styles.recipientButtonTextActive,
-                  ]}
-                >
-                  👤 Manager
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.recipientButton,
-                  composeRecipient === 'team' && styles.recipientButtonActive,
-                ]}
-                onPress={() => setComposeRecipient('team')}
-              >
-                <Text
-                  style={[
-                    styles.recipientButtonText,
-                    composeRecipient === 'team' && styles.recipientButtonTextActive,
-                  ]}
-                >
-                  👥 Team
-                </Text>
-              </TouchableOpacity>
+        <ScrollView style={s.composeBody} keyboardShouldPersistTaps="handled">
+          <View style={s.toRow}>
+            <Text style={s.toLabel}>To:</Text>
+            <View style={s.staticToChip}>
+              <Text style={s.staticToChipText}>👤 Admin / Manager</Text>
             </View>
           </View>
 
-          <View style={styles.composeSection}>
-            <Text style={styles.composeLabel}>Subject:</Text>
-            <TextInput
-              style={styles.composeInput}
-              value={composeSubject}
-              onChangeText={setComposeSubject}
-              placeholder="Enter subject"
-              placeholderTextColor="#6B7280"
-            />
-          </View>
-
-          <View style={styles.composeSection}>
-            <Text style={styles.composeLabel}>Message:</Text>
-            <TextInput
-              style={styles.composeTextArea}
-              value={composeMessage}
-              onChangeText={setComposeMessage}
-              placeholder="Type your message..."
-              placeholderTextColor="#6B7280"
-              multiline
-              numberOfLines={8}
-            />
-          </View>
-
-          <TouchableOpacity style={styles.composeSendButton} onPress={sendNewMessage}>
-            <Text style={styles.composeSendButtonText}>Send Message</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  const renderMessage = ({ item }) => (
-    <TouchableOpacity
-      style={[styles.messageCard, !item.read && styles.unreadMessage]}
-      onPress={() => {
-        markAsRead(item.id);
-        setSelectedConversation(item);
-      }}
-    >
-      <View style={styles.messageHeader}>
-        <Text style={styles.messageSender}>{item.sender_name || item.from}</Text>
-        <Text style={styles.messageTime}>
-          {new Date(item.timestamp).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
-      </View>
-
-      {item.subject && (
-        <Text style={styles.messageSubject}>{item.subject}</Text>
-      )}
-
-      <Text style={styles.messagePreview} numberOfLines={2}>
-        {item.content || item.message}
-      </Text>
-
-      <View style={styles.messageFooter}>
-        <View
-          style={[
-            styles.typeBadge,
-            item.type === 'admin' && styles.adminBadge,
-            item.type === 'team' && styles.teamBadge,
-            item.type === 'system' && styles.systemBadge,
-          ]}
-        >
-          <Text style={styles.typeBadgeText}>
-            {item.type === 'admin' ? '👤 Admin' :
-             item.type === 'team' ? '👥 Team' :
-             '⚙️ System'}
+          <Text style={s.helperText}>
+            Playback Messages is your personal inbox. Team-wide broadcasts and the shared admin inbox stay in Admin Dashboard.
           </Text>
-        </View>
-        {!item.read && <View style={styles.unreadDot} />}
-      </View>
-    </TouchableOpacity>
-  );
 
-  if (selectedConversation) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.conversationHeader}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setSelectedConversation(null)}
-          >
-            <Text style={styles.backButtonText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.conversationTitle}>
-            {selectedConversation.sender_name || selectedConversation.from}
-          </Text>
-        </View>
+          {profile?.email ? (
+            <View style={s.fromRow}>
+              <Text style={s.fromLabel}>From:</Text>
+              <Text style={s.fromValue}>{profile.email}</Text>
+            </View>
+          ) : (
+            <TouchableOpacity style={s.noEmailWarning} onPress={() => navigation.navigate('ProfileSetup')}>
+              <Text style={s.noEmailWarningText}>⚠️ Set your email in Profile first</Text>
+            </TouchableOpacity>
+          )}
 
-        <ScrollView style={styles.conversationBody}>
-          <View style={styles.messageBubble}>
-            <Text style={styles.bubbleSender}>
-              {selectedConversation.sender_name || selectedConversation.from}
-            </Text>
-            {selectedConversation.subject && (
-              <Text style={styles.bubbleSubject}>{selectedConversation.subject}</Text>
-            )}
-            <Text style={styles.bubbleText}>
-              {selectedConversation.content || selectedConversation.message}
-            </Text>
-            <Text style={styles.bubbleTime}>
-              {new Date(selectedConversation.timestamp).toLocaleString()}
-            </Text>
-          </View>
-        </ScrollView>
-
-        <View style={styles.replyBox}>
           <TextInput
-            style={styles.replyInput}
-            value={newMessage}
-            onChangeText={setNewMessage}
-            placeholder="Type your reply..."
+            style={s.subjectInput}
+            value={subject}
+            onChangeText={setSubject}
+            placeholder="Subject"
+            placeholderTextColor="#6B7280"
+          />
+
+          <TextInput
+            style={s.bodyInput}
+            value={body}
+            onChangeText={setBody}
+            placeholder="Write your message..."
             placeholderTextColor="#6B7280"
             multiline
+            textAlignVertical="top"
           />
-          <TouchableOpacity style={styles.sendButton} onPress={sendMessage}>
-            <Text style={styles.sendButtonText}>Send</Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── Thread view ─────────────────────────────────────────────────────────
+
+  if (selected) {
+    return (
+      <View style={s.container}>
+        <View style={[s.topBar, { paddingTop: insets.top + 14 }]}>
+          <TouchableOpacity onPress={() => setSelected(null)}>
+            <Text style={s.cancelText}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={s.topBarTitle} numberOfLines={1}>{selected.subject}</Text>
+          <TouchableOpacity onPress={confirmHideSelectedThread} disabled={deleting}>
+            {deleting
+              ? <ActivityIndicator size="small" color="#EF4444" />
+              : <Text style={s.deleteText}>Delete</Text>}
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={s.threadBody}>
+          {/* Original message */}
+          <View style={s.bubble}>
+            <View style={s.bubbleHeader}>
+              <Text style={s.bubbleName}>You</Text>
+              <Text style={s.bubbleTime}>{formatTime(selected.timestamp)}</Text>
+            </View>
+            <Text style={s.bubbleText}>{selected.message}</Text>
+          </View>
+
+          {/* Admin replies */}
+          {(selected.replies || []).length === 0 ? (
+            <View style={s.noReplies}>
+              <Text style={s.noRepliesText}>Waiting for admin reply…</Text>
+            </View>
+          ) : (
+            (selected.replies || []).map((r) => (
+              <View key={r.id} style={[s.bubble, s.adminBubble]}>
+                <View style={s.bubbleHeader}>
+                  <Text style={[s.bubbleName, s.adminName]}>👤 {r.from}</Text>
+                  <Text style={s.bubbleTime}>{formatTime(r.timestamp)}</Text>
+                </View>
+                <Text style={s.bubbleText}>{r.message}</Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
+
+        <View style={s.threadFooter}>
+          <TouchableOpacity
+            style={s.replyBtn}
+            onPress={() => {
+              setSelected(null);
+              setSubject(`Re: ${selected.subject}`);
+              setShowCompose(true);
+            }}
+          >
+            <Text style={s.replyBtnText}>↩ Send Follow-up</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
+  // ── Inbox list ───────────────────────────────────────────────────────────
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerIcon}>💬</Text>
-        <Text style={styles.title}>Messages</Text>
-        <Text style={styles.subtitle}>
-          {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up!'}
+    <View style={s.container}>
+      <View style={[s.header, { paddingTop: insets.top + 24 }]}>
+        <Text style={s.headerIcon}>💬</Text>
+        <Text style={s.title}>Messages</Text>
+        {hasAdminGrant && (
+          <View style={s.personalModeBadge}>
+            <Text style={s.personalModeBadgeText}>Admin dashboard inbox stays separate.</Text>
+          </View>
+        )}
+        <Text style={s.subtitle}>
+          {profile?.email
+            ? `Inbox: ${profile.email}`
+            : 'Set your email in Profile to send messages'}
         </Text>
       </View>
 
-      {/* New Message Button */}
-      <TouchableOpacity
-        style={styles.newMessageButton}
-        onPress={() => setShowCompose(true)}
-      >
-        <Text style={styles.newMessageButtonIcon}>✉️</Text>
-        <Text style={styles.newMessageButtonText}>New Message</Text>
+      <TouchableOpacity style={s.composeBtn} onPress={() => setShowCompose(true)}>
+        <Text style={s.composeBtnText}>✉️  New Message</Text>
       </TouchableOpacity>
 
-      {messages.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>📭</Text>
-          <Text style={styles.emptyTitle}>No Messages</Text>
-          <Text style={styles.emptyText}>
-            You'll receive messages here from your team and admins.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-        />
-      )}
+      <FlatList
+        data={threads}
+        keyExtractor={(item) => item.id}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => refreshInbox(profile?.email)}
+            tintColor="#8B5CF6"
+          />
+        }
+        contentContainerStyle={s.list}
+        renderItem={({ item }) => {
+          const hasReply = item.replies?.length > 0;
+          const lastReply = hasReply ? item.replies[item.replies.length - 1] : null;
+          return (
+            <TouchableOpacity
+              style={[s.threadCard, hasReply && s.threadCardWithReply]}
+              onPress={() => setSelected(item)}
+              onLongPress={() => confirmHideInboxThread(item)}
+              delayLongPress={250}
+            >
+              <View style={s.threadCardHeader}>
+                <Text style={s.threadSubject}>{item.subject}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {item.to === 'all_team' && (
+                    <View style={s.broadcastBadge}>
+                      <Text style={s.broadcastBadgeText}>👥 Team</Text>
+                    </View>
+                  )}
+                  <Text style={s.threadTime}>{formatTime(item.timestamp)}</Text>
+                </View>
+              </View>
+              <Text style={s.threadPreview} numberOfLines={2}>{item.message}</Text>
+              {hasReply ? (
+                <View style={s.replyBadge}>
+                  <Text style={s.replyBadgeText}>
+                    💬 {item.replies.length} reply{item.replies.length > 1 ? 's' : ''} from Admin
+                  </Text>
+                </View>
+              ) : (
+                <View style={s.pendingBadge}>
+                  <Text style={s.pendingBadgeText}>⏳ Awaiting reply</Text>
+                </View>
+              )}
+              {lastReply ? (
+                <Text style={s.lastReply} numberOfLines={1}>
+                  👤 {lastReply.from}: {lastReply.message}
+                </Text>
+              ) : null}
+              <Text style={s.threadHint}>Long press to delete</Text>
+            </TouchableOpacity>
+          );
+        }}
+        ListEmptyComponent={
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>📭</Text>
+            <Text style={s.emptyTitle}>No Messages Yet</Text>
+            <Text style={s.emptyText}>
+              Send a message to your admin or manager.{'\n'}Pull down to refresh.
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#020617',
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffH = Math.floor((now - d) / 3600000);
+  if (diffH < 1) return 'Just now';
+  if (diffH < 24) return `${diffH}h ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#020617' },
+
+  // Header
+  personalModeBadge: { paddingHorizontal: 12, paddingVertical: 4, backgroundColor: '#1E1B4B', borderRadius: 12, borderWidth: 1, borderColor: '#4F46E5', marginBottom: 6 },
+  personalModeBadgeText: { fontSize: 12, fontWeight: '700', color: '#A5B4FC' },
+  header: { alignItems: 'center', paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
+  headerIcon: { fontSize: 48, marginBottom: 10 },
+  title: { fontSize: 24, fontWeight: '700', color: '#F9FAFB', marginBottom: 4 },
+  subtitle: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 20 },
+
+  // Compose button
+  composeBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#8B5CF6', margin: 16, padding: 14, borderRadius: 12,
   },
-  header: {
-    alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+  composeBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
+
+  // Inbox list
+  list: { paddingHorizontal: 16, paddingBottom: 40 },
+  threadCard: {
+    padding: 16, backgroundColor: '#0B1120',
+    borderRadius: 12, borderWidth: 1, borderColor: '#374151', marginBottom: 12,
   },
-  headerIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#F9FAFB',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#9CA3AF',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 8,
-  },
-  filterButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#0B1120',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#374151',
-    alignItems: 'center',
-  },
-  filterButtonActive: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-  },
-  filterButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
-  filterButtonTextActive: {
-    color: '#FFFFFF',
-  },
-  messagesList: {
-    padding: 16,
-    paddingTop: 0,
-  },
-  messageCard: {
-    padding: 16,
-    backgroundColor: '#0B1120',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    marginBottom: 12,
-  },
-  unreadMessage: {
-    backgroundColor: '#1E1B4B',
-    borderColor: '#4F46E5',
-  },
-  messageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  threadCardWithReply: { borderColor: '#8B5CF6' },
+  threadCardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  threadSubject: { fontSize: 15, fontWeight: '700', color: '#F9FAFB', flex: 1, marginRight: 8 },
+  threadTime: { fontSize: 11, color: '#6B7280' },
+  threadPreview: { fontSize: 13, color: '#9CA3AF', lineHeight: 20, marginBottom: 10 },
+  replyBadge: {
+    alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: '#8B5CF620', borderRadius: 12, borderWidth: 1, borderColor: '#8B5CF6',
     marginBottom: 8,
   },
-  messageSender: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F9FAFB',
+  replyBadgeText: { fontSize: 12, fontWeight: '600', color: '#A78BFA' },
+  pendingBadge: {
+    alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: '#1F2937', borderRadius: 12, marginBottom: 8,
   },
-  messageTime: {
-    fontSize: 12,
-    color: '#6B7280',
+  pendingBadgeText: { fontSize: 12, color: '#6B7280' },
+  lastReply: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+  threadHint: { fontSize: 11, color: '#4B5563', marginTop: 8 },
+  broadcastBadge: { paddingHorizontal: 7, paddingVertical: 2, backgroundColor: '#064E3B', borderRadius: 8, borderWidth: 1, borderColor: '#10B981' },
+  broadcastBadgeText: { fontSize: 10, fontWeight: '700', color: '#34D399' },
+
+  // Top bar (compose / thread)
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingBottom: 14,
+    borderBottomWidth: 1, borderBottomColor: '#1F2937',
+    backgroundColor: '#0A0A1A',
   },
-  messageSubject: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#E5E7EB',
-    marginBottom: 4,
+  topBarTitle: { fontSize: 16, fontWeight: '700', color: '#F9FAFB', flex: 1, textAlign: 'center' },
+  cancelText: { fontSize: 15, color: '#8B5CF6', fontWeight: '600', minWidth: 60 },
+  sendText: { fontSize: 15, color: '#8B5CF6', fontWeight: '700', minWidth: 60, textAlign: 'right' },
+  deleteText: { fontSize: 15, color: '#F87171', fontWeight: '700', minWidth: 60, textAlign: 'right' },
+
+  // Compose body
+  composeBody: { flex: 1, padding: 16 },
+  toRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+  toLabel: { fontSize: 14, color: '#9CA3AF', fontWeight: '600', width: 40 },
+  staticToChip: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#1E1B4B', borderRadius: 20, borderWidth: 1, borderColor: '#4F46E5' },
+  staticToChipText: { fontSize: 14, fontWeight: '600', color: '#A5B4FC' },
+  helperText: { fontSize: 12, color: '#9CA3AF', lineHeight: 18, marginBottom: 14 },
+  fromRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  fromLabel: { fontSize: 14, color: '#9CA3AF', fontWeight: '600', width: 40 },
+  fromValue: { fontSize: 14, color: '#6B7280' },
+  noEmailWarning: {
+    padding: 12, backgroundColor: '#7C2D1220', borderRadius: 8,
+    borderWidth: 1, borderColor: '#F97316', marginBottom: 12,
   },
-  messagePreview: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    marginBottom: 12,
+  noEmailWarningText: { fontSize: 13, color: '#F97316' },
+  subjectInput: {
+    backgroundColor: '#0B1120', borderWidth: 1, borderColor: '#374151',
+    borderRadius: 8, padding: 14, fontSize: 16, color: '#F9FAFB', marginBottom: 12,
   },
-  messageFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  bodyInput: {
+    backgroundColor: '#0B1120', borderWidth: 1, borderColor: '#374151',
+    borderRadius: 8, padding: 14, fontSize: 15, color: '#F9FAFB',
+    minHeight: 220, textAlignVertical: 'top',
   },
-  typeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: '#374151',
+
+  // Thread view
+  threadBody: { flex: 1, padding: 16 },
+  bubble: {
+    padding: 14, backgroundColor: '#0B1120',
+    borderRadius: 12, borderWidth: 1, borderColor: '#374151', marginBottom: 12,
   },
-  adminBadge: {
-    backgroundColor: '#7C3AED20',
+  adminBubble: { backgroundColor: '#1E1B4B', borderColor: '#4F46E5' },
+  bubbleHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  bubbleName: { fontSize: 13, fontWeight: '700', color: '#9CA3AF' },
+  adminName: { color: '#818CF8' },
+  bubbleTime: { fontSize: 11, color: '#6B7280' },
+  bubbleText: { fontSize: 15, color: '#E5E7EB', lineHeight: 24 },
+  noReplies: { alignItems: 'center', paddingVertical: 24 },
+  noRepliesText: { fontSize: 14, color: '#6B7280', fontStyle: 'italic' },
+  threadFooter: { padding: 16, borderTopWidth: 1, borderTopColor: '#1F2937' },
+  replyBtn: {
+    backgroundColor: '#8B5CF6', padding: 14, borderRadius: 10, alignItems: 'center',
   },
-  teamBadge: {
-    backgroundColor: '#10B98120',
-  },
-  systemBadge: {
-    backgroundColor: '#F59E0B20',
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4F46E5',
-  },
-  conversationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  backButton: {
-    marginRight: 12,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#4F46E5',
-  },
-  conversationTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#F9FAFB',
-  },
-  conversationBody: {
-    flex: 1,
-    padding: 16,
-  },
-  messageBubble: {
-    padding: 16,
-    backgroundColor: '#0B1120',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  bubbleSender: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4F46E5',
-    marginBottom: 4,
-  },
-  bubbleSubject: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F9FAFB',
-    marginBottom: 8,
-  },
-  bubbleText: {
-    fontSize: 14,
-    color: '#E5E7EB',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  bubbleTime: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  replyBox: {
-    flexDirection: 'row',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#374151',
-    gap: 8,
-  },
-  replyInput: {
-    flex: 1,
-    backgroundColor: '#0B1120',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: '#F9FAFB',
-    maxHeight: 100,
-  },
-  sendButton: {
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    justifyContent: 'center',
-  },
-  sendButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#F9FAFB',
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-  },
-  newMessageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4F46E5',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  newMessageButtonIcon: {
-    fontSize: 20,
-  },
-  newMessageButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  composeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  composeTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#F9FAFB',
-  },
-  composeBody: {
-    flex: 1,
-    padding: 16,
-  },
-  composeSection: {
-    marginBottom: 24,
-  },
-  composeLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#E5E7EB',
-    marginBottom: 8,
-  },
-  recipientButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  recipientButton: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#0B1120',
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#374151',
-    alignItems: 'center',
-  },
-  recipientButtonActive: {
-    backgroundColor: '#1E1B4B',
-    borderColor: '#4F46E5',
-  },
-  recipientButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
-  recipientButtonTextActive: {
-    color: '#F9FAFB',
-  },
-  composeInput: {
-    backgroundColor: '#0B1120',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
-    color: '#F9FAFB',
-  },
-  composeTextArea: {
-    backgroundColor: '#0B1120',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
-    color: '#F9FAFB',
-    minHeight: 200,
-    textAlignVertical: 'top',
-  },
-  composeSendButton: {
-    backgroundColor: '#4F46E5',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  composeSendButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
+  replyBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
+
+  empty: { alignItems: 'center', paddingVertical: 60 },
+  emptyIcon: { fontSize: 56, marginBottom: 16 },
+  emptyTitle: { fontSize: 20, fontWeight: '600', color: '#F9FAFB', marginBottom: 8 },
+  emptyText: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', lineHeight: 22 },
 });

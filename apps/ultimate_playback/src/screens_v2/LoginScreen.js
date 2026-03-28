@@ -1,9 +1,4 @@
-/**
- * Login Screen - Ultimate Playback
- * Team member authentication
- */
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -14,264 +9,295 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { login, isLoggedIn } from '../services/authAPI';
 
-export default function LoginScreen({ navigation }) {
-  const [email, setEmail] = useState('');
+export default function LoginScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
+  const [identifier, setIdentifier] = useState(
+    route?.params?.identifier || route?.params?.email || '',
+  );
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    checkExistingAuth();
+    isLoggedIn().then(loggedIn => {
+      if (loggedIn) navigation.replace('Main', { screen: 'HomeTab' });
+      else setReady(true);
+    }).catch(() => setReady(true));
   }, []);
 
-  const checkExistingAuth = async () => {
-    try {
-      const session = await AsyncStorage.getItem('user_session');
-      if (session) {
-        // User is already logged in, navigate to main app
-        navigation.replace('Main');
-      }
-    } catch (error) {
-      console.error('Error checking auth:', error);
-    } finally {
-      setIsCheckingAuth(false);
+  useEffect(() => {
+    const nextIdentifier = route?.params?.identifier || route?.params?.email || '';
+    if (nextIdentifier) {
+      setIdentifier(nextIdentifier);
     }
-  };
+  }, [route?.params?.email, route?.params?.identifier]);
 
-  const handleLogin = async () => {
-    // Validate inputs
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both email and password');
+  const handleSignIn = async () => {
+    if (!identifier.trim() || !password) {
+      Alert.alert('Missing info', 'Email or phone, plus password, are required.');
       return;
     }
-
     setLoading(true);
-
     try {
-      // TODO: Replace with actual API call to authenticate
-      // For now, simulate authentication
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Check credentials (temporary - replace with real API)
-      // For demo purposes, any email/password combo works
-      if (email && password) {
-        // Create session
-        const session = {
-          email: email.toLowerCase(),
-          loginTime: new Date().toISOString(),
-          token: `token_${Date.now()}`, // Replace with real JWT token
-        };
-
-        // Save session
-        await AsyncStorage.setItem('user_session', JSON.stringify(session));
-
-        // Navigate to main app
-        navigation.replace('Main');
-      } else {
-        Alert.alert('Error', 'Invalid email or password');
+      const result = await login(identifier.trim(), password);
+      if (result?.needsVerification) {
+        navigation.navigate('Verify', {
+          identifier: result.email || identifier.trim(),
+          email: result.email || '',
+          purpose: result.verificationPurpose || 'login',
+        });
+        return;
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Login failed. Please try again.');
+      navigation.replace('Main', { screen: 'HomeTab' });
+    } catch (err) {
+      if (err?.needsVerification) {
+        navigation.navigate('Verify', {
+          identifier: err.email || identifier.trim(),
+          email: err.email || '',
+          purpose: err.verificationPurpose || 'login',
+        });
+        return;
+      }
+      Alert.alert('Sign In Failed', err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (isCheckingAuth) {
+  if (!ready) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.logo}>🎵</Text>
-        <ActivityIndicator size="large" color="#4F46E5" />
+        <ActivityIndicator color="#818CF8" size="large" />
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.logo}>🎵</Text>
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingTop: Math.max(insets.top + 16, 80) }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Brand */}
+        <View style={styles.brandBlock}>
+          <Text style={styles.badge}>CineStage™</Text>
           <Text style={styles.title}>Ultimate Playback</Text>
-          <Text style={styles.subtitle}>powered by CineStage</Text>
+          <Text style={styles.subtitle}>
+            Your setlist. Your stems. Perform with confidence.
+          </Text>
         </View>
 
-        {/* Login Form */}
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>Team Member Login</Text>
+        {/* Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Sign In</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your email"
-              placeholderTextColor="#6B7280"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-              editable={!loading}
-            />
-          </View>
+          <Text style={styles.label}>Email or Phone</Text>
+          <TextInput
+            style={styles.input}
+            value={identifier}
+            onChangeText={setIdentifier}
+            placeholder="you@example.com or (555) 123-4567"
+            placeholderTextColor="#4B5563"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.helperText}>
+            Use your email, or the phone number saved on your team profile.
+          </Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              placeholderTextColor="#6B7280"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoComplete="password"
-              editable={!loading}
-            />
-          </View>
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            placeholderTextColor="#4B5563"
+            secureTextEntry
+          />
 
           <TouchableOpacity
-            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-            onPress={handleLogin}
+            style={[styles.signInBtn, loading && { opacity: 0.6 }]}
+            onPress={handleSignIn}
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.loginButtonText}>Sign In</Text>
+              <Text style={styles.signInBtnText}>Sign In</Text>
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.forgotButton}
-            onPress={() => Alert.alert('Password Reset', 'Contact your team manager to reset your password')}
+            style={styles.resetLink}
+            onPress={() =>
+              navigation.navigate('ResetPassword', {
+                identifier: identifier.trim(),
+              })
+            }
             disabled={loading}
           >
-            <Text style={styles.forgotButtonText}>Forgot Password?</Text>
+            <Text style={styles.resetLinkText}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.registerLink}
+            onPress={() => navigation.navigate('Register')}
+          >
+            <Text style={styles.registerLinkText}>Create an account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.supportLink}
+            onPress={() =>
+              navigation.navigate('Feedback', {
+                subject: 'Playback sign-in issue',
+                source: 'login_screen',
+              })
+            }
+            disabled={loading}
+          >
+            <Text style={styles.supportLinkText}>Report a problem</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            Don't have an account?
-          </Text>
-          <Text style={styles.footerSubtext}>
-            Contact your team manager to get registered
-          </Text>
-        </View>
-      </View>
+        <Text style={styles.footerNote}>
+          Forgot your password? Use your email or phone to get a reset code by email.
+        </Text>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#020617',
-  },
   loadingContainer: {
     flex: 1,
     backgroundColor: '#020617',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  content: {
-    flex: 1,
-    padding: 20,
+  container: {
+    flexGrow: 1,
+    backgroundColor: '#020617',
+    paddingHorizontal: 24,
+    paddingTop: 80,
+    paddingBottom: 48,
     justifyContent: 'center',
   },
-  header: {
+  brandBlock: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 40,
   },
-  logo: {
-    fontSize: 72,
-    marginBottom: 16,
+  badge: {
+    color: '#818CF8',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 10,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '700',
     color: '#F9FAFB',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    fontStyle: 'italic',
-  },
-  form: {
-    backgroundColor: '#0B1120',
-    borderRadius: 16,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  formTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#F9FAFB',
-    marginBottom: 24,
+    fontSize: 32,
+    fontWeight: '900',
     textAlign: 'center',
   },
-  inputGroup: {
+  subtitle: {
+    color: '#6B7280',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  card: {
+    backgroundColor: '#0B1120',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    padding: 20,
+    marginBottom: 16,
+  },
+  cardTitle: {
+    color: '#E5E7EB',
+    fontSize: 18,
+    fontWeight: '800',
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
+    color: '#6B7280',
+    fontSize: 12,
     fontWeight: '600',
-    color: '#E5E7EB',
-    marginBottom: 8,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  helperText: {
+    color: '#6B7280',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -8,
+    marginBottom: 12,
   },
   input: {
     backgroundColor: '#020617',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
+    borderColor: '#1F2937',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     color: '#F9FAFB',
+    fontSize: 15,
+    marginBottom: 12,
   },
-  loginButton: {
+  signInBtn: {
     backgroundColor: '#4F46E5',
-    padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 4,
   },
-  loginButtonDisabled: {
-    opacity: 0.6,
-  },
-  loginButtonText: {
+  signInBtnText: {
     color: '#FFFFFF',
+    fontWeight: '800',
     fontSize: 16,
+  },
+  registerLink: {
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  registerLinkText: {
+    color: '#818CF8',
+    fontSize: 14,
     fontWeight: '600',
   },
-  forgotButton: {
-    marginTop: 16,
+  supportLink: {
+    marginTop: 10,
     alignItems: 'center',
   },
-  forgotButtonText: {
-    color: '#4F46E5',
-    fontSize: 14,
+  supportLinkText: {
+    color: '#93C5FD',
+    fontSize: 13,
+    fontWeight: '700',
   },
-  footer: {
-    marginTop: 32,
+  resetLink: {
+    marginTop: 14,
     alignItems: 'center',
   },
-  footerText: {
+  resetLinkText: {
+    color: '#A5B4FC',
     fontSize: 14,
-    color: '#9CA3AF',
-    marginBottom: 4,
+    fontWeight: '600',
   },
-  footerSubtext: {
-    fontSize: 12,
+  footerNote: {
     color: '#6B7280',
+    fontSize: 12,
+    textAlign: 'center',
   },
 });

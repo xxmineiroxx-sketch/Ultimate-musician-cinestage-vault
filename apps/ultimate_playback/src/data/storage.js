@@ -24,7 +24,7 @@ const nowIso = () => new Date().toISOString();
 export const getSettings = async () => {
   const raw = await AsyncStorage.getItem(SETTINGS_KEY);
   return safeJsonParse(raw, {
-    apiBase: 'http://localhost:8000',
+    apiBase: 'https://cinestage.studio-cinestage.workers.dev',
     defaultUserId: 'keyboardist-001',
     instrumentRole: 'Keyboardist',
   });

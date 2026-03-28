@@ -48,6 +48,88 @@ export const getTeamMemberByEmail = async (email) => {
   return members.find(m => m.email?.toLowerCase() === email?.toLowerCase());
 };
 
+const normalizePhoneForLookup = (value) =>
+  String(value || '').replace(/\D+/g, '');
+
+const INVITE_STATUS_ORDER = {
+  '': 0,
+  ready: 1,
+  pending: 2,
+  accepted: 3,
+  registered: 4,
+};
+
+const normalizeInviteStatus = (value) =>
+  String(value || '').trim().toLowerCase();
+
+const isPortablePhotoUrl = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    normalized.startsWith('data:image/')
+    || normalized.startsWith('http://')
+    || normalized.startsWith('https://')
+  );
+};
+
+const pickPreferredPhotoUrl = (...values) => {
+  for (const value of values) {
+    if (isPortablePhotoUrl(value)) return String(value || '').trim();
+  }
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+};
+
+const getEffectiveInviteStatus = (person = {}) => {
+  const baseStatus = normalizeInviteStatus(person?.inviteStatus);
+  const isRegistered =
+    person?.playbackRegistered === true
+    || Boolean(person?.playbackRegisteredAt)
+    || Boolean(person?.inviteRegisteredAt);
+  if (isRegistered || baseStatus === 'registered') return 'registered';
+  if (person?.inviteAcceptedAt) {
+    return INVITE_STATUS_ORDER[baseStatus] >= INVITE_STATUS_ORDER.accepted
+      ? baseStatus
+      : 'accepted';
+  }
+  return baseStatus;
+};
+
+const pickHighestInviteStatus = (...records) => {
+  let bestStatus = '';
+  let bestRank = -1;
+
+  for (const record of records) {
+    const status = getEffectiveInviteStatus(record);
+    const rank = INVITE_STATUS_ORDER[status] ?? 0;
+    if (rank >= bestRank) {
+      bestStatus = status;
+      bestRank = rank;
+    }
+  }
+
+  return bestStatus;
+};
+
+const findTeamMemberIndex = (members, localProfile) => {
+  const profileId = String(localProfile?.id || '').trim();
+  const profileEmail = String(localProfile?.email || '').trim().toLowerCase();
+  const profilePhone = normalizePhoneForLookup(localProfile?.phone);
+
+  return members.findIndex((member) => {
+    const memberId = String(member?.id || '').trim();
+    const memberEmail = String(member?.email || '').trim().toLowerCase();
+    const memberPhone = normalizePhoneForLookup(member?.phone);
+
+    if (profileId && memberId && memberId === profileId) return true;
+    if (profileEmail && memberEmail && memberEmail === profileEmail) return true;
+    if (profilePhone && memberPhone && memberPhone === profilePhone) return true;
+    return false;
+  });
+};
+
 export const updateTeamMember = async (memberId, updates) => {
   const members = await getSharedTeamMembers();
   const index = members.findIndex(m => m.id === memberId);
@@ -258,21 +340,70 @@ export const getSongsByIds = async (songIds) => {
  */
 export const syncProfileToTeamMembers = async (localProfile) => {
   const members = await getSharedTeamMembers();
-  const existingIndex = members.findIndex(m =>
-    m.email?.toLowerCase() === localProfile.email?.toLowerCase()
-  );
+  const existingIndex = findTeamMemberIndex(members, localProfile);
+  const existingMember = existingIndex !== -1 ? members[existingIndex] : null;
+  const nextName = localProfile.name ?? existingMember?.name ?? '';
+  const existingLastName = existingMember?.lastName ?? '';
+  const nextRoles =
+    Array.isArray(localProfile.roles) && localProfile.roles.length > 0
+      ? localProfile.roles
+      : existingMember?.roles || [];
+  const nextLastName =
+    localProfile.lastName !== undefined
+      ? localProfile.lastName
+      : nextName &&
+          existingLastName &&
+          nextName.toLowerCase().endsWith(existingLastName.toLowerCase())
+        ? ''
+        : existingLastName;
+  const nextInviteStatus = pickHighestInviteStatus(existingMember, localProfile);
+  const nextPlaybackRegistered =
+    localProfile.playbackRegistered === true
+      || existingMember?.playbackRegistered === true
+      || Boolean(localProfile.playbackRegisteredAt)
+      || Boolean(existingMember?.playbackRegisteredAt)
+      || Boolean(localProfile.inviteRegisteredAt)
+      || Boolean(existingMember?.inviteRegisteredAt);
 
   const memberData = {
-    id: localProfile.id || `person_${Date.now()}`,
-    name: localProfile.name,
-    lastName: localProfile.lastName,
-    email: localProfile.email,
-    phone: localProfile.phone,
-    dateOfBirth: localProfile.dateOfBirth,
-    photo_url: localProfile.photo_url,
-    roles: localProfile.roles || [],
-    roleAssignments: localProfile.roleAssignments,
-    blockout_dates: localProfile.blockout_dates || [],
+    id: existingMember?.id || localProfile.id || `person_${Date.now()}`,
+    name: nextName,
+    lastName: nextLastName,
+    email: localProfile.email ?? existingMember?.email ?? '',
+    phone: localProfile.phone ?? existingMember?.phone ?? '',
+    dateOfBirth: localProfile.dateOfBirth ?? existingMember?.dateOfBirth ?? '',
+    photo_url: pickPreferredPhotoUrl(localProfile.photo_url, existingMember?.photo_url),
+    roles: nextRoles,
+    roleAssignments:
+      localProfile.roleAssignments ??
+      existingMember?.roleAssignments ??
+      nextRoles.join(', '),
+    roleSyncSource: 'playback_profile',
+    roleSyncUpdatedAt: new Date().toISOString(),
+    blockout_dates:
+      localProfile.blockout_dates ?? existingMember?.blockout_dates ?? [],
+    inviteStatus: nextInviteStatus,
+    inviteToken:
+      localProfile.inviteToken ?? existingMember?.inviteToken ?? '',
+    inviteCreatedAt:
+      localProfile.inviteCreatedAt ?? existingMember?.inviteCreatedAt ?? null,
+    inviteSentAt:
+      localProfile.inviteSentAt ?? existingMember?.inviteSentAt ?? null,
+    inviteAcceptedAt:
+      localProfile.inviteAcceptedAt ?? existingMember?.inviteAcceptedAt ?? null,
+    inviteRegisteredAt:
+      localProfile.inviteRegisteredAt ?? existingMember?.inviteRegisteredAt ?? null,
+    playbackRegistered: nextPlaybackRegistered,
+    playbackRegisteredAt:
+      localProfile.playbackRegisteredAt
+      ?? existingMember?.playbackRegisteredAt
+      ?? localProfile.inviteRegisteredAt
+      ?? existingMember?.inviteRegisteredAt
+      ?? null,
+    createdAt:
+      localProfile.createdAt
+      ?? existingMember?.createdAt
+      ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
@@ -306,8 +437,14 @@ export const syncTeamMemberToProfile = async (email) => {
       phone: member.phone,
       dateOfBirth: member.dateOfBirth,
       photo_url: member.photo_url,
+      createdAt: member.createdAt || '',
+      inviteRegisteredAt: member.inviteRegisteredAt || '',
+      playbackRegisteredAt: member.playbackRegisteredAt || '',
+      playbackRegistered: member.playbackRegistered === true,
       roles: member.roles || [],
       roleAssignments: member.roleAssignments,
+      roleSyncSource: member.roleSyncSource || '',
+      roleSyncUpdatedAt: member.roleSyncUpdatedAt || null,
       blockout_dates: member.blockout_dates || [],
     };
   }
@@ -319,90 +456,7 @@ export const syncTeamMemberToProfile = async (email) => {
 // ============================================
 
 export const initializeDemoData = async () => {
-  // Check if data already exists
-  const existingMembers = await getSharedTeamMembers();
-  if (existingMembers.length > 0) {
-    return; // Already initialized
-  }
-
-  // Create demo team members
-  const demoMembers = [
-    {
-      id: 'person_demo1',
-      name: 'Sarah',
-      lastName: 'Johnson',
-      email: 'sarah@example.com',
-      phone: '555-0101',
-      roles: ['vocals', 'worship_leader'],
-      roleAssignments: 'Vocals, Worship Leader',
-      blockout_dates: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: 'person_demo2',
-      name: 'Mike',
-      lastName: 'Chen',
-      email: 'mike@example.com',
-      phone: '555-0102',
-      roles: ['keyboard', 'music_director'],
-      roleAssignments: 'Keyboard, Music Director',
-      blockout_dates: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
-
-  await saveSharedTeamMembers(demoMembers);
-
-  // Create demo service
-  const demoServices = [
-    {
-      id: 'svc_demo1',
-      date: '2026-03-15',
-      title: 'Sunday Service - March 15',
-      service_name: 'Sunday Service',
-      setlist: ['song_demo1', 'song_demo2'],
-      assignments: [],
-      status: 'confirmed',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
-
-  await saveSharedServices(demoServices);
-
-  // Create demo songs
-  const demoSongs = [
-    {
-      id: 'song_demo1',
-      title: 'Amazing Grace',
-      artist: 'Traditional',
-      originalKey: 'G',
-      bpm: 80,
-      role_content: {
-        vocals: {
-          notes: 'Lead on all verses, harmony on chorus',
-          lyrics: 'Amazing grace, how sweet the sound...',
-          vocal_range: 'G3-D5',
-        },
-        keyboard: {
-          notes: 'Play in G major, simple chord progression',
-          chords: 'G-C-D-Em',
-        },
-        foh_engineer: {
-          notes: 'Boost vocals on chorus, add reverb',
-          mix_notes: 'Compression 4:1, EQ cut at 200Hz',
-        },
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  ];
-
-  await saveSharedSongs(demoSongs);
-
-  console.log('Demo data initialized successfully');
+  return;
 };
 
 export default {

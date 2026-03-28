@@ -3,9 +3,77 @@
  * Mark dates when unavailable for service
  */
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native';
 import { getUserProfile, saveUserProfile } from '../services/storage';
+
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+
+async function serverBlockout(method, params = {}, body = null) {
+  try {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 5000);
+    const qs   = new URLSearchParams(params).toString();
+    const url  = `${SYNC_URL}/sync/blockout${qs ? '?' + qs : ''}`;
+    const opts = {
+      method,
+      signal: ctrl.signal,
+      headers: syncHeaders(),
+    };
+    if (body) {
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, opts);
+    clearTimeout(tid);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: data?.error || `HTTP ${res.status}` };
+    return data;
+  } catch (_) { return null; }
+}
+
+function toDateKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateKey(value) {
+  if (!value) return '';
+  if (value instanceof Date) return toDateKey(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) return toDateKey(parsed);
+  }
+  return '';
+}
+
+function parseDateKey(value) {
+  const dateKey = normalizeDateKey(value);
+  if (!dateKey) return null;
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDateKey(value, options) {
+  const parsed = parseDateKey(value);
+  return parsed ? parsed.toLocaleDateString('en-US', options) : '';
+}
+
+function normalizeBlockoutEntry(entry) {
+  if (!entry) return null;
+  const date = normalizeDateKey(entry.date || entry.start_date || entry.end_date);
+  if (!date) return null;
+  return {
+    ...entry,
+    date,
+  };
+}
 
 export default function BlockoutCalendarScreen({ navigation }) {
   const [profile, setProfile] = useState(null);
@@ -13,17 +81,61 @@ export default function BlockoutCalendarScreen({ navigation }) {
   const [selectedDate, setSelectedDate] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [reason, setReason] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadProfile();
   }, []);
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProfile();
+    setRefreshing(false);
+  }, []);
+
   const loadProfile = async () => {
     const userProfile = await getUserProfile();
-    if (userProfile) {
-      setProfile(userProfile);
-      setBlockoutDates(userProfile.blockout_dates || []);
+    if (!userProfile) return;
+    setProfile(userProfile);
+
+    let localDates = userProfile.blockout_dates || [];
+
+    // Pull from server and merge (handles reinstalls / multiple devices)
+    if (userProfile.email) {
+      try {
+        const ctrl = new AbortController();
+        const tid  = setTimeout(() => ctrl.abort(), 4000);
+        const res  = await fetch(
+          `${SYNC_URL}/sync/blockouts?email=${encodeURIComponent(userProfile.email.trim().toLowerCase())}`,
+          {
+            signal: ctrl.signal,
+            headers: syncHeaders(),
+          }
+        );
+        clearTimeout(tid);
+        if (res.ok) {
+          const serverDates = await res.json();
+          if (serverDates.length > 0) {
+            const localIds  = new Set(localDates.map(b => b.id));
+            const newFromServer = serverDates.filter(b => !localIds.has(b.id));
+            if (newFromServer.length > 0) {
+              localDates = [...localDates, ...newFromServer];
+              await saveUserProfile({ ...userProfile, blockout_dates: localDates });
+            }
+          }
+        }
+      } catch (_) {}
     }
+
+    const normalizedDates = localDates
+      .map(normalizeBlockoutEntry)
+      .filter(Boolean);
+
+    if (JSON.stringify(normalizedDates) !== JSON.stringify(localDates)) {
+      await saveUserProfile({ ...userProfile, blockout_dates: normalizedDates });
+    }
+
+    setBlockoutDates(normalizedDates);
   };
 
   const handleAddDate = async () => {
@@ -33,7 +145,7 @@ export default function BlockoutCalendarScreen({ navigation }) {
     }
 
     // Format date as YYYY-MM-DD
-    const dateStr = selectedDate.toISOString().split('T')[0];
+    const dateStr = toDateKey(selectedDate);
 
     // Check if date already blocked
     const alreadyBlocked = blockoutDates.some(b => b.date === dateStr);
@@ -55,6 +167,21 @@ export default function BlockoutCalendarScreen({ navigation }) {
     try {
       const updatedProfile = { ...profile, blockout_dates: updatedDates };
       await saveUserProfile(updatedProfile);
+      setProfile(updatedProfile);
+
+      // Sync to server so admin can see blockouts when assigning
+      if (profile?.email) {
+        const syncResult = await serverBlockout('POST', {}, {
+          ...newBlockout,
+          email: profile.email.trim().toLowerCase(),
+          name:  profile.name || profile.email,
+          phone: profile.phone || '',
+          personId: profile.id || '',
+        });
+        if (syncResult?.error) {
+          Alert.alert('Saved locally', 'Blockout saved on this device, but cloud sync failed. Pull to refresh and try again.');
+        }
+      }
 
       Alert.alert('Success', 'Blockout date added');
       setSelectedDate(null);
@@ -100,13 +227,13 @@ export default function BlockoutCalendarScreen({ navigation }) {
 
   const isDateBlocked = (date) => {
     if (!date) return false;
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = toDateKey(date);
     return blockoutDates.some(b => b.date === dateStr);
   };
 
   const isDateSelected = (date) => {
     if (!date || !selectedDate) return false;
-    return date.toISOString().split('T')[0] === selectedDate.toISOString().split('T')[0];
+    return toDateKey(date) === toDateKey(selectedDate);
   };
 
   const isDateInPast = (date) => {
@@ -132,6 +259,19 @@ export default function BlockoutCalendarScreen({ navigation }) {
             try {
               const updatedProfile = { ...profile, blockout_dates: updatedDates };
               await saveUserProfile(updatedProfile);
+              setProfile(updatedProfile);
+
+              // Remove from server
+              if (profile?.email) {
+                const syncResult = await serverBlockout('DELETE', {
+                  id: blockoutId,
+                  email: profile.email.trim().toLowerCase(),
+                });
+                if (syncResult?.error) {
+                  Alert.alert('Removed locally', 'Blockout was removed on this device, but cloud sync failed. Pull to refresh and try again.');
+                }
+              }
+
               Alert.alert('Success', 'Blockout date removed');
             } catch (error) {
               Alert.alert('Error', 'Failed to remove blockout date');
@@ -142,15 +282,18 @@ export default function BlockoutCalendarScreen({ navigation }) {
     );
   };
 
-  const sortedDates = [...blockoutDates].sort((a, b) =>
-    new Date(a.date) - new Date(b.date)
-  );
+  const sortedDates = [...blockoutDates].sort((a, b) => {
+    const aTime = parseDateKey(a.date)?.getTime() ?? 0;
+    const bTime = parseDateKey(b.date)?.getTime() ?? 0;
+    return aTime - bTime;
+  });
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       nestedScrollEnabled={true}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
     >
       <View style={styles.header}>
         <Text style={styles.headerIcon}>📅</Text>
@@ -275,7 +418,7 @@ export default function BlockoutCalendarScreen({ navigation }) {
             <View key={blockout.id} style={styles.dateCard}>
               <View style={styles.dateCardContent}>
                 <Text style={styles.dateText}>
-                  📅 {new Date(blockout.date).toLocaleDateString('en-US', {
+                  📅 {formatDateKey(blockout.date, {
                     weekday: 'short',
                     year: 'numeric',
                     month: 'short',

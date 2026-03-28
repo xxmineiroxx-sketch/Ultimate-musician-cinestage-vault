@@ -48,6 +48,11 @@ class AudioEngine {
    * Load stem track
    */
   async loadStem(trackId, uri, trackType = 'stem') {
+    // Guard: never attempt to load a null/empty URI — expo-av throws an unrecoverable AV error
+    if (!uri) {
+      console.warn(`[AudioEngine] loadStem: skipping "${trackId}" — URI is null/empty`);
+      return false;
+    }
     try {
       const { sound } = await Audio.Sound.createAsync(
         { uri },
@@ -93,10 +98,12 @@ class AudioEngine {
   }
 
   /**
-   * Load multiple stems at once
+   * Load multiple stems at once — null URIs are silently skipped
    */
   async loadStems(stems) {
-    const promises = stems.map((stem) =>
+    const valid = stems.filter(s => !!s?.uri);
+    if (!valid.length) return false;
+    const promises = valid.map((stem) =>
       this.loadStem(stem.id, stem.uri, stem.type || 'stem')
     );
     const results = await Promise.all(promises);

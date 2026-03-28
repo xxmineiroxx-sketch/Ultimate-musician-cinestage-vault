@@ -3,7 +3,7 @@
  * Main performance interface with stems playback, scene control, and emergency features
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   Alert,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import audioEngine from '../services/audioEngine';
 import sceneManager from '../services/sceneManager';
@@ -30,6 +31,13 @@ export default function LivePerformanceScreen({ route, navigation }) {
   const [stems, setStems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [emergencyMode, setEmergencyMode] = useState(null); // null, 'click_only', 'stopped'
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadSong();
+    setRefreshing(false);
+  }, []);
 
   useEffect(() => {
     loadSong();
@@ -232,10 +240,19 @@ export default function LivePerformanceScreen({ route, navigation }) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>{song.title}</Text>
-        <Text style={styles.subtitle}>
-          {song.artist} • {song.key} • {song.bpm} BPM
-        </Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Text style={styles.backBtnText}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.headerInfo}>
+          <Text style={styles.title}>{song.title}</Text>
+          <Text style={styles.subtitle}>
+            {song.artist} • {song.key} • {song.bpm} BPM
+          </Text>
+        </View>
       </View>
 
       {/* Emergency Mode Banner */}
@@ -319,7 +336,10 @@ export default function LivePerformanceScreen({ route, navigation }) {
       </View>
 
       {/* Stems List */}
-      <ScrollView style={styles.stemsList}>
+      <ScrollView
+        style={styles.stemsList}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+      >
         <Text style={styles.stemsTitle}>Active Tracks</Text>
         {stems.map((stem) => (
           <View key={stem.id} style={styles.stemRow}>
@@ -398,9 +418,26 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#1F2937',
+  },
+  backBtn: {
+    paddingRight: 12,
+    paddingVertical: 4,
+    justifyContent: 'center',
+  },
+  backBtnText: {
+    color: '#9CA3AF',
+    fontSize: 28,
+    fontWeight: '300',
+    lineHeight: 30,
+    marginTop: -2,
+  },
+  headerInfo: {
+    flex: 1,
   },
   title: {
     fontSize: 24,
