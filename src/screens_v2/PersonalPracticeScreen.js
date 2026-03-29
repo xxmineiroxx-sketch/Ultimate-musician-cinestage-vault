@@ -1148,7 +1148,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                 <Text style={[styles.transpBtnText, (!hasPrevSong || loadingStems) && styles.transpDisabled]}>⏮︎♫</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.transpBtn} onPress={handleRestart} disabled={!stemsReady}>
-                <Text style={[styles.transpBtnText, !stemsReady && styles.transpDisabled]}>⏮</Text>
+                <Text style={[styles.transpBtnText, !stemsReady && styles.transpDisabled]}>↺</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.transpBtn} onPress={() => handleSkip(-15000)} disabled={!stemsReady}>
                 <Text style={[styles.transpSkipText, !stemsReady && styles.transpDisabled]}>-15</Text>
