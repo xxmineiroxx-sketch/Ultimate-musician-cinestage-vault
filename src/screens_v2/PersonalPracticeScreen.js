@@ -1363,23 +1363,30 @@ const styles = StyleSheet.create({
 
   // Transport
   transport: {
-    flexDirection: 'row', justifyContent: 'center',
-    alignItems: 'center', gap: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: width < 390 ? 2 : 6,
   },
   transpBtn: {
-    width: 48, height: 48, borderRadius: 24,
+    width: width < 390 ? 42 : 48,
+    height: width < 390 ? 42 : 48,
+    borderRadius: width < 390 ? 21 : 24,
     backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#334155',
     justifyContent: 'center', alignItems: 'center',
   },
   transpBtnDone: { borderColor: '#10B981' },
-  transpBtnText: { fontSize: 20 },
-  transpSkipText: { color: '#94A3B8', fontSize: 12, fontWeight: '700' },
+  transpBtnText: { fontSize: width < 390 ? 17 : 20 },
+  transpSkipText: { color: '#94A3B8', fontSize: width < 390 ? 11 : 12, fontWeight: '700' },
   playBtn: {
-    width: 72, height: 72, borderRadius: 36,
+    width: width < 390 ? 62 : 72,
+    height: width < 390 ? 62 : 72,
+    borderRadius: width < 390 ? 31 : 36,
     backgroundColor: '#4F46E5', justifyContent: 'center', alignItems: 'center',
   },
   playBtnActive: { backgroundColor: '#7C3AED' },
-  playBtnText:   { fontSize: 28, color: '#FFF' },
+  playBtnText:   { fontSize: width < 390 ? 24 : 28, color: '#FFF' },
 
   // No stems inline (inside mixer card)
   noStemsInline: {
@@ -1396,7 +1403,9 @@ const styles = StyleSheet.create({
   modeRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 10,
+    flexWrap: 'wrap',
+    rowGap: 10,
+    columnGap: 10,
     marginTop: 14,
   },
   modeChip: {
@@ -1406,6 +1415,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
     backgroundColor: '#0F172A',
+    minWidth: width < 390 ? 142 : 156,
+    alignItems: 'center',
+    flexShrink: 1,
   },
   modeChipActive: {
     backgroundColor: '#312E81',
@@ -1415,6 +1427,7 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
   },
   modeChipTextActive: {
     color: '#EDE9FE',
