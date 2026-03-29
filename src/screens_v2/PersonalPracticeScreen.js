@@ -1398,7 +1398,7 @@ const styles = StyleSheet.create({
   noStemsInlineText: {
     color: '#64748B', fontSize: 12, lineHeight: 18, textAlign: 'center',
   },
-  transpDisabled: { opacity: 0.25 },
+  transpDisabled: { opacity: 0.55, color: '#64748B' },
   playBtnLoad: { backgroundColor: '#374151' },
   modeRow: {
     flexDirection: 'row',
