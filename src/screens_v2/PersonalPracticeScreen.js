@@ -1377,7 +1377,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   transpBtnDone: { borderColor: '#10B981' },
-  transpBtnText: { fontSize: width < 390 ? 17 : 20 },
+  transpBtnText: { fontSize: width < 390 ? 17 : 20, color: '#94A3B8' },
   transpSkipText: { color: '#94A3B8', fontSize: width < 390 ? 11 : 12, fontWeight: '700' },
   playBtn: {
     width: width < 390 ? 62 : 72,
