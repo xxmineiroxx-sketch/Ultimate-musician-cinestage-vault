@@ -1418,10 +1418,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
             {svcs.map(svc => {
               const isOpen = expandedSvc?.id === svc.id;
               const plan   = plans[svc.id] || {};
-              return (
-                <View key={svc.id} style={[s.calCard, isOpen && s.calCardOpen]}>
-                  <TouchableOpacity style={s.calCardTap}
-                    onPress={() => setExpandedSvc(isOpen ? null : svc)}>
+              const card = (
+                <View style={[s.calCard, isOpen && s.calCardOpen]}>
+                  <TouchableOpacity
+                    style={s.calCardTap}
+                    onPress={() => setExpandedSvc(isOpen ? null : svc)}
+                    onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
+                    delayLongPress={450}
+                  >
                     <View style={s.calDayBadge}>
                       <Text style={s.calDayNum}>{dayNum(svc.date)}</Text>
                       <Text style={s.calDayMon}>{dayShortMonth(svc.date)}</Text>
@@ -1435,6 +1439,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
                       {svc.created_by_name ? (
                         <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
                       ) : null}
+                      {canDeleteServices ? (
+                        <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
+                      ) : null}
                     </View>
                     <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>
                       {isOpen ? '▲' : '▶'}
@@ -1442,6 +1449,47 @@ export default function AdminDashboardScreen({ navigation, route }) {
                   </TouchableOpacity>
                   {isOpen && renderPlanSection(svc)}
                 </View>
+              );
+              if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
+              return (
+                <Swipeable
+                  key={svc.id}
+                  ref={(ref) => {
+                    if (ref) serviceSwipeRefs.current[svc.id] = ref;
+                    else delete serviceSwipeRefs.current[svc.id];
+                  }}
+                  overshootRight={false}
+                  friction={2}
+                  rightThreshold={40}
+                  onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
+                  onSwipeableClose={() => {
+                    if (openServiceSwipeIdRef.current === svc.id) {
+                      openServiceSwipeIdRef.current = null;
+                    }
+                  }}
+                  renderRightActions={() => (
+                    <TouchableOpacity
+                      style={[
+                        s.serviceDeleteAction,
+                        deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
+                      ]}
+                      activeOpacity={0.9}
+                      disabled={deletingServiceId === svc.id}
+                      onPress={() => confirmDeleteService(svc)}
+                    >
+                      {deletingServiceId === svc.id ? (
+                        <ActivityIndicator color="#FFF" size="small" />
+                      ) : (
+                        <>
+                          <Text style={s.serviceDeleteActionIcon}>🗑</Text>
+                          <Text style={s.serviceDeleteActionText}>Delete</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                >
+                  {card}
+                </Swipeable>
               );
             })}
           </View>
