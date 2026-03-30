@@ -9,3 +9,9 @@ apps/primary_app/ultimate_musician_full_project_v3/snapshots/
 **/node_modules/
 **/.expo/
 **/target/
+ios/Pods/
+ios/build/
+ios/.symlinks/
+ios/DerivedData/
+*.xcarchive
+*.xcresult
