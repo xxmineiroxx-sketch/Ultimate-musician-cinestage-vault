@@ -51,6 +51,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#020617"
       },
+      "versionCode": 30,
       "package": "com.ultimatemusician.playback",
       "intentFilters": [
         {
