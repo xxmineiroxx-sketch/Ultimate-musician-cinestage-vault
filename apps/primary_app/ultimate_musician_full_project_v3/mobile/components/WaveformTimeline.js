@@ -288,8 +288,8 @@ export default function WaveformTimeline({
         width: Math.max(2, ((end - start) / total) * 100),
       });
     }
-    // Fall back to default layout when 0 or 1 sections (no meaningful color contrast)
-    if (segs.length <= 1) {
+    // Fall back to default layout when <= 2 sections (no meaningful color contrast)
+    if (segs.length <= 2) {
       return DEFAULT_SECTIONS_PCT.map((d) => ({
         label: d.label,
         color: null,
