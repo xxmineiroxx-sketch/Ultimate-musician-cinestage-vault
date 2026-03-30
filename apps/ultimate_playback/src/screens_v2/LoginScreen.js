@@ -12,7 +12,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { login, isLoggedIn } from '../services/authAPI';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { login, loginWithApple, isLoggedIn } from '../services/authAPI';
 
 export default function LoginScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -22,12 +23,14 @@ export default function LoginScreen({ navigation, route }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
+  const [isAppleLoginAvailable, setIsAppleLoginAvailable] = useState(false);
 
   useEffect(() => {
     isLoggedIn().then(loggedIn => {
       if (loggedIn) navigation.replace('Main', { screen: 'HomeTab' });
       else setReady(true);
     }).catch(() => setReady(true));
+    AppleAuthentication.isAvailableAsync().then(setIsAppleLoginAvailable);
   }, []);
 
   useEffect(() => {
@@ -36,6 +39,41 @@ export default function LoginScreen({ navigation, route }) {
       setIdentifier(nextIdentifier);
     }
   }, [route?.params?.email, route?.params?.identifier]);
+
+  const handleAppleSignIn = async () => {
+    try {
+      setLoading(true);
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      const result = await loginWithApple(credential.identityToken, {
+        email: credential.email,
+        fullName: credential.fullName ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : undefined,
+      });
+
+      if (result?.needsVerification) {
+        navigation.navigate('Verify', {
+          identifier: result.email || 'apple_user',
+          email: result.email || '',
+          purpose: result.verificationPurpose || 'login',
+        });
+        return;
+      }
+      navigation.replace('Main', { screen: 'HomeTab' });
+    } catch (e) {
+      if (e.code === 'ERR_REQUEST_CANCELED') {
+        // User canceled
+      } else {
+        Alert.alert('Sign In Failed', String(e.message || e));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSignIn = async () => {
     if (!identifier.trim() || !password) {
@@ -168,6 +206,16 @@ export default function LoginScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
+        {isAppleLoginAvailable && (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={12}
+            style={styles.appleBtn}
+            onPress={handleAppleSignIn}
+          />
+        )}
+
         <Text style={styles.footerNote}>
           Forgot your password? Use your email or phone to get a reset code by email.
         </Text>
@@ -294,6 +342,11 @@ const styles = StyleSheet.create({
     color: '#A5B4FC',
     fontSize: 14,
     fontWeight: '600',
+  },
+  appleBtn: {
+    width: '100%',
+    height: 50,
+    marginBottom: 16,
   },
   footerNote: {
     color: '#6B7280',

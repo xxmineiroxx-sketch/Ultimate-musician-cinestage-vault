@@ -598,6 +598,24 @@ export async function login(identifier, password) {
   return data;
 }
 
+export async function loginWithApple(identityToken, user) {
+  const deviceId = await getDeviceId();
+  const data = await syncRequest('auth/apple', {
+    identityToken,
+    user, // optional user data on first login
+    deviceId,
+  });
+
+  if (data?.needsVerification) {
+    return data;
+  }
+
+  await completeAuthFromResponse(data, {
+    identifier: data.email || 'apple_user',
+  });
+  return data;
+}
+
 export async function verifyCode(identifier, code, options = {}) {
   const normalizedIdentifier = normalizeAuthIdentifier(identifier);
   const normalizedCode = String(code || '').trim();

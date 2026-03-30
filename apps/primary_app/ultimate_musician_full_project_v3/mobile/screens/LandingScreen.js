@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
@@ -43,15 +44,17 @@ async function registerExpoPushToken() {
 
 export default function LandingScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { login, continueAsGuest, pendingVerification, userId, ready } =
+  const { login, loginWithApple, continueAsGuest, pendingVerification, userId, ready } =
     useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isAppleLoginAvailable, setIsAppleLoginAvailable] = useState(false);
 
   // Load branch credentials from AsyncStorage on first mount
   useEffect(() => {
     loadBranchConfig();
+    AppleAuthentication.isAvailableAsync().then(setIsAppleLoginAvailable);
   }, []);
 
   // Restore any pending verification step before sending the user into the app.
@@ -85,6 +88,44 @@ export default function LandingScreen({ navigation }) {
       });
     } catch (err) {
       Alert.alert("Sign In Failed", String(err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    try {
+      setLoading(true);
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      // Try to log in to our backend using the Apple identityToken
+      const data = await loginWithApple(credential.identityToken, {
+        email: credential.email,
+        fullName: credential.fullName ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : undefined,
+      });
+
+      if (data.needsVerification) {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Verify" }],
+        });
+      } else {
+        registerExpoPushToken();
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "Home" }],
+        });
+      }
+    } catch (e) {
+      if (e.code === 'ERR_REQUEST_CANCELED') {
+        // User canceled
+      } else {
+        Alert.alert("Sign In Failed", String(e.message || e));
+      }
     } finally {
       setLoading(false);
     }
@@ -178,6 +219,16 @@ export default function LandingScreen({ navigation }) {
             <Text style={styles.registerLinkText}>Create an account</Text>
           </TouchableOpacity>
         </View>
+
+        {isAppleLoginAvailable && (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={12}
+            style={styles.appleBtn}
+            onPress={handleAppleSignIn}
+          />
+        )}
 
         {/* Guest */}
         <TouchableOpacity
@@ -295,6 +346,11 @@ const styles = StyleSheet.create({
     color: "#818CF8",
     fontSize: 14,
     fontWeight: "600",
+  },
+  appleBtn: {
+    width: '100%',
+    height: 50,
+    marginBottom: 12,
   },
   guestBtn: {
     borderRadius: 12,

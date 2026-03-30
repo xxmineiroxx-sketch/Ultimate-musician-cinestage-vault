@@ -202,6 +202,24 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const loginWithApple = async (identityToken, user) => {
+    const deviceId = await getOrCreateDeviceId();
+    const res = await fetch(`${SYNC_URL}/sync/auth/apple`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({
+        identityToken,
+        user, // Only available on first login, contains email and fullName
+        deviceId,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Apple Sign-In failed");
+
+    await persistSession(data, data.email || "Apple User");
+    return data;
+  };
+
   const verifyCode = async (identifier, code, purpose) => {
     const verification = normalizePendingVerification({
       identifier: identifier || pendingVerification?.identifier,
@@ -318,6 +336,7 @@ export function AuthProvider({ children }) {
     apiBase: SYNC_URL,
     setApiBase: () => {},
     login,
+    loginWithApple,
     register,
     verifyCode,
     resendVerification,
