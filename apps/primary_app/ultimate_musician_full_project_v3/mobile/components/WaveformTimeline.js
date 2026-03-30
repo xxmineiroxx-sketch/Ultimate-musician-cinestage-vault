@@ -690,8 +690,9 @@ export default function WaveformTimeline({
                   pointMarker && styles.userMarkerFlagPoint,
                   {
                     left: `${left}%`,
-                    backgroundColor: pointMarker ? "#08111F" : col,
-                    borderColor: col,
+                    backgroundColor: "rgba(10, 15, 30, 0.75)",
+                    borderColor: col + "60",
+                    borderWidth: 1,
                   },
                 ]}
                 onStartShouldSetResponder={() => true}
@@ -711,7 +712,8 @@ export default function WaveformTimeline({
                 <Text
                   style={[
                     styles.userMarkerFlagText,
-                    pointMarker && { color: col, fontSize: 10 },
+                    { color: col },
+                    pointMarker && { fontSize: 10 },
                   ]}
                   numberOfLines={1}
                 >
@@ -1064,7 +1066,7 @@ const styles = StyleSheet.create({
     bottom: 8,
     flexDirection: "row",
     alignItems: "center",
-    gap: 1,
+    gap: 0,
   },
   // Two-tone bar container
   peakBar: {
@@ -1119,23 +1121,23 @@ const styles = StyleSheet.create({
   },
   userMarkerFlag: {
     position: "absolute",
-    top: MARKER_PIN_TOP + MARKER_PIN_HEIGHT + 4,
-    height: 20,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
+    top: MARKER_PIN_TOP,
+    height: MARKER_PIN_HEIGHT,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 6,
     zIndex: 16,
-    maxWidth: 80,
+    minWidth: 48,
+    marginLeft: 2,
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 3,
   },
   userMarkerFlagPoint: {
-    height: 28,
-    minWidth: 88,
+    height: MARKER_PIN_HEIGHT + 4,
+    minWidth: 68,
     maxWidth: 148,
-    borderRadius: 10,
-    borderWidth: 1.5,
+    borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
