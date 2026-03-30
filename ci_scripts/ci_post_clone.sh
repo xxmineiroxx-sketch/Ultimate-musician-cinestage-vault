@@ -8,6 +8,20 @@ log() {
   printf '%s\n' "[ci_post_clone] $*"
 }
 
+normalize_watch_assets() {
+  legacy_watch_dir="$PROJECT_ROOT/ios/UltimatePlaybackWatch 2"
+  legacy_assets_dir="$legacy_watch_dir/Assets.xcassets"
+  watch_dir="$PROJECT_ROOT/ios/UltimatePlaybackWatch"
+  watch_assets_dir="$watch_dir/Assets.xcassets"
+
+  if [ -d "$legacy_assets_dir" ] && [ ! -d "$watch_assets_dir" ]; then
+    log "Normalizing stray watch asset folder"
+    mkdir -p "$watch_dir"
+    mv "$legacy_assets_dir" "$watch_assets_dir"
+    rmdir "$legacy_watch_dir" 2>/dev/null || true
+  fi
+}
+
 ensure_xcodeproj_gem() {
   if ruby -e "require 'xcodeproj'" >/dev/null 2>&1; then
     log "Ruby gem xcodeproj already available"
@@ -52,6 +66,8 @@ if [ "${CI_POST_CLONE_SKIP_PREBUILD:-0}" != "1" ]; then
 else
   log "Skipping Expo prebuild because CI_POST_CLONE_SKIP_PREBUILD=1"
 fi
+
+normalize_watch_assets
 
 if [ ! -d ios/UltimatePlayback.xcworkspace ]; then
   log "Expected ios/UltimatePlayback.xcworkspace to exist after prebuild"
