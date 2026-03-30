@@ -1,22 +1,42 @@
 import React, { useRef, useMemo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { normalizePeaksRange, smoothPeaks } from "../services/wavePipelineEngine";
+
+import {
+  normalizePeaksRange,
+  smoothPeaks,
+} from "../services/wavePipelineEngine";
 
 /** Strip trailing numbers/spaces so "Verse 1", "Bridge8" → "verse", "bridge". */
 function normLabel(label) {
-  return (label || '').toLowerCase().replace(/[\s]*\d+\s*$/, '').trim();
+  return (label || "")
+    .toLowerCase()
+    .replace(/[\s]*\d+\s*$/, "")
+    .trim();
 }
 
 /** Strip leading type prefixes like "SECTION ", "MARKER ", "CUE " from stored labels. */
 function cleanLabel(label) {
-  return (label || '').replace(/^(section|marker|cue|part)\s+/i, '').trim() || (label || 'Section');
+  return (
+    (label || "").replace(/^(section|marker|cue|part)\s+/i, "").trim() ||
+    label ||
+    "Section"
+  );
 }
 
 /** Cycling color palette for sections that don't match known SECTION_COLORS. */
 const PALETTE = [
-  '#6366F1', '#EC4899', '#F59E0B', '#10B981',
-  '#38BDF8', '#F97316', '#8B5CF6', '#EF4444',
-  '#14B8A6', '#A3E635', '#F472B6', '#FB923C',
+  "#6366F1",
+  "#EC4899",
+  "#F59E0B",
+  "#10B981",
+  "#38BDF8",
+  "#F97316",
+  "#8B5CF6",
+  "#EF4444",
+  "#14B8A6",
+  "#A3E635",
+  "#F472B6",
+  "#FB923C",
 ];
 
 /** Deterministic pseudo-random from a string seed. */
@@ -45,48 +65,63 @@ const SECTION_COLORS = {
 
 // High-frequency zone colors (top portion of each bar — cooler/lighter)
 const HIGH_FREQ_COLORS = {
-  intro:         "#9CA3AF",
-  verse:         "#818CF8",
-  "pre-chorus":  "#C4B5FD",
-  chorus:        "#F9A8D4",
-  bridge:        "#FDE68A",
-  outro:         "#6EE7B7",
-  tag:           "#7DD3FC",
+  intro: "#9CA3AF",
+  verse: "#818CF8",
+  "pre-chorus": "#C4B5FD",
+  chorus: "#F9A8D4",
+  bridge: "#FDE68A",
+  outro: "#6EE7B7",
+  tag: "#7DD3FC",
 };
 
 const ROLE_COLORS = {
-  worship_leader:   '#F59E0B',
-  lead_vocal:       '#EC4899',
-  bgv_1:            '#C026D3',
-  bgv_2:            '#9333EA',
-  bgv_3:            '#7C3AED',
-  keyboard:         '#6366F1',
-  piano:            '#6366F1',
-  synth:            '#818CF8',
-  electric_guitar:  '#F97316',
-  rhythm_guitar:    '#FB923C',
-  acoustic_guitar:  '#EAB308',
-  bass:             '#10B981',
-  drums:            '#EF4444',
-  percussion:       '#DC2626',
-  strings:          '#A78BFA',
-  brass:            '#FBBF24',
-  music_director:   '#0EA5E9',
-  foh_engineer:     '#64748B',
-  monitor_engineer: '#94A3B8',
-  stream_engineer:  '#38BDF8',
-  lighting:         '#FB923C',
-  media_tech:       '#A3E635',
+  worship_leader: "#F59E0B",
+  lead_vocal: "#EC4899",
+  bgv_1: "#C026D3",
+  bgv_2: "#9333EA",
+  bgv_3: "#7C3AED",
+  keyboard: "#6366F1",
+  piano: "#6366F1",
+  synth: "#818CF8",
+  electric_guitar: "#F97316",
+  rhythm_guitar: "#FB923C",
+  acoustic_guitar: "#EAB308",
+  bass: "#10B981",
+  drums: "#EF4444",
+  percussion: "#DC2626",
+  strings: "#A78BFA",
+  brass: "#FBBF24",
+  music_director: "#0EA5E9",
+  foh_engineer: "#64748B",
+  monitor_engineer: "#94A3B8",
+  stream_engineer: "#38BDF8",
+  lighting: "#FB923C",
+  media_tech: "#A3E635",
 };
 
 const ROLE_EMOJIS = {
-  worship_leader: '🎸', lead_vocal: '🎤',
-  bgv_1: '🎤', bgv_2: '🎤', bgv_3: '🎤',
-  keyboard: '🎹', piano: '🎹', synth: '🎛️',
-  electric_guitar: '🎸', rhythm_guitar: '🎸', acoustic_guitar: '🎸',
-  bass: '🎸', drums: '🥁', percussion: '🪘', strings: '🎻', brass: '🎺',
-  music_director: '🎼', foh_engineer: '🎚️', monitor_engineer: '🎚️',
-  stream_engineer: '📡', lighting: '💡', media_tech: '🖥️',
+  worship_leader: "🎸",
+  lead_vocal: "🎤",
+  bgv_1: "🎤",
+  bgv_2: "🎤",
+  bgv_3: "🎤",
+  keyboard: "🎹",
+  piano: "🎹",
+  synth: "🎛️",
+  electric_guitar: "🎸",
+  rhythm_guitar: "🎸",
+  acoustic_guitar: "🎸",
+  bass: "🎸",
+  drums: "🥁",
+  percussion: "🪘",
+  strings: "🎻",
+  brass: "🎺",
+  music_director: "🎼",
+  foh_engineer: "🎚️",
+  monitor_engineer: "🎚️",
+  stream_engineer: "📡",
+  lighting: "💡",
+  media_tech: "🖥️",
 };
 const DEFAULT_SECTIONS_PCT = [
   { label: "Intro", s: 0.0, e: 0.08 },
@@ -97,7 +132,7 @@ const DEFAULT_SECTIONS_PCT = [
   { label: "Outro", s: 0.82, e: 1.0 },
 ];
 
-const BAR_COUNT = 180;
+const BAR_COUNT = 300;
 
 /**
  * Pro waveform timeline with section marker pins.
@@ -122,10 +157,10 @@ export default function WaveformTimeline({
   sectionMarkers = [],
   activeSectionLabel = null,
   sectionLoopActive = false,
-  onSectionTap = null,        // (sec, tapCount: 1|2|3) — caller handles loop/worship
-  onWorshipLoop = null,       // shortcut for 3-tap worship loop
+  onSectionTap = null, // (sec, tapCount: 1|2|3) — caller handles loop/worship
+  onWorshipLoop = null, // shortcut for 3-tap worship loop
   onSectionMarkerDrag = null, // (sec, nextTimeSec, isFinal) — drag cue marker left/right
-  onSectionMenu = null,       // (sec) — long-press → rename/delete menu
+  onSectionMenu = null, // (sec) — long-press → rename/delete menu
   // Marker add / tap
   onAddMarker = null,
   onMarkerTap = null,
@@ -143,13 +178,13 @@ export default function WaveformTimeline({
   const containerPageXRef = useRef(0);
 
   // ── Per-marker tap counting (1=jump, 2=loop, 3=worship loop) ─────────────
-  const tapCountRef  = useRef({}); // { [label]: count }
-  const tapTimerRef  = useRef({}); // { [label]: timeoutId }
+  const tapCountRef = useRef({}); // { [label]: count }
+  const tapTimerRef = useRef({}); // { [label]: timeoutId }
   const [tapVisual, setTapVisual] = React.useState({}); // { [label]: 1|2|3 } for UI
 
   function handleMarkerPress(sec) {
-    const key   = String(sec?.markerId || sec?.id || sec?.label);
-    const prev  = tapCountRef.current[key] || 0;
+    const key = String(sec?.markerId || sec?.id || sec?.label);
+    const prev = tapCountRef.current[key] || 0;
     const count = prev + 1;
 
     // Clear existing reset timer for this marker
@@ -159,16 +194,24 @@ export default function WaveformTimeline({
     if (count >= 3) {
       tapCountRef.current[key] = 0;
       delete tapTimerRef.current[key];
-      setTapVisual(v => { const n = { ...v }; delete n[key]; return n; });
+      setTapVisual((v) => {
+        const n = { ...v };
+        delete n[key];
+        return n;
+      });
       onWorshipLoop?.(sec);
       onSectionTap?.(sec, 3);
     } else {
       tapCountRef.current[key] = count;
-      setTapVisual(v => ({ ...v, [key]: count }));
+      setTapVisual((v) => ({ ...v, [key]: count }));
       // Auto-reset after 700ms inactivity
       tapTimerRef.current[key] = setTimeout(() => {
         tapCountRef.current[key] = 0;
-        setTapVisual(v => { const n = { ...v }; delete n[key]; return n; });
+        setTapVisual((v) => {
+          const n = { ...v };
+          delete n[key];
+          return n;
+        });
       }, 700);
       onSectionTap?.(sec, count);
     }
@@ -191,25 +234,27 @@ export default function WaveformTimeline({
 
   // ── Sort song-structure sections ─────────────────────────────────────────
   const sorted = useMemo(() => {
-    const source = Array.isArray(sections) && sections.length > 0
-      ? sections
-      : sectionMarkers;
+    const source =
+      Array.isArray(sections) && sections.length > 0
+        ? sections
+        : sectionMarkers;
 
     return [...source]
       .map((section, index) => {
         const rawTime = Number(
-          section?.timeSec
-          ?? section?.positionSeconds
-          ?? section?.startSeconds
-          ?? section?.startSec
-          ?? section?.start
-          ?? 0,
+          section?.timeSec ??
+            section?.positionSeconds ??
+            section?.startSeconds ??
+            section?.startSec ??
+            section?.start ??
+            0,
         );
         const timeSec = Number.isFinite(rawTime) ? rawTime : 0;
         const label = cleanLabel(section?.label || `Section ${index + 1}`);
-        const color = section?.color
-          || SECTION_COLORS[normLabel(label)]
-          || PALETTE[index % PALETTE.length];
+        const color =
+          section?.color ||
+          SECTION_COLORS[normLabel(label)] ||
+          PALETTE[index % PALETTE.length];
         return {
           ...section,
           label,
@@ -222,7 +267,8 @@ export default function WaveformTimeline({
       .sort((a, b) => a.positionSeconds - b.positionSeconds);
   }, [sections, sectionMarkers]);
   const markerList = [...markers].sort(
-    (a, b) => Number(a.start ?? a.timeSec ?? 0) - Number(b.start ?? b.timeSec ?? 0),
+    (a, b) =>
+      Number(a.start ?? a.timeSec ?? 0) - Number(b.start ?? b.timeSec ?? 0),
   );
   const automationList = [...automationEvents].sort(
     (a, b) => (a.timeSec || 0) - (b.timeSec || 0),
@@ -238,7 +284,7 @@ export default function WaveformTimeline({
       const end = next ? next.positionSeconds || total : total;
       segs.push({
         label: s.label || "SECTION",
-        color: s.color || null,   // carry explicit color from sectionJumpList
+        color: s.color || null, // carry explicit color from sectionJumpList
         width: Math.max(2, ((end - start) / total) * 100),
       });
     }
@@ -302,10 +348,10 @@ export default function WaveformTimeline({
 
   // ── Role color ────────────────────────────────────────────────────────
   const roleKey = userRole
-    ? String(userRole).toLowerCase().replace(/[\s-]/g, '_')
+    ? String(userRole).toLowerCase().replace(/[\s-]/g, "_")
     : null;
-  const roleColor = roleKey ? (ROLE_COLORS[roleKey] || '#4F46E5') : null;
-  const roleEmoji = roleKey ? (ROLE_EMOJIS[roleKey] || '🎵') : null;
+  const roleColor = roleKey ? ROLE_COLORS[roleKey] || "#4F46E5" : null;
+  const roleEmoji = roleKey ? ROLE_EMOJIS[roleKey] || "🎵" : null;
 
   // ── BPM grid ──────────────────────────────────────────────────────────
   const beatCount = bpm > 0 && total > 0 ? Math.floor((total * bpm) / 60) : 0;
@@ -390,7 +436,8 @@ export default function WaveformTimeline({
         {/* Section color strip — bottom */}
         <View style={styles.sectionStrip} pointerEvents="none">
           {segments.map((seg, idx) => {
-            const c = seg.color || SECTION_COLORS[normLabel(seg.label)] || "#4F46E5";
+            const c =
+              seg.color || SECTION_COLORS[normLabel(seg.label)] || "#4F46E5";
             return (
               <View
                 key={seg.label + idx}
@@ -422,20 +469,27 @@ export default function WaveformTimeline({
         )}
 
         {/* Section boundary lines — subtle vertical dividers at each section start */}
-        {sorted.length > 1 && sorted.slice(1).map((sec, i) => {
-          const posLeft = ((sec.positionSeconds || 0) / total) * 100;
-          const secColor = sec.color || SECTION_COLORS[normLabel(sec.label || '')] || '#6366F1';
-          return (
-            <View
-              key={`secbound-${i}`}
-              pointerEvents="none"
-              style={[styles.sectionBoundaryLine, {
-                left: `${posLeft}%`,
-                backgroundColor: secColor + '55',
-              }]}
-            />
-          );
-        })}
+        {sorted.length > 1 &&
+          sorted.slice(1).map((sec, i) => {
+            const posLeft = ((sec.positionSeconds || 0) / total) * 100;
+            const secColor =
+              sec.color ||
+              SECTION_COLORS[normLabel(sec.label || "")] ||
+              "#6366F1";
+            return (
+              <View
+                key={`secbound-${i}`}
+                pointerEvents="none"
+                style={[
+                  styles.sectionBoundaryLine,
+                  {
+                    left: `${posLeft}%`,
+                    backgroundColor: secColor + "55",
+                  },
+                ]}
+              />
+            );
+          })}
 
         {/* Waveform bars — two-tone frequency simulation (bass zone + high zone) */}
         <View style={styles.peaksRow} pointerEvents="none">
@@ -449,33 +503,38 @@ export default function WaveformTimeline({
               cumW += s.width;
               return pct * 100 >= st * 100 && pct * 100 < cumW;
             });
-            const segKey = normLabel(seg?.label || '');
-            const sectionColor = seg?.color || SECTION_COLORS[segKey] || '#6366F1';
-            const highFreqColor = HIGH_FREQ_COLORS[segKey] || (seg?.color ? seg.color + 'CC' : '#94A3B8');
-            const bassBase = sectionColor;
-            const highBase = highFreqColor;
+            const segKey = normLabel(seg?.label || "");
+            const sectionColor =
+              seg?.color || SECTION_COLORS[segKey] || "#6366F1";
+            const baseColor = sectionColor;
 
             // Active section focus: playing section = bright, others = very dim
             const barTimeSec = pct * total;
             const inActiveSec = activeSec
-              ? barTimeSec >= (activeSec.timeSec || 0) && barTimeSec < (activeSec.endTimeSec || total)
+              ? barTimeSec >= (activeSec.timeSec || 0) &&
+                barTimeSec < (activeSec.endTimeSec || total)
               : false;
             const isIdle = clampedPlayhead == null || clampedPlayhead === 0;
             // alpha: idle=full, played=full, active-future=55%, inactive=13%
-            const barAlpha = isIdle ? 1.0
-              : isPast         ? 0.95
-              : inActiveSec    ? 0.58
-              : 0.14;
+            const barAlpha = isIdle
+              ? 1.0
+              : isPast
+                ? 0.95
+                : inActiveSec
+                  ? 0.8
+                  : 0.3;
 
             return (
               <View
                 key={`b${idx}`}
                 style={[styles.peakBar, { height: `${Math.max(5, v * 100)}%` }]}
               >
-                {/* High-freq zone — top 45% of bar */}
-                <View style={[styles.barHighZone, { backgroundColor: highBase, opacity: barAlpha * 0.82 }]} />
-                {/* Bass zone — bottom 55% of bar */}
-                <View style={[styles.barBassZone, { backgroundColor: bassBase, opacity: barAlpha }]} />
+                <View
+                  style={[
+                    styles.barSolid,
+                    { backgroundColor: baseColor, opacity: barAlpha },
+                  ]}
+                />
               </View>
             );
           })}
@@ -490,8 +549,8 @@ export default function WaveformTimeline({
               {
                 width: `${clampedPlayhead * 100}%`,
                 backgroundColor: roleColor
-                  ? roleColor + '1A'
-                  : 'rgba(99,102,241,0.14)',
+                  ? roleColor + "1A"
+                  : "rgba(99,102,241,0.14)",
               },
             ]}
           />
@@ -518,7 +577,10 @@ export default function WaveformTimeline({
           const left = ((markerStart || 0) / total) * 100;
           const width = pointMarker
             ? 0
-            : Math.max(1.5, (((markerEnd || 0) - (markerStart || 0)) / total) * 100);
+            : Math.max(
+                1.5,
+                (((markerEnd || 0) - (markerStart || 0)) / total) * 100,
+              );
           const col = m.color || "#4F46E5";
           const markerId = String(m.id || `${m.label}-${idx}`);
           const typeTag = m.type ? String(m.type).toUpperCase() : "";
@@ -533,9 +595,7 @@ export default function WaveformTimeline({
               key,
               mode,
               offsetSec:
-                mode === "move"
-                  ? timeFromPageX(pageX) - markerStart
-                  : 0,
+                mode === "move" ? timeFromPageX(pageX) - markerStart : 0,
               startX: pageX,
               moved: false,
             };
@@ -549,10 +609,7 @@ export default function WaveformTimeline({
             if (mode === "move") {
               return Math.max(
                 0,
-                Math.min(
-                  total,
-                  normalized - dragStateRef.current.offsetSec,
-                ),
+                Math.min(total, normalized - dragStateRef.current.offsetSec),
               );
             }
             return normalized;
@@ -562,8 +619,7 @@ export default function WaveformTimeline({
             if (!isDraggable && mode !== "move") return;
             if (dragStateRef.current.key !== key) return;
             const pageX = gestureState?.moveX || e?.nativeEvent?.pageX || 0;
-            const moved =
-              Math.abs(pageX - dragStateRef.current.startX) > 3;
+            const moved = Math.abs(pageX - dragStateRef.current.startX) > 3;
             if (moved) dragStateRef.current.moved = true;
             const nextValue = computeNextValue(mode, pageX);
             onMarkerDrag?.(m, nextValue, false, mode);
@@ -662,82 +718,89 @@ export default function WaveformTimeline({
                   {m.label}
                 </Text>
               </View>
-            {!pointMarker && (
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.markerBlock,
-                  {
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    backgroundColor: col + "33",
-                    borderLeftColor: col,
-                    borderLeftWidth: 2,
-                  },
-                ]}
-              />
-            )}
-            {isDraggable && !pointMarker && (
-              <>
+              {!pointMarker && (
                 <View
-                  pointerEvents="auto"
+                  pointerEvents="none"
                   style={[
-                    styles.markerHandle,
-                    { left: `${left}%`, backgroundColor: col + "33" },
+                    styles.markerBlock,
+                    {
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      backgroundColor: col + "33",
+                      borderLeftColor: col,
+                      borderLeftWidth: 2,
+                    },
                   ]}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={handleLeftStart}
-                  onResponderMove={handleDragMove(leftKey, "resize-left")}
-                  onResponderRelease={handleDragEnd(leftKey, "resize-left")}
-                  onResponderTerminate={handleDragEnd(leftKey, "resize-left")}
-                  onResponderTerminationRequest={() => false}
-                >
+                />
+              )}
+              {isDraggable && !pointMarker && (
+                <>
                   <View
+                    pointerEvents="auto"
                     style={[
-                      styles.markerHandleGrip,
-                      { backgroundColor: col + "EE" },
+                      styles.markerHandle,
+                      { left: `${left}%`, backgroundColor: col + "33" },
                     ]}
-                  />
-                </View>
-                <View
-                  pointerEvents="auto"
-                  style={[
-                    styles.markerHandle,
-                    { left: `${rightPct}%`, backgroundColor: col + "33" },
-                  ]}
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
-                  onResponderGrant={handleRightStart}
-                  onResponderMove={handleDragMove(rightKey, "resize-right")}
-                  onResponderRelease={handleDragEnd(rightKey, "resize-right")}
-                  onResponderTerminate={handleDragEnd(rightKey, "resize-right")}
-                  onResponderTerminationRequest={() => false}
-                >
+                    onStartShouldSetResponder={() => true}
+                    onMoveShouldSetResponder={() => true}
+                    onResponderGrant={handleLeftStart}
+                    onResponderMove={handleDragMove(leftKey, "resize-left")}
+                    onResponderRelease={handleDragEnd(leftKey, "resize-left")}
+                    onResponderTerminate={handleDragEnd(leftKey, "resize-left")}
+                    onResponderTerminationRequest={() => false}
+                  >
+                    <View
+                      style={[
+                        styles.markerHandleGrip,
+                        { backgroundColor: col + "EE" },
+                      ]}
+                    />
+                  </View>
                   <View
+                    pointerEvents="auto"
                     style={[
-                      styles.markerHandleGrip,
-                      { backgroundColor: col + "EE" },
+                      styles.markerHandle,
+                      { left: `${rightPct}%`, backgroundColor: col + "33" },
                     ]}
-                  />
-                </View>
-              </>
-            )}
-          </React.Fragment>
-        );
-      })}
+                    onStartShouldSetResponder={() => true}
+                    onMoveShouldSetResponder={() => true}
+                    onResponderGrant={handleRightStart}
+                    onResponderMove={handleDragMove(rightKey, "resize-right")}
+                    onResponderRelease={handleDragEnd(rightKey, "resize-right")}
+                    onResponderTerminate={handleDragEnd(
+                      rightKey,
+                      "resize-right",
+                    )}
+                    onResponderTerminationRequest={() => false}
+                  >
+                    <View
+                      style={[
+                        styles.markerHandleGrip,
+                        { backgroundColor: col + "EE" },
+                      ]}
+                    />
+                  </View>
+                </>
+              )}
+            </React.Fragment>
+          );
+        })}
 
         {/* ── Section marker pins ─────────────────────────────────────── */}
         {sectionMarkers.map((sec, secIdx) => {
           const displayLabel = cleanLabel(sec.label);
-          const leftPct  = (sec.timeSec / total) * 100;
-          const isActive = activeSectionLabel === sec.label || activeSectionLabel === displayLabel;
-          const secKey = String(sec?.markerId || sec?.id || `${sec.label}-${secIdx}`);
+          const leftPct = (sec.timeSec / total) * 100;
+          const isActive =
+            activeSectionLabel === sec.label ||
+            activeSectionLabel === displayLabel;
+          const secKey = String(
+            sec?.markerId || sec?.id || `${sec.label}-${secIdx}`,
+          );
           const tapCount = tapVisual[secKey] || 0;
-          const isLoop   = (isActive && sectionLoopActive) || tapCount === 2;
+          const isLoop = (isActive && sectionLoopActive) || tapCount === 2;
           const isWorship = tapCount === 3;
-          const color    = sec.color;
-          const canDragSection = typeof onSectionMarkerDrag === 'function';
+          const color = sec.color;
+          const canDragSection = typeof onSectionMarkerDrag === "function";
           const pinHeight = MARKER_PIN_HEIGHT;
           const pinMinWidth = 48;
           const pinPaddingHorizontal = 7;
@@ -749,9 +812,9 @@ export default function WaveformTimeline({
 
           // Pin icon based on tap state
           let pinIcon = null;
-          if (isWorship)      pinIcon = '🙏';
-          else if (isLoop)    pinIcon = '🔁';
-          else if (tapCount === 1) pinIcon = '▶';
+          if (isWorship) pinIcon = "🙏";
+          else if (isLoop) pinIcon = "🔁";
+          else if (tapCount === 1) pinIcon = "▶";
 
           const handlePinDragStart = (e, gestureState) => {
             updateContainerMetrics();
@@ -765,8 +828,16 @@ export default function WaveformTimeline({
             // Long-press timer → open menu
             if (secLongPressRef.current) clearTimeout(secLongPressRef.current);
             secLongPressRef.current = setTimeout(() => {
-              if (!sectionDragStateRef.current?.moved && sectionDragStateRef.current?.id === secKey) {
-                sectionDragStateRef.current = { id: null, offsetSec: 0, startX: 0, moved: false };
+              if (
+                !sectionDragStateRef.current?.moved &&
+                sectionDragStateRef.current?.id === secKey
+              ) {
+                sectionDragStateRef.current = {
+                  id: null,
+                  offsetSec: 0,
+                  startX: 0,
+                  moved: false,
+                };
                 onSectionMenu?.(sec);
               }
             }, 500);
@@ -775,26 +846,43 @@ export default function WaveformTimeline({
           const handlePinDragMove = (e, gestureState) => {
             if (sectionDragStateRef.current.id !== secKey) return;
             const pageX = gestureState?.moveX || e?.nativeEvent?.pageX || 0;
-            const moved = Math.abs(pageX - sectionDragStateRef.current.startX) > 5;
+            const moved =
+              Math.abs(pageX - sectionDragStateRef.current.startX) > 5;
             if (moved) {
               sectionDragStateRef.current.moved = true;
-              if (secLongPressRef.current) { clearTimeout(secLongPressRef.current); secLongPressRef.current = null; }
+              if (secLongPressRef.current) {
+                clearTimeout(secLongPressRef.current);
+                secLongPressRef.current = null;
+              }
             }
             if (canDragSection && moved) {
-              const nextTimeSec = Math.max(0, Math.min(total,
-                timeFromPageX(pageX) - sectionDragStateRef.current.offsetSec));
+              const nextTimeSec = Math.max(
+                0,
+                Math.min(
+                  total,
+                  timeFromPageX(pageX) - sectionDragStateRef.current.offsetSec,
+                ),
+              );
               onSectionMarkerDrag?.(sec, nextTimeSec, false);
             }
           };
 
           const handlePinDragEnd = (e, gestureState) => {
-            if (secLongPressRef.current) { clearTimeout(secLongPressRef.current); secLongPressRef.current = null; }
+            if (secLongPressRef.current) {
+              clearTimeout(secLongPressRef.current);
+              secLongPressRef.current = null;
+            }
             const pageX = gestureState?.moveX || e?.nativeEvent?.pageX || 0;
             const moved =
               sectionDragStateRef.current.moved ||
               Math.abs(pageX - sectionDragStateRef.current.startX) > 5;
-            const nextTimeSec = Math.max(0, Math.min(total,
-              timeFromPageX(pageX) - sectionDragStateRef.current.offsetSec));
+            const nextTimeSec = Math.max(
+              0,
+              Math.min(
+                total,
+                timeFromPageX(pageX) - sectionDragStateRef.current.offsetSec,
+              ),
+            );
             if (canDragSection && sectionDragStateRef.current.id === secKey) {
               if (moved) {
                 onSectionMarkerDrag?.(sec, nextTimeSec, true);
@@ -837,15 +925,13 @@ export default function WaveformTimeline({
                     minWidth: pinMinWidth,
                     paddingHorizontal: pinPaddingHorizontal,
                     paddingVertical: pinPaddingVertical,
-                    marginLeft: pinMarginLeft,
-                    borderRadius: pinRadius,
+                    marginLeft: 2,
+                    borderRadius: 6,
                     gap: pinGap,
-                    borderColor: isActive ? color : color + "99",
-                    backgroundColor: isActive ? color + "EE" : color + "22",
+                    borderColor: color + "60",
+                    backgroundColor: "rgba(10, 15, 30, 0.75)",
                     borderWidth: 1,
                   },
-                  isLoop    && { backgroundColor: color + "CC", borderColor: color },
-                  isWorship && { backgroundColor: '#F59E0BCC', borderColor: '#F59E0B' },
                 ]}
                 onStartShouldSetResponder={() => true}
                 onMoveShouldSetResponder={() => true}
@@ -857,21 +943,21 @@ export default function WaveformTimeline({
                 onResponderTerminationRequest={() => false}
               >
                 {pinIcon ? (
-                  <Text style={[styles.markerPinIcon, { fontSize: 10 }]}>{pinIcon}</Text>
+                  <Text style={[styles.markerPinIcon, { fontSize: 10, color }]}>
+                    {pinIcon}
+                  </Text>
                 ) : null}
                 <Text
-                  style={[
-                    styles.markerPinText,
-                    { color: isActive ? '#FFFFFF' : color + "EE" },
-                    isWorship && { color: '#FFF' },
-                  ]}
+                  style={[styles.markerPinText, { color }]}
                   numberOfLines={1}
                 >
                   {displayLabel}
                 </Text>
                 {tapCount > 0 && (
-                  <View style={[styles.tapDot, { backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : color }]}>
-                    <Text style={[styles.tapDotText, { color: isActive ? '#fff' : '#000' }]}>{tapCount}</Text>
+                  <View style={[styles.tapDot, { backgroundColor: color }]}>
+                    <Text style={[styles.tapDotText, { color: "#000" }]}>
+                      {tapCount}
+                    </Text>
                   </View>
                 )}
               </View>
@@ -893,15 +979,6 @@ export default function WaveformTimeline({
             <View style={styles.playheadDiamond} />
           </View>
         )}
-
-        {/* Time display corner */}
-        <View style={styles.timeCorner} pointerEvents="none">
-          <Text style={styles.timeCornerText}>
-            {clampedPlayhead != null ? fmtSec(clampedPlayhead * total) : "0:00"}
-            {"  /  "}
-            {fmtSec(total)}
-          </Text>
-        </View>
       </TouchableOpacity>
 
       {/* ── Automation lane ─────────────────────────────────────────────── */}
@@ -928,8 +1005,13 @@ export default function WaveformTimeline({
       {/* ── Role cue ────────────────────────────────────────────────────── */}
       {!!roleCue && !!roleColor && (
         <View style={styles.roleCueRow}>
-          <Text style={[styles.roleCueText, { color: roleColor }]} numberOfLines={2}>
-            {roleEmoji}{'  '}{roleCue}
+          <Text
+            style={[styles.roleCueText, { color: roleColor }]}
+            numberOfLines={2}
+          >
+            {roleEmoji}
+            {"  "}
+            {roleCue}
           </Text>
         </View>
       )}
@@ -991,10 +1073,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     flexDirection: "column",
   },
-  // High-freq zone (top ~45% of each bar — cooler, lighter color)
-  barHighZone: { flex: 9 },
-  // Bass zone (bottom ~55% of each bar — richer section color)
-  barBassZone: { flex: 11 },
+  barSolid: { flex: 1 },
 
   // Section boundary line — full height through entire waveform
   sectionBoundaryLine: {
@@ -1132,8 +1211,12 @@ const styles = StyleSheet.create({
   markerPinIcon: { fontSize: 10 },
   markerPinText: { fontSize: 11, fontWeight: "800", letterSpacing: 0.2 },
   tapDot: {
-    width: 16, height: 16, borderRadius: 8,
-    alignItems: "center", justifyContent: "center", marginLeft: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 2,
   },
   tapDotText: { color: "#000", fontSize: 9, fontWeight: "900" },
 
@@ -1201,13 +1284,13 @@ const styles = StyleSheet.create({
   // Role cue
   roleCueRow: {
     marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     paddingHorizontal: 2,
   },
   roleCueText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
     lineHeight: 16,
     flex: 1,
   },
