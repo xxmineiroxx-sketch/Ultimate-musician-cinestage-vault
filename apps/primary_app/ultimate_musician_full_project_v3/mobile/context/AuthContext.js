@@ -1,10 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 
 import { SYNC_URL, syncHeaders } from "../screens/config";
 
@@ -21,7 +16,9 @@ const STORAGE_KEYS = {
 };
 
 function isGuestUserId(value) {
-  return String(value || "").trim().startsWith("guest-");
+  return String(value || "")
+    .trim()
+    .startsWith("guest-");
 }
 
 function makeDeviceId() {
@@ -34,7 +31,9 @@ function normalizePendingVerification(value) {
   return {
     identifier,
     purpose: value?.purpose === "signup" ? "signup" : "login",
-    email: String(value?.email || identifier).trim().toLowerCase(),
+    email: String(value?.email || identifier)
+      .trim()
+      .toLowerCase(),
   };
 }
 
@@ -64,15 +63,14 @@ export function AuthProvider({ children }) {
         storedName,
         storedRole,
         storedPendingVerification,
-      ] =
-        await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.token),
-          AsyncStorage.getItem(STORAGE_KEYS.userId),
-          AsyncStorage.getItem(STORAGE_KEYS.userEmail),
-          AsyncStorage.getItem(STORAGE_KEYS.userName),
-          AsyncStorage.getItem(STORAGE_KEYS.userRole),
-          AsyncStorage.getItem(STORAGE_KEYS.pendingVerification),
-        ]);
+      ] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.token),
+        AsyncStorage.getItem(STORAGE_KEYS.userId),
+        AsyncStorage.getItem(STORAGE_KEYS.userEmail),
+        AsyncStorage.getItem(STORAGE_KEYS.userName),
+        AsyncStorage.getItem(STORAGE_KEYS.userRole),
+        AsyncStorage.getItem(STORAGE_KEYS.pendingVerification),
+      ]);
 
       const resolvedUserId = storedEmail || storedUserId || null;
       const parsedPendingVerification = parsePendingVerification(

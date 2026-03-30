@@ -1,3 +1,6 @@
+import * as AppleAuthentication from "expo-apple-authentication";
+import Constants from "expo-constants";
+import * as Notifications from "expo-notifications";
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -12,25 +15,33 @@ import {
   ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as AppleAuthentication from 'expo-apple-authentication';
 
-import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
-import { loadBranchConfig, SYNC_URL, getActiveOrgId, getActiveSecretKey } from "./config";
+import {
+  loadBranchConfig,
+  SYNC_URL,
+  getActiveOrgId,
+  getActiveSecretKey,
+} from "./config";
 import { useAuth } from "../context/AuthContext";
 
 async function registerExpoPushToken() {
   try {
     const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== 'granted') return;
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId || '94e824e3-8029-4138-b5d1-67b82b89b2db';
+    if (status !== "granted") return;
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ||
+      "94e824e3-8029-4138-b5d1-67b82b89b2db";
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     if (!tokenData?.data) return;
     const orgId = getActiveOrgId();
     const secretKey = getActiveSecretKey();
     await fetch(`${SYNC_URL}/sync/push/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-org-id': orgId, 'x-secret-key': secretKey },
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-org-id": orgId,
+        "x-secret-key": secretKey,
+      },
       body: JSON.stringify({
         token: tokenData.data,
         platform: Platform.OS,
@@ -44,8 +55,14 @@ async function registerExpoPushToken() {
 
 export default function LandingScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { login, loginWithApple, continueAsGuest, pendingVerification, userId, ready } =
-    useAuth();
+  const {
+    login,
+    loginWithApple,
+    continueAsGuest,
+    pendingVerification,
+    userId,
+    ready,
+  } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -105,7 +122,9 @@ export default function LandingScreen({ navigation }) {
       // Try to log in to our backend using the Apple identityToken
       const data = await loginWithApple(credential.identityToken, {
         email: credential.email,
-        fullName: credential.fullName ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim() : undefined,
+        fullName: credential.fullName
+          ? `${credential.fullName.givenName || ""} ${credential.fullName.familyName || ""}`.trim()
+          : undefined,
       });
 
       if (data.needsVerification) {
@@ -121,7 +140,7 @@ export default function LandingScreen({ navigation }) {
         });
       }
     } catch (e) {
-      if (e.code === 'ERR_REQUEST_CANCELED') {
+      if (e.code === "ERR_REQUEST_CANCELED") {
         // User canceled
       } else {
         Alert.alert("Sign In Failed", String(e.message || e));
@@ -222,8 +241,12 @@ export default function LandingScreen({ navigation }) {
 
         {isAppleLoginAvailable && (
           <AppleAuthentication.AppleAuthenticationButton
-            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            buttonType={
+              AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+            }
+            buttonStyle={
+              AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+            }
             cornerRadius={12}
             style={styles.appleBtn}
             onPress={handleAppleSignIn}
@@ -348,7 +371,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   appleBtn: {
-    width: '100%',
+    width: "100%",
     height: 50,
     marginBottom: 12,
   },
