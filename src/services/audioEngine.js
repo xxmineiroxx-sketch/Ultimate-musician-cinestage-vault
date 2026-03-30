@@ -658,10 +658,16 @@ class AudioEngine {
    */
   _onPlaybackStatusUpdate(status) {
     if (status.isLoaded) {
+      if (typeof status.positionMillis === 'number') {
+        this.currentPosition = status.positionMillis;
+      }
+      if (typeof status.durationMillis === 'number' && status.durationMillis > 0) {
+        this.duration = status.durationMillis;
+      }
       this._emitStatus({
-        isPlaying: status.isPlaying,
-        position: status.positionMillis,
-        duration: status.durationMillis,
+        isPlaying: this.isPlaying,
+        position: this.currentPosition,
+        duration: this.duration,
         loopRegion: this.getLoopRegion(),
       });
     }

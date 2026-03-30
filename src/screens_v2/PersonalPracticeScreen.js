@@ -842,7 +842,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     }
     try {
       if (isPlaying) {
-        await audioEngine.pause();
+        await audioEngine.stop();
+        setPosition(0);
+        setIsPlaying(false);
       } else {
         await audioEngine.play();
       }
@@ -1159,7 +1161,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
               >
                 {loadingStems
                   ? <ActivityIndicator color="#FFF" size="small" />
-                  : <Text style={styles.playBtnText}>{isPlaying ? '⏸' : '▶'}</Text>}
+                  : <Text style={styles.playBtnText}>{isPlaying ? '■' : '▶'}</Text>}
               </TouchableOpacity>
               <TouchableOpacity style={styles.transpBtn} onPress={() => handleSkip(15000)} disabled={!stemsReady}>
                 <Text style={[styles.transpSkipText, !stemsReady && styles.transpDisabled]}>+15</Text>
