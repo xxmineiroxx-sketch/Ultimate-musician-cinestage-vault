@@ -1,0 +1,75 @@
+{
+  "expo": {
+    "name": "Ultimate Musician",
+    "slug": "studio",
+    "version": "1.0.0",
+    "runtimeVersion": "1.0.0",
+    "orientation": "default",
+    "icon": "assets/icon.png",
+    "splash": {
+      "image": "assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "assets/*",
+      "assets/fat-channel-presets/*"
+    ],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "jsEngine": "hermes",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "co.ultimatelabs.musician",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSMicrophoneUsageDescription": "Ultimate Musician uses the microphone for audio monitoring.",
+        "NSCameraUsageDescription": "Ultimate Musician uses the camera for profile photos.",
+        "NSLocalNetworkUsageDescription": "Ultimate Musician connects to devices on your local network for live sync and remote control.",
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSDocumentsFolderUsageDescription": "Ultimate Musician needs access to your files to import audio for stem separation.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "co.ultimatelabs.musician",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "assets/icon.png",
+        "backgroundColor": "#020617"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png",
+      "name": "Ultimate Musician",
+      "shortName": "UM",
+      "backgroundColor": "#020617",
+      "themeColor": "#020617"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/94e824e3-8029-4138-b5d1-67b82b89b2db",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    },
+    "experiments": {
+      "newArchEnabled": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "94e824e3-8029-4138-b5d1-67b82b89b2db"
+      }
+    },
+    "owner": "xxmineiroxx"
+  }
+}

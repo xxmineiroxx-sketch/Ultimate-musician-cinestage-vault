@@ -1,0 +1,34 @@
+{
+  "SongPartSheet": {
+    "id": "string",
+    "songId": "string",
+    "arrangementId": "string|null",
+    "role": "KEYS|GUITAR|BASS|DRUMS",
+    "title": "string",
+    "createdAt": "ISO",
+    "updatedAt": "ISO",
+    "assignedMusicianId": "string|null",
+    "visibility": "PRIVATE|TEAM|ASSIGNED_ONLY",
+    "header": {
+      "songTitle": "string",
+      "artistOrBand": "string",
+      "bpm": "number|null",
+      "timeSignature": "string|null",
+      "keyConcert": "string|null",
+      "capo": "number|null",
+      "feel": "string|null"
+    },
+    "notesMarkdown": "string",
+    "sections": [
+      {
+        "id": "string",
+        "label": "string",
+        "bars": "number|null",
+        "cues": "string|null",
+        "patterns": "string|null",
+        "patches": "string|null",
+        "riffs": "string|null"
+      }
+    ]
+  }
+}

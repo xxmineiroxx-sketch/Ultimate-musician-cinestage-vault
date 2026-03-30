@@ -1,0 +1,11 @@
+apps/desktop/
+apps/ipad/
+apps/workers/
+apps/primary_app/ultimate_musician_full_project_v3/legacy_packages/
+apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_early_restore_2026-02-06/
+apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_sdk54_2026-02-06/
+apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/
+apps/primary_app/ultimate_musician_full_project_v3/snapshots/
+**/node_modules/
+**/.expo/
+**/target/
