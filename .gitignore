@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.expo/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+__MACOSX/
+.env
+.env.local
+*.log
+
+# Build artifacts
+**/target/
+**/dist/
+**/build/
+**/.next/
+**/.wrangler/
+**/Pods/
+**/DerivedData/
+*.ipa
+*.apk
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# Large media files (if any)
+*.mp4
+*.mov

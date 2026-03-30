@@ -20,6 +20,97 @@ import { getSongById } from '../services/storage';
 
 const { width } = Dimensions.get('window');
 
+function formatStemName(value) {
+  return String(value || 'Track')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .trim();
+}
+
+function sectionKey(section, index = 0) {
+  return String(
+    section?.id
+    || section?.sectionId
+    || section?.markerId
+    || section?.section
+    || `section_${index}`
+  );
+}
+
+function normalizeStructure(structure = [], fallbackDuration = 0) {
+  const raw = Array.isArray(structure) ? structure : [];
+  const mapped = raw
+    .map((section, index) => {
+      const startMs = Number(
+        section?.start_ms
+        ?? section?.startMillis
+        ?? (section?.startSec != null ? Number(section.startSec) * 1000 : null)
+        ?? (section?.timeSec != null ? Number(section.timeSec) * 1000 : null)
+        ?? 0
+      );
+      const endMsValue = Number(
+        section?.end_ms
+        ?? section?.endMillis
+        ?? (section?.endSec != null ? Number(section.endSec) * 1000 : null)
+      );
+      return {
+        ...section,
+        id: sectionKey(section, index),
+        section: section?.section || section?.label || `Section ${index + 1}`,
+        start_ms: Number.isFinite(startMs) ? Math.max(0, startMs) : 0,
+        end_ms: Number.isFinite(endMsValue) ? Math.max(0, endMsValue) : null,
+      };
+    })
+    .sort((left, right) => left.start_ms - right.start_ms);
+
+  return mapped.map((section, index) => ({
+    ...section,
+    end_ms: section.end_ms ?? mapped[index + 1]?.start_ms ?? fallbackDuration ?? section.start_ms,
+  }));
+}
+
+function extractStemEntries(source, seen) {
+  if (!source) return [];
+  const rawEntries = Array.isArray(source)
+    ? source
+    : Object.entries(source).map(([id, value]) => (
+      typeof value === 'string'
+        ? { id, name: id, uri: value, type: id }
+        : {
+            id: value?.id || value?.type || id,
+            name: value?.name || value?.label || id,
+            uri: value?.uri || value?.url || value?.localUri || value?.fileUrl || value?.downloadUrl || null,
+            type: value?.type || id,
+          }
+    ));
+
+  return rawEntries.reduce((list, item, index) => {
+    const rawId = String(item?.id || item?.type || item?.name || `track_${index}`).trim();
+    const uri = String(item?.uri || '').trim();
+    if (!rawId || !uri) return list;
+    const key = rawId.toLowerCase();
+    if (seen.has(key)) return list;
+    seen.add(key);
+    list.push({
+      id: rawId,
+      name: formatStemName(item?.name || item?.label || rawId),
+      uri,
+      type: item?.type || rawId,
+    });
+    return list;
+  }, []);
+}
+
+function getSongStemEntries(songData) {
+  const seen = new Set();
+  return [
+    ...extractStemEntries(songData?.latestStemsJob?.result?.stems, seen),
+    ...extractStemEntries(songData?.latestStemsJob?.stems, seen),
+    ...extractStemEntries(songData?.stems, seen),
+    ...extractStemEntries(songData?.localStems, seen),
+  ];
+}
+
 export default function LivePerformanceScreen({ route, navigation }) {
   const { songId, assignmentId } = route.params;
 
@@ -32,6 +123,7 @@ export default function LivePerformanceScreen({ route, navigation }) {
   const [isLoading, setIsLoading] = useState(true);
   const [emergencyMode, setEmergencyMode] = useState(null); // null, 'click_only', 'stopped'
   const [refreshing, setRefreshing] = useState(false);
+  const [loopSectionKey, setLoopSectionKey] = useState(null);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -57,23 +149,19 @@ export default function LivePerformanceScreen({ route, navigation }) {
         return;
       }
 
-      setSong(songData);
+      const structure = normalizeStructure(
+        songData.structure,
+        Number(songData?.duration_ms || songData?.durationMs || 0),
+      );
+      const liveStems = getSongStemEntries(songData);
 
-      // Load stems info (URLs would come from backend)
-      const mockStems = [
-        { id: 'drums', name: 'Drums', uri: songData.stems?.drums || null },
-        { id: 'bass', name: 'Bass', uri: songData.stems?.bass || null },
-        { id: 'guitar', name: 'Guitar', uri: songData.stems?.guitar || null },
-        { id: 'keys', name: 'Keys', uri: songData.stems?.keys || null },
-        { id: 'vocals', name: 'Vocals', uri: songData.stems?.vocals || null },
-        { id: 'bgv', name: 'BGV', uri: songData.stems?.bgv || null },
-      ].filter((s) => s.uri); // Only stems with URIs
-
-      setStems(mockStems);
+      setSong({ ...songData, structure });
+      setStems(liveStems);
+      setLoopSectionKey(null);
 
       // Create scenes from song structure
-      if (songData.structure && songData.structure.length > 0) {
-        sceneManager.createScenesFromStructure(songData.structure, mockStems);
+      if (structure.length > 0) {
+        sceneManager.createScenesFromStructure(structure, liveStems);
       }
     } catch (error) {
       console.error('Error loading song:', error);
@@ -134,9 +222,9 @@ export default function LivePerformanceScreen({ route, navigation }) {
   const handlePlay = async () => {
     try {
       if (isPlaying) {
-        await audioEngine.pause();
+        await audioEngine.applyConductorCommand('PAUSE');
       } else {
-        await audioEngine.play();
+        await audioEngine.applyConductorCommand('PLAY');
 
         // Start auto scene transitions
         sceneManager.startAutoTransition();
@@ -149,26 +237,71 @@ export default function LivePerformanceScreen({ route, navigation }) {
 
   const handleStop = async () => {
     try {
-      await audioEngine.stop();
+      await audioEngine.applyConductorCommand('STOP');
+      audioEngine.clearLoopRegion();
       setPosition(0);
       setEmergencyMode(null);
+      setLoopSectionKey(null);
     } catch (error) {
       console.error('Error stopping:', error);
     }
   };
 
-  const handleSeek = async (sectionIndex) => {
-    if (!song.structure || !song.structure[sectionIndex]) return;
+  const handleSeek = async (targetSection, options = {}) => {
+    const section = typeof targetSection === 'number'
+      ? song?.structure?.[targetSection]
+      : targetSection;
+    if (!section) return;
 
     try {
-      const section = song.structure[sectionIndex];
-      await audioEngine.seek(section.start_ms);
+      await audioEngine.applyConductorCommand({
+        type: 'SEEK_SECTION',
+        section,
+      });
+      if (options.keepLoop !== true) {
+        audioEngine.clearLoopRegion();
+        setLoopSectionKey(null);
+      }
 
       // Apply scene for this section
       await sceneManager.applySceneBySection(section.section);
     } catch (error) {
       console.error('Error seeking:', error);
     }
+  };
+
+  const toggleSectionLoop = async (section, index) => {
+    if (!section) return;
+    const key = sectionKey(section, index);
+
+    try {
+      if (loopSectionKey === key) {
+        audioEngine.clearLoopRegion();
+        setLoopSectionKey(null);
+        return;
+      }
+
+      await audioEngine.applyConductorCommand({
+        type: 'LOOP_SECTION',
+        section,
+        seek: true,
+        label: section.section,
+      });
+      await sceneManager.applySceneBySection(section.section);
+      setLoopSectionKey(key);
+    } catch (error) {
+      console.error('Error toggling section loop:', error);
+      Alert.alert('Loop Error', 'Unable to loop this section');
+    }
+  };
+
+  const handleLoopCurrentSection = async () => {
+    const currentIndex = song?.structure?.findIndex((section) => (
+      position >= section.start_ms && position < section.end_ms
+    )) ?? -1;
+    const section = currentIndex >= 0 ? song?.structure?.[currentIndex] : song?.structure?.[0];
+    if (!section) return;
+    await toggleSectionLoop(section, currentIndex >= 0 ? currentIndex : 0);
   };
 
   const handlePanicStop = () => {
@@ -211,6 +344,7 @@ export default function LivePerformanceScreen({ route, navigation }) {
 
   const cleanup = async () => {
     try {
+      audioEngine.clearLoopRegion();
       await audioEngine.stop();
       await audioEngine.unloadAll();
       sceneManager.clear();
@@ -296,11 +430,14 @@ export default function LivePerformanceScreen({ route, navigation }) {
               key={index}
               style={[
                 styles.sectionPill,
+                loopSectionKey === sectionKey(section, index) &&
+                  styles.sectionPillLooping,
                 position >= section.start_ms &&
                   position < section.end_ms &&
                   styles.sectionPillActive,
               ]}
-              onPress={() => handleSeek(index)}
+              onPress={() => handleSeek(section)}
+              onLongPress={() => toggleSectionLoop(section, index)}
             >
               <Text
                 style={[
@@ -328,6 +465,16 @@ export default function LivePerformanceScreen({ route, navigation }) {
           onPress={handlePlay}
         >
           <Text style={styles.playButtonText}>{isPlaying ? '⏸' : '▶️'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.controlButton,
+            loopSectionKey && styles.loopButtonActive,
+          ]}
+          onPress={handleLoopCurrentSection}
+        >
+          <Text style={styles.controlButtonText}>🔁</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.controlButton} onPress={loadStems}>
@@ -515,6 +662,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#8B5CF6',
     borderColor: '#8B5CF6',
   },
+  sectionPillLooping: {
+    borderColor: '#F59E0B',
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.24,
+    shadowRadius: 8,
+  },
   sectionPillText: {
     fontSize: 14,
     fontWeight: '600',
@@ -546,6 +699,10 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     backgroundColor: '#8B5CF6',
     borderColor: '#8B5CF6',
+  },
+  loopButtonActive: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#351908',
   },
   controlButtonText: {
     fontSize: 24,

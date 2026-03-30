@@ -1,0 +1,11 @@
+node_modules/
+.expo/
+dist/
+build/
+*.log
+.env
+.DS_Store
+*.orig
+ios/
+android/
+.expo-shared/

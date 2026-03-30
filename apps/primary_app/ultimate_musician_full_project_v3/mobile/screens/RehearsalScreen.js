@@ -1916,6 +1916,7 @@ export default function RehearsalScreen({ route, navigation }) {
           guideVolume: 0.85,
           lang: "PT",
           skipPad: true, // pad only starts when user explicitly picks a key via ♩ DRONE
+          skipAudioCues: audioEngine.hasStemTracks(), // suppress voice cues when stems are playing
           onCountBeat: (b) => setCountBeat(b),
           onPadStart: () => setPadActive(true),
           onCueFire: (label) => {

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
+import ModernDashboardCard from '../components_v2/ModernDashboardCard';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
@@ -323,18 +324,19 @@ export default function MessagesScreen({ navigation }) {
 
   return (
     <View style={s.container}>
+      {/* Mesh Orbs */}
+      <View style={[s.orb, s.orb1]} />
+      <View style={[s.orb, s.orb2]} />
+
       <View style={[s.header, { paddingTop: insets.top + 24 }]}>
-        <Text style={s.headerIcon}>💬</Text>
-        <Text style={s.title}>Messages</Text>
-        {hasAdminGrant && (
-          <View style={s.personalModeBadge}>
-            <Text style={s.personalModeBadgeText}>Admin dashboard inbox stays separate.</Text>
-          </View>
-        )}
+        <View style={s.headerIconContainer}>
+          <Text style={s.headerIcon}>💬</Text>
+        </View>
+        <Text style={s.title}>Inbox</Text>
         <Text style={s.subtitle}>
           {profile?.email
-            ? `Inbox: ${profile.email}`
-            : 'Set your email in Profile to send messages'}
+            ? profile.email
+            : 'Messages from your team'}
         </Text>
       </View>
 
@@ -358,40 +360,51 @@ export default function MessagesScreen({ navigation }) {
           const lastReply = hasReply ? item.replies[item.replies.length - 1] : null;
           return (
             <TouchableOpacity
-              style={[s.threadCard, hasReply && s.threadCardWithReply]}
               onPress={() => setSelected(item)}
               onLongPress={() => confirmHideInboxThread(item)}
               delayLongPress={250}
+              activeOpacity={0.8}
             >
-              <View style={s.threadCardHeader}>
-                <Text style={s.threadSubject}>{item.subject}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  {item.to === 'all_team' && (
-                    <View style={s.broadcastBadge}>
-                      <Text style={s.broadcastBadgeText}>👥 Team</Text>
+              <ModernDashboardCard 
+                variant={hasReply ? 'verse' : 'default'}
+                style={{ marginBottom: 12, padding: 0 }}
+              >
+                <View style={s.threadCardHeader}>
+                  <Text style={s.threadSubject}>{item.subject}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {item.to === 'all_team' && (
+                      <View style={s.broadcastBadge}>
+                        <Text style={s.broadcastBadgeText}>👥 Team</Text>
+                      </View>
+                    )}
+                    <Text style={s.threadTime}>{formatTime(item.timestamp)}</Text>
+                  </View>
+                </View>
+                <Text style={s.threadPreview} numberOfLines={2}>{item.message}</Text>
+                
+                <View style={s.threadCardFooter}>
+                  {hasReply ? (
+                    <View style={s.replyBadge}>
+                      <Text style={s.replyBadgeText}>
+                        💬 {item.replies.length} reply{item.replies.length > 1 ? 's' : ''}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={s.pendingBadge}>
+                      <Text style={s.pendingBadgeText}>⏳ Awaiting reply</Text>
                     </View>
                   )}
-                  <Text style={s.threadTime}>{formatTime(item.timestamp)}</Text>
+                  <Text style={s.threadHint}>Hold to delete</Text>
                 </View>
-              </View>
-              <Text style={s.threadPreview} numberOfLines={2}>{item.message}</Text>
-              {hasReply ? (
-                <View style={s.replyBadge}>
-                  <Text style={s.replyBadgeText}>
-                    💬 {item.replies.length} reply{item.replies.length > 1 ? 's' : ''} from Admin
-                  </Text>
-                </View>
-              ) : (
-                <View style={s.pendingBadge}>
-                  <Text style={s.pendingBadgeText}>⏳ Awaiting reply</Text>
-                </View>
-              )}
-              {lastReply ? (
-                <Text style={s.lastReply} numberOfLines={1}>
-                  👤 {lastReply.from}: {lastReply.message}
-                </Text>
-              ) : null}
-              <Text style={s.threadHint}>Long press to delete</Text>
+
+                {lastReply ? (
+                  <View style={s.lastReplyContainer}>
+                    <Text style={s.lastReply} numberOfLines={1}>
+                      <Text style={{ fontWeight: '800', color: '#818CF8' }}>{lastReply.from}:</Text> {lastReply.message}
+                    </Text>
+                  </View>
+                ) : null}
+              </ModernDashboardCard>
             </TouchableOpacity>
           );
         }}

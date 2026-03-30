@@ -91,6 +91,28 @@ function parseSectionsFromSong(song) {
   return found.length >= 2 ? found : DEFAULT_SECTIONS;
 }
 
+function buildSectionWindows(sectionList = [], totalDuration = 0) {
+  const sections = Array.isArray(sectionList) ? sectionList : [];
+  if (sections.length === 0) return [];
+  const safeDuration = Math.max(Number(totalDuration || 0), sections.length * 4);
+  return sections.map((label, index) => {
+    const startSec = (safeDuration * index) / sections.length;
+    const endSec = index === sections.length - 1
+      ? safeDuration
+      : (safeDuration * (index + 1)) / sections.length;
+    return {
+      label,
+      startSec,
+      endSec,
+    };
+  });
+}
+
+function getSectionWindow(sectionList = [], sectionLabel = '', totalDuration = 0) {
+  return buildSectionWindows(sectionList, totalDuration)
+    .find((section) => section.label === sectionLabel) || null;
+}
+
 // ─── AI Flow Suggestion (from Kimi engine — chorus fatigue, bridge rules) ─────
 function getAISuggestion(currentSection, history, sections) {
   if (!currentSection || !sections?.length) return null;
@@ -450,6 +472,7 @@ export default function StemMixerScreen({ route, navigation }) {
 
   async function handleStop() {
     await audioEngine.stop();
+    audioEngine.clearLoopRegion?.();
     stopPolling();
     setEngineState(ENGINE_STATE.IDLE);
     setPosition(0); setSeekValue(0);
@@ -520,10 +543,22 @@ export default function StemMixerScreen({ route, navigation }) {
       if (engineState === ENGINE_STATE.LOOPING || engineState === ENGINE_STATE.WORSHIP_FREE) {
         setEngineState(position > 0 ? ENGINE_STATE.PLAYING : ENGINE_STATE.IDLE);
       }
+      audioEngine.clearLoopRegion?.();
       const suggestion = getAISuggestion(section, sectionHistoryRef.current, sections);
       setAiSuggestion(suggestion?.section ? suggestion : null);
     } else if (tap.count === 2) {
       // Loop section
+      const sectionWindow = getSectionWindow(sections, section, duration);
+      if (sectionWindow) {
+        audioEngine.applyConductorCommand?.({
+          type: 'LOOP_SECTION',
+          startSec: sectionWindow.startSec,
+          endSec: sectionWindow.endSec,
+          label: sectionWindow.label,
+          seek: true,
+        }).catch(() => {});
+        setPosition(sectionWindow.startSec);
+      }
       preStateRef.current = ENGINE_STATE.LOOPING;
       setEngineState(ENGINE_STATE.LOOPING);
       setAiSuggestion(null);
@@ -542,8 +577,19 @@ export default function StemMixerScreen({ route, navigation }) {
   // ── Loop Section button ────────────────────────────────────────────────────
   function handleLoopSection() {
     if (engineState === ENGINE_STATE.LOOPING) {
+      audioEngine.clearLoopRegion?.();
       setEngineState(position > 0 ? ENGINE_STATE.PLAYING : ENGINE_STATE.IDLE);
     } else {
+      const sectionWindow = getSectionWindow(sections, activeSection, duration);
+      if (sectionWindow) {
+        audioEngine.applyConductorCommand?.({
+          type: 'LOOP_SECTION',
+          startSec: sectionWindow.startSec,
+          endSec: sectionWindow.endSec,
+          label: sectionWindow.label,
+          seek: false,
+        }).catch(() => {});
+      }
       preStateRef.current = ENGINE_STATE.LOOPING;
       setEngineState(ENGINE_STATE.LOOPING);
     }
@@ -575,6 +621,7 @@ export default function StemMixerScreen({ route, navigation }) {
       preStateRef.current = ENGINE_STATE.PLAYING;
       return;
     }
+    audioEngine.clearLoopRegion?.();
     activateWorshipFree();
   }
 
@@ -590,6 +637,7 @@ export default function StemMixerScreen({ route, navigation }) {
           style: 'destructive',
           onPress: () => {
             audioEngine.emergencyClear();
+            audioEngine.clearLoopRegion?.();
             setTracks(prev => prev.map(t => ({ ...t, volume: 0, mute: true })));
             stopPolling();
             setEngineState(ENGINE_STATE.IDLE);
@@ -622,6 +670,7 @@ export default function StemMixerScreen({ route, navigation }) {
         break;
       case 'MIDI_EMERGENCY_CLEAR':
         audioEngine.emergencyClear();
+        audioEngine.clearLoopRegion?.();
         setTracks(prev => prev.map(t => ({ ...t, volume: 0, mute: true })));
         stopPolling();
         setEngineState(ENGINE_STATE.IDLE);

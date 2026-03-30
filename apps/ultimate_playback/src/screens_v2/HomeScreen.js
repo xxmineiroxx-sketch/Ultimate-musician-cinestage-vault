@@ -16,9 +16,13 @@ import {
   Modal,
   Platform,
   Pressable,
+  useWindowDimensions,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ModernDashboardCard from '../components_v2/ModernDashboardCard';
+import PreparationHub from '../components_v2/PreparationHub';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -352,6 +356,9 @@ function isPastService(dateStr) {
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isTablet = width > 768;
+
   const [profile, setProfile] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [upcomingServices, setUpcomingServices] = useState([]); // array of service groups
@@ -749,138 +756,170 @@ export default function HomeScreen({ navigation }) {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      nestedScrollEnabled={true}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#4F46E5" />
-      }
-    >
-      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-        <Text style={styles.logo}>🎵</Text>
-        <Text style={styles.title}>Ultimate Playback</Text>
-        <Text style={styles.subtitle}>powered by CineStage</Text>
-      </View>
+    <View style={styles.container}>
+      {/* Dynamic Background Orbs for Mesh Effect */}
+      <View style={[styles.orb, styles.orb1]} />
+      <View style={[styles.orb, styles.orb2]} />
+      <View style={[styles.orb, styles.orb3]} />
 
-      {profile ? (
-        <View style={styles.welcomeCard}>
-          <Text style={styles.welcomeText}>
-            Welcome back, {profile.name} {profile.lastName}!
-          </Text>
-          <Text style={styles.roleText}>
-            {profile.roleAssignments
-              ? `Roles: ${profile.roleAssignments}`
-              : 'No roles set yet'}
-          </Text>
-        </View>
-      ) : (
-        <TouchableOpacity
-          style={styles.setupCard}
-          onPress={() => navigation.navigate('ProfileTab')}
-        >
-          <Text style={styles.setupIcon}>👋</Text>
-          <Text style={styles.setupTitle}>Get Started</Text>
-          <Text style={styles.setupText}>
-            Set up your profile to receive assignments from your team
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Admin / Manager / MD Panel card */}
-      {mdRole && mdRole !== 'leader' && (
-        <TouchableOpacity
-          style={styles.adminCard}
-          onPress={() => navigation.navigate('AdminDashboard', { mdRole })}
-        >
-          <View style={styles.adminCardLeft}>
-            <View style={styles.adminBadge}>
-              <Text style={styles.adminBadgeText}>
-                {mdRole === 'org_owner' ? '🏛 Org Owner'
-                  : mdRole === 'admin'   ? '👑 Admin'
-                  : mdRole === 'manager' ? '🛡 Worship Leader'
-                  : '🎛 Music Director'}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.content}
+        nestedScrollEnabled={true}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#4F46E5" />
+        }
+      >
+        <View style={[styles.modernHeader, { paddingTop: insets.top + 10 }]}>
+          <View>
+            <Text style={styles.brandSubtitle}>CINESTAGE™</Text>
+            <Text style={styles.brandTitle}>Ultimate Playback</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.headerAvatar}
+            onPress={() => navigation.navigate('ProfileTab')}
+          >
+            {profile?.photo_url || profile?.photo || profile?.avatar || profile?.image ? (
+              <Image 
+                source={{ uri: profile.photo_url || profile.photo || profile.avatar || profile.image }} 
+                style={styles.avatarImage} 
+              />
+            ) : (
+              <Text style={styles.avatarInitial}>
+                {profile?.name ? profile.name.charAt(0).toUpperCase() : '👤'}
               </Text>
-            </View>
-            <Text style={styles.adminCardTitle}>Admin Panel</Text>
-            <Text style={styles.adminCardDesc}>
-              Manage messages, services, team & songs
-            </Text>
-          </View>
-          <Text style={styles.adminCardArrow}>›</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Leader Dashboard card */}
-      {mdRole === 'leader' && (
-        <TouchableOpacity
-          style={[styles.adminCard, { borderColor: '#7C3AED44' }]}
-          onPress={() => navigation.navigate('LeaderDashboard', { leaderEmail: profile?.email, leaderName: profile?.name })}
-        >
-          <View style={styles.adminCardLeft}>
-            <View style={[styles.adminBadge, { backgroundColor: '#7C3AED22', borderColor: '#7C3AED' }]}>
-              <Text style={[styles.adminBadgeText, { color: '#A78BFA' }]}>🎼 Leader</Text>
-            </View>
-            <Text style={styles.adminCardTitle}>Leader Dashboard</Text>
-            <Text style={styles.adminCardDesc}>
-              Services, team, library & setlists
-            </Text>
-          </View>
-          <Text style={styles.adminCardArrow}>›</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Quick Stats */}
-      <View style={styles.statsRow}>
-        <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('Assignments')}>
-          <Text style={styles.statNumber}>{pendingCount}</Text>
-          <Text style={styles.statLabel}>Pending</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('Assignments')}>
-          <Text style={styles.statNumber}>{acceptedCount}</Text>
-          <Text style={styles.statLabel}>Accepted</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('ProfileSetup')}>
-          <Text style={styles.statNumber}>{profile?.roles?.length || 0}</Text>
-          <Text style={styles.statLabel}>Roles</Text>
-        </TouchableOpacity>
-      </View>
-
-
-
-
-      <View style={styles.verseCard}>
-        <View style={styles.verseHeader}>
-          <Text style={styles.verseLabel}>Verse of the Day</Text>
-          <Text style={styles.verseSeason}>{seasonTheme.label}</Text>
+            )}
+          </TouchableOpacity>
         </View>
-        <Text style={styles.verseText}>"{verseOfDay.text}"</Text>
-        <Text style={styles.verseRef}>{verseOfDay.ref}</Text>
-        <View style={styles.readingDivider} />
-        <Text style={styles.readingTitle}>📖 Day {readingPlan.day} of 365</Text>
-        <Text style={styles.readingLine}>OT · {readingPlan.ot}</Text>
-        <Text style={styles.readingLine}>NT · {readingPlan.nt}</Text>
-        <Text style={styles.readingLine}>{readingPlan.wisdom}</Text>
+
+      <View style={isTablet && styles.tabletRow}>
+        <View style={isTablet && styles.tabletColumn}>
+          {profile ? (
+            <ModernDashboardCard variant="setup">
+              <Text style={styles.welcomeText}>
+                Welcome back, {profile.name} {profile.lastName}!
+              </Text>
+              <Text style={styles.roleText}>
+                {profile.roleAssignments
+                  ? `Roles: ${profile.roleAssignments}`
+                  : 'No roles set yet'}
+              </Text>
+            </ModernDashboardCard>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('ProfileTab')}
+            >
+              <ModernDashboardCard variant="setup" style={{ borderStyle: 'dashed' }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={styles.setupIcon}>👋</Text>
+                  <Text style={styles.setupTitle}>Get Started</Text>
+                  <Text style={styles.setupText}>
+                    Set up your profile to receive assignments from your team
+                  </Text>
+                </View>
+              </ModernDashboardCard>
+            </TouchableOpacity>
+          )}
+
+          {/* Admin / Manager / MD Panel card */}
+          {mdRole && mdRole !== 'leader' && (
+            <TouchableOpacity
+              style={styles.adminCard}
+              onPress={() => navigation.navigate('AdminDashboard', { mdRole })}
+            >
+              <View style={styles.adminCardLeft}>
+                <View style={styles.adminBadge}>
+                  <Text style={styles.adminBadgeText}>
+                    {mdRole === 'org_owner' ? '🏛 Org Owner'
+                      : mdRole === 'admin'   ? '👑 Admin'
+                      : mdRole === 'manager' ? '🛡 Worship Leader'
+                      : '🎛 Music Director'}
+                  </Text>
+                </View>
+                <Text style={styles.adminCardTitle}>Admin Panel</Text>
+                <Text style={styles.adminCardDesc}>
+                  Manage messages, services, team & songs
+                </Text>
+              </View>
+              <Text style={styles.adminCardArrow}>›</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Leader Dashboard card */}
+          {mdRole === 'leader' && (
+            <TouchableOpacity
+              style={[styles.adminCard, { borderColor: '#7C3AED44' }]}
+              onPress={() => navigation.navigate('LeaderDashboard', { leaderEmail: profile?.email, leaderName: profile?.name })}
+            >
+              <View style={styles.adminCardLeft}>
+                <View style={[styles.adminBadge, { backgroundColor: '#7C3AED22', borderColor: '#7C3AED' }]}>
+                  <Text style={[styles.adminBadgeText, { color: '#A78BFA' }]}>🎼 Leader</Text>
+                </View>
+                <Text style={styles.adminCardTitle}>Leader Dashboard</Text>
+                <Text style={styles.adminCardDesc}>
+                  Services, team, library & setlists
+                </Text>
+              </View>
+              <Text style={styles.adminCardArrow}>›</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Quick Stats */}
+          <View style={styles.statsRow}>
+            <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('Assignments')}>
+              <Text style={styles.statNumber}>{pendingCount}</Text>
+              <Text style={styles.statLabel}>Pending</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('Assignments')}>
+              <Text style={styles.statNumber}>{acceptedCount}</Text>
+              <Text style={styles.statLabel}>Accepted</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.statCard} activeOpacity={0.7} onPress={() => navigation.navigate('ProfileSetup')}>
+              <Text style={styles.statNumber}>{profile?.roles?.length || 0}</Text>
+              <Text style={styles.statLabel}>Roles</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={isTablet && styles.tabletColumn}>
+          <ModernDashboardCard variant="verse">
+            <View style={styles.verseHeader}>
+              <Text style={styles.verseLabel}>Verse of the Day</Text>
+              <Text style={styles.verseSeason}>{seasonTheme.label}</Text>
+            </View>
+            <Text style={styles.verseText}>"{verseOfDay.text}"</Text>
+            <Text style={styles.verseRef}>{verseOfDay.ref}</Text>
+            <View style={styles.readingDivider} />
+            <Text style={styles.readingTitle}>📖 Day {readingPlan.day} of 365</Text>
+            <Text style={styles.readingLine}>OT · {readingPlan.ot}</Text>
+            <Text style={styles.readingLine}>NT · {readingPlan.nt}</Text>
+            <Text style={styles.readingLine}>{readingPlan.wisdom}</Text>
+          </ModernDashboardCard>
+        </View>
       </View>
 
-      {/* Pending Assignments */}
       {pendingCount > 0 && (
         <TouchableOpacity
-          style={styles.alertCard}
+          activeOpacity={0.8}
           onPress={() => navigation.navigate('Assignments')}
         >
-          <View style={styles.alertHeader}>
-            <Text style={styles.alertIcon}>📬</Text>
-            <View style={styles.alertContent}>
-              <Text style={styles.alertTitle}>
-                {pendingCount} Pending Assignment{pendingCount > 1 ? 's' : ''}
-              </Text>
-              <Text style={styles.alertText}>
-                You have assignments waiting for your response
-              </Text>
+          <ModernDashboardCard variant="alert">
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={styles.alertHeader}>
+                <Text style={styles.alertIcon}>📬</Text>
+                <View style={styles.alertContent}>
+                  <Text style={styles.alertTitle}>
+                    {pendingCount} Pending Assignment{pendingCount > 1 ? 's' : ''}
+                  </Text>
+                  <Text style={styles.alertText}>
+                    You have assignments waiting for your response
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.alertAction}>Review →</Text>
             </View>
-          </View>
-          <Text style={styles.alertAction}>Review →</Text>
+          </ModernDashboardCard>
         </TouchableOpacity>
       )}
 
@@ -925,6 +964,12 @@ export default function HomeScreen({ navigation }) {
           })}
         </View>
       )}
+
+      <PreparationHub 
+        score={85} 
+        mastered={upcomingServices.length > 0 ? 4 : 0} 
+        total={upcomingServices.length > 0 ? 6 : 0} 
+      />
 
       {/* ── Monthly Assignment Tracker (hidden — last day of month only) ── */}
       <Modal
@@ -1039,75 +1084,31 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
       </Modal>
 
-      {/* Quick Actions */}
+      {/* Quick Actions Grid */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
+        
+        <View style={styles.actionGrid}>
+          <TouchableOpacity style={styles.actionTile} onPress={() => navigation.navigate('Setlist')}>
+            <Text style={styles.actionTileIcon}>📋</Text>
+            <Text style={styles.actionTileTitle}>Setlist</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Setlist')}
-        >
-          <Text style={styles.actionIcon}>📋</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>View Setlist</Text>
-            <Text style={styles.actionDesc}>See role-specific content</Text>
-          </View>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.actionTile} onPress={() => navigation.navigate('Assignments')}>
+            <Text style={styles.actionTileIcon}>📬</Text>
+            <Text style={styles.actionTileTitle}>Assign</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Assignments')}
-        >
-          <Text style={styles.actionIcon}>📬</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Assignments</Text>
-            <Text style={styles.actionDesc}>Manage service assignments</Text>
-          </View>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.actionTile} onPress={() => navigation.navigate('Messages')}>
+            <Text style={styles.actionTileIcon}>💬</Text>
+            <Text style={styles.actionTileTitle}>Inbox</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('BlockoutCalendar')}
-        >
-          <Text style={styles.actionIcon}>📅</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Blockout Calendar</Text>
-            <Text style={styles.actionDesc}>Mark unavailable dates</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Messages')}
-        >
-          <Text style={styles.actionIcon}>💬</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Messages</Text>
-            <Text style={styles.actionDesc}>Team communication</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('ProfileSetup')}
-        >
-          <Text style={styles.actionIcon}>👤</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Profile & Roles</Text>
-            <Text style={styles.actionDesc}>Update your information</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, { borderColor: '#4F46E5', borderWidth: 1 }]}
-          onPress={() => navigation.navigate('PersonalPractice')}
-        >
-          <Text style={styles.actionIcon}>🎧</Text>
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>My Practice</Text>
-            <Text style={styles.actionDesc}>Your personalized stem mix</Text>
-          </View>
-        </TouchableOpacity>
+          <TouchableOpacity style={styles.actionTile} onPress={() => navigation.navigate('PersonalPractice')}>
+            <Text style={styles.actionTileIcon}>🎧</Text>
+            <Text style={styles.actionTileTitle}>Practice</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.footer}>
@@ -1116,6 +1117,7 @@ export default function HomeScreen({ navigation }) {
         </Text>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
@@ -1123,29 +1125,78 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#020617',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  orb: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    opacity: 0.15,
+  },
+  orb1: {
+    top: -100,
+    right: -100,
+    backgroundColor: '#4F46E5',
+  },
+  orb2: {
+    bottom: -50,
+    left: -100,
+    backgroundColor: '#0EA5E9',
+  },
+  orb3: {
+    top: '40%',
+    left: '20%',
+    width: 200,
+    height: 200,
+    backgroundColor: '#7C3AED',
+    opacity: 0.1,
   },
   content: {
     padding: 20,
     paddingBottom: 40,
     flexGrow: 1,
   },
-  header: {
+  modernHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 32,
+    paddingHorizontal: 4,
   },
-  logo: {
-    fontSize: 64,
-    marginBottom: 16,
+  brandSubtitle: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#4F46E5',
+    letterSpacing: 2,
+    marginBottom: 2,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: '800',
     color: '#F9FAFB',
-    marginBottom: 8,
+    letterSpacing: -0.5,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#9CA3AF',
+  headerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1E293B',
+    borderWidth: 1.5,
+    borderColor: '#4F46E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarInitial: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#F9FAFB',
   },
   welcomeCard: {
     padding: 20,
@@ -1668,32 +1719,29 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
   },
 
-  actionButton: {
+  actionGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#0B1120',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  actionIcon: {
-    fontSize: 32,
-    marginRight: 16,
-  },
-  actionContent: {
+  actionTile: {
     flex: 1,
+    minWidth: '45%',
+    backgroundColor: 'rgba(30, 41, 59, 0.4)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  actionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F9FAFB',
-    marginBottom: 4,
+  actionTileIcon: {
+    fontSize: 32,
+    marginBottom: 8,
   },
-  actionDesc: {
-    fontSize: 13,
-    color: '#9CA3AF',
+  actionTileTitle: {
+    color: '#F1F5F9',
+    fontSize: 14,
+    fontWeight: '700',
   },
   footer: {
     alignItems: 'center',
@@ -1702,5 +1750,14 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     color: '#6B7280',
+  },
+  tabletRow: {
+    flexDirection: 'row',
+    gap: 20,
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  tabletColumn: {
+    flex: 1,
   },
 });

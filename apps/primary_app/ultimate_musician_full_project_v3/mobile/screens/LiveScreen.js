@@ -867,7 +867,11 @@ export default function LiveScreen({ route, navigation }) {
   // ── Derived song data ──────────────────────────────────────────────────────
   const stemsResult    = song?.latestStemsJob?.result || song?.latestStemsJob || null;
   const waveformRaw    = paramPeaks || song?.analysis?.waveformPeaks || song?.waveformPeaks || stemsResult?.waveformPeaks || null;
-  const waveformPeaks  = processPeaksForDisplay(waveformRaw, 200);
+  const waveformPointCount = Math.max(
+    220,
+    Math.min(960, Math.floor(Dimensions.get('window').width * 1.4)),
+  );
+  const waveformPeaks  = processPeaksForDisplay(waveformRaw, waveformPointCount);
   const sourceSections = useMemo(() => (
     paramSections.length > 0
       ? paramSections
@@ -1128,12 +1132,6 @@ export default function LiveScreen({ route, navigation }) {
         }
       }
 
-      // Loop enforcement — jump back when section ends
-      const loopSec = loopSectionRef.current;
-      if (loopSec && pos >= (loopSec.endTimeSec ?? dur ?? 0) - 0.15) {
-        audioEngine.seek(loopSec.timeSec);
-      }
-
       // Song end
       if (dur > 0 && pos >= dur - 0.2) {
         stopPolling();
@@ -1171,6 +1169,7 @@ export default function LiveScreen({ route, navigation }) {
   }
 
   function handleStop() {
+    audioEngine.clearLoopRegion?.();
     audioEngine.stop(); stopPolling(); setIsPlaying(false); setPosition(0);
     setEngineState(ENGINE_STATE.PLAYING);
     queuedSectionRef.current = null;
@@ -1194,6 +1193,7 @@ export default function LiveScreen({ route, navigation }) {
     audioEngine.seek(prev.timeSec);
     setPosition(prev.timeSec);
     setActiveSectionLabel(prev.label);
+    audioEngine.clearLoopRegion?.();
     queuedSectionRef.current = null;
     loopSectionRef.current   = null;
     setQueueLabel(null);
@@ -1209,6 +1209,7 @@ export default function LiveScreen({ route, navigation }) {
     audioEngine.seek(next.timeSec);
     setPosition(next.timeSec);
     setActiveSectionLabel(next.label);
+    audioEngine.clearLoopRegion?.();
     queuedSectionRef.current = null;
     loopSectionRef.current   = null;
     setQueueLabel(null);
@@ -1324,10 +1325,30 @@ export default function LiveScreen({ route, navigation }) {
 
   function clearLiveQueueState() {
     queuedSectionRef.current = null;
+    audioEngine.clearLoopRegion?.();
     loopSectionRef.current = null;
     setQueueLabel(null);
     setLoopActive(false);
     setEngineState(ENGINE_STATE.PLAYING);
+  }
+
+  function armLoopForSection(section, options = {}) {
+    if (!section) return;
+    if (options.seek !== false) {
+      setPosition(section.timeSec);
+      setActiveSectionLabel(section.label);
+    }
+    audioEngine.applyConductorCommand?.({
+      type: 'LOOP_SECTION',
+      section,
+      seek: options.seek !== false,
+      label: section.label,
+    }).catch(() => {});
+    loopSectionRef.current = section;
+    queuedSectionRef.current = null;
+    setQueueLabel(null);
+    setLoopActive(true);
+    setEngineState(ENGINE_STATE.LOOPING);
   }
 
   function jumpToSection(section) {
@@ -1384,23 +1405,18 @@ export default function LiveScreen({ route, navigation }) {
       // 1× — QUEUE: play to end of current section then jump
       queuedSectionRef.current = resolvedSec;
       setQueueLabel(resolvedSec.label);
+      audioEngine.clearLoopRegion?.();
       loopSectionRef.current = null;
       setLoopActive(false);
       setEngineState(ENGINE_STATE.PLAYING);
     } else if (tapCount === 2) {
       // 2× — LOOP: seek immediately + loop
-      audioEngine.seek(resolvedSec.timeSec);
-      setPosition(resolvedSec.timeSec);
-      setActiveSectionLabel(resolvedSec.label);
-      loopSectionRef.current   = resolvedSec;
-      queuedSectionRef.current = null;
-      setQueueLabel(null);
-      setLoopActive(true);
-      setEngineState(ENGINE_STATE.LOOPING);
+      armLoopForSection(resolvedSec);
       broadcastPerf('PERF_SECTION', { sectionLabel: resolvedSec.label });
     } else {
       // 3× — WORSHIP FREE
       sectionTapRef.current.count = 0;
+      audioEngine.clearLoopRegion?.();
       loopSectionRef.current   = null;
       queuedSectionRef.current = null;
       setQueueLabel(null);
@@ -1415,13 +1431,7 @@ export default function LiveScreen({ route, navigation }) {
     // Loop current section immediately
     const cur = sectionJumpList.find(s => s.label === activeSectionLabel);
     if (!cur) return;
-    audioEngine.seek(cur.timeSec);
-    setPosition(cur.timeSec);
-    loopSectionRef.current   = cur;
-    queuedSectionRef.current = null;
-    setQueueLabel(null);
-    setLoopActive(true);
-    setEngineState(ENGINE_STATE.LOOPING);
+    armLoopForSection(cur);
   }
 
   function handleSkip() {
@@ -1435,6 +1445,7 @@ export default function LiveScreen({ route, navigation }) {
     if (!cur) return;
     queuedSectionRef.current = cur;
     setQueueLabel(cur.label);
+    audioEngine.clearLoopRegion?.();
     loopSectionRef.current = null;
     setLoopActive(false);
     setEngineState(ENGINE_STATE.PLAYING);
@@ -1443,6 +1454,7 @@ export default function LiveScreen({ route, navigation }) {
   // ── Worship Free ───────────────────────────────────────────────────────────
   function handleWorshipLoop() {
     if (engineState === ENGINE_STATE.LOOPING) {
+      audioEngine.clearLoopRegion?.();
       loopSectionRef.current = null;
       setLoopActive(false);
       setEngineState(ENGINE_STATE.PLAYING);
@@ -1451,14 +1463,13 @@ export default function LiveScreen({ route, navigation }) {
     } else {
       const cur = sectionJumpList.find(s => s.label === activeSectionLabel);
       if (cur) {
-        loopSectionRef.current = cur;
-        setLoopActive(true);
-        setEngineState(ENGINE_STATE.LOOPING);
+        armLoopForSection(cur, { seek: false });
       }
     }
   }
 
   function activateWorshipFree() {
+    audioEngine.clearLoopRegion?.();
     stopMixAnimation();
     const baseMix = (liveTracks.length > 0 ? liveTracks : buildFallbackTrackPreview(stemsResult))
       .map(cloneTrack);
@@ -1551,6 +1562,11 @@ export default function LiveScreen({ route, navigation }) {
       }
       if (loopSectionRef.current?.label === previousSection.label) {
         loopSectionRef.current = { ...loopSectionRef.current, label: nextLabel };
+        audioEngine.setLoopRegion?.(
+          loopSectionRef.current.timeSec,
+          loopSectionRef.current.endTimeSec,
+          { label: nextLabel },
+        );
       }
       setRenamingMarkerId(null);
       setRenamingCueKind(null);
@@ -1584,6 +1600,11 @@ export default function LiveScreen({ route, navigation }) {
       }
       if (loopSectionRef.current?.label === previousLabel) {
         loopSectionRef.current = { ...loopSectionRef.current, label: nextLabel };
+        audioEngine.setLoopRegion?.(
+          loopSectionRef.current.timeSec,
+          loopSectionRef.current.endTimeSec,
+          { label: nextLabel },
+        );
       }
     }
     setRenamingMarkerId(null);
@@ -1612,6 +1633,7 @@ export default function LiveScreen({ route, navigation }) {
       setQueueLabel(null);
     }
     if (loopSectionRef.current?.label === marker.label) {
+      audioEngine.clearLoopRegion?.();
       loopSectionRef.current = null;
       setLoopActive(false);
       setEngineState(ENGINE_STATE.PLAYING);
@@ -1642,6 +1664,7 @@ export default function LiveScreen({ route, navigation }) {
       setQueueLabel(null);
     }
     if (loopSectionRef.current?.label === cue.label) {
+      audioEngine.clearLoopRegion?.();
       loopSectionRef.current = null;
       setLoopActive(false);
       setEngineState(ENGINE_STATE.PLAYING);
