@@ -1496,7 +1496,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
           const isOpen = expandedSvc?.id === svc.id;
           const card = (
             <View style={[s.svcCard, isOpen && s.svcCardOpen]}>
-              <TouchableOpacity style={s.svcCardTap} onPress={() => setExpandedSvc(isOpen ? null : svc)}>
+              <TouchableOpacity
+                style={s.svcCardTap}
+                onPress={() => setExpandedSvc(isOpen ? null : svc)}
+                onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
+                delayLongPress={450}
+              >
                 <View style={s.svcHeaderRow}>
                   <Text style={s.svcName}>{svc.name || svc.title}</Text>
                   <Text style={s.svcDate}>{formatServiceDate(svc.date)}</Text>
@@ -1506,6 +1511,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 </Text>
                 {svc.created_by_name ? (
                   <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
+                ) : null}
+                {canDeleteServices ? (
+                  <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
                 ) : null}
                 <Text style={s.svcExpandHint}>{isOpen ? '▲ Close Plan' : '▼ Manage Plan'}</Text>
               </TouchableOpacity>
@@ -2611,6 +2619,7 @@ const s = StyleSheet.create({
   svcName: { fontSize: 15, fontWeight: '700', color: '#F9FAFB', flex: 1 },
   svcDate: { fontSize: 12, color: '#6B7280', marginLeft: 8 },
   svcMeta: { fontSize: 12, color: '#9CA3AF', marginBottom: 4 },
+  svcDeleteHint: { fontSize: 10, color: '#FCA5A5', fontWeight: '700', marginBottom: 4 },
   svcExpandHint: { fontSize: 11, color: '#8B5CF6', fontWeight: '600' },
   svcCreatedBy: { fontSize: 11, color: '#4B5563', fontStyle: 'italic', marginTop: 2 },
   serviceDeleteAction: {
