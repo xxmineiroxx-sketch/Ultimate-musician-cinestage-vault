@@ -61,6 +61,8 @@ import {
   shouldAutoPlayNext,
 } from "../services/setlistWavePipeline";
 import { resolveTransitionWindow } from "../services/wavePipelineEngine";
+import { connectSync, disconnectSync, send, subscribeSync, getSyncStatus } from "../services/syncClient";
+import { SYNC_URL } from "./config";
 
 const SECTION_COLORS = {
   intro: "#6B7280",
@@ -178,6 +180,12 @@ export default function PerformanceScreen() {
   const [sectionLoopActive, setSectionLoopActive] = useState(false);
   const [queuedSectionLabel, setQueuedSectionLabel] = useState(null);
   const [voiceGuideEnabled, setVoiceGuideEnabled] = useState(true);
+  
+  // Real-time MD Sync
+  const [syncRole, setSyncRole] = useState("OFF"); // 'HOST', 'FOLLOWER', 'OFF'
+  const [syncStatus, setSyncStatus] = useState("disconnected");
+  const isHost = syncRole === "HOST";
+  const isFollower = syncRole === "FOLLOWER";
 
   const appendDemoLog = useCallback((message) => {
     const now = new Date();
@@ -516,6 +524,7 @@ export default function PerformanceScreen() {
       setPosition(safeTarget);
       setJumpStatus(`Jumped to ${label} at ${formatTime(safeTarget)}.`);
       appendDemoLog(`Jump immediate: ${label} -> ${formatTime(safeTarget)}`);
+      broadcastPlayback(isPlaying, safeTarget);
       const target = jumpTargets.find(
         (jt) => jt.label === label || jt.quantizedTargetSec === targetSec,
       );
@@ -536,6 +545,7 @@ export default function PerformanceScreen() {
       setPosition(safeTarget);
       setJumpStatus(`Jumped to ${label} at ${formatTime(safeTarget)}.`);
       appendDemoLog(`Jump executed: ${label} -> ${formatTime(safeTarget)}`);
+      broadcastPlayback(isPlaying, safeTarget);
       const target = jumpTargets.find(
         (jt) => jt.label === label || jt.quantizedTargetSec === targetSec,
       );
@@ -571,6 +581,7 @@ export default function PerformanceScreen() {
       announcedSectionRef.current = label;
       setQueuedSectionLabel(null);
       setJumpStatus(`→ ${label}`);
+      broadcastPlayback(isPlaying, safeTarget);
       const jt = jumpTargets.find((t) => t.label === label);
       if (jt) {
         const ns = registerJumpIntent(predictiveState, jt.markerId || label);
@@ -588,6 +599,7 @@ export default function PerformanceScreen() {
       announcedSectionRef.current = label;
       setQueuedSectionLabel(null);
       setJumpStatus(`→ ${label}`);
+      broadcastPlayback(isPlaying, safeTarget);
       const jt = jumpTargets.find((t) => t.label === label);
       if (jt) {
         const ns = registerJumpIntent(predictiveState, jt.markerId || label);
@@ -676,18 +688,75 @@ export default function PerformanceScreen() {
     appendDemoLog(`Rollback to arm snapshot ${restored.armedAt}`);
   }
 
+  // Real-time MD Sync Setup
+  useEffect(() => {
+    if (syncRole === "OFF") {
+      disconnectSync();
+      setSyncStatus("disconnected");
+      return;
+    }
+    
+    // Connect to Sync Server
+    connectSync(SYNC_URL, { role: syncRole, roomId: "main-stage", deviceId: `ipad-${Date.now()}` });
+    
+    const unsubscribe = subscribeSync((evt) => {
+      if (evt.type === "SYNC_STATUS") {
+        setSyncStatus(evt.status);
+      } else if (evt.type === "SYNC_MESSAGE" && syncRole === "FOLLOWER") {
+        const msg = evt.message;
+        if (msg.type === "MD_PLAYBACK") {
+          if (msg.isPlaying && !isPlaying) {
+            audioEngine.play();
+            setIsPlaying(true);
+            startPolling();
+          } else if (!msg.isPlaying && isPlaying) {
+            audioEngine.pause();
+            setIsPlaying(false);
+            stopPolling();
+          }
+          if (msg.position !== undefined) {
+            const drift = Math.abs(msg.position - position);
+            // Only force seek if follower drifts more than 0.5s from MD
+            if (drift > 0.5) {
+              audioEngine.seek(msg.position);
+              setPosition(msg.position);
+            }
+          }
+        }
+      }
+    });
+    
+    return () => {
+      unsubscribe();
+      disconnectSync();
+    };
+  }, [syncRole, isPlaying, position]); // intentionally omit startPolling/stopPolling to avoid loops
+
+  const broadcastPlayback = useCallback((playingState, pos) => {
+    if (syncRole === "HOST") {
+      send({
+        type: "MD_PLAYBACK",
+        isPlaying: playingState,
+        position: pos !== undefined ? pos : position,
+        timestamp: Date.now()
+      });
+    }
+  }, [syncRole, position]);
+
   async function handlePlayPause() {
     if (isPlaying) {
       await audioEngine.pause();
       setIsPlaying(false);
       stopPolling();
       appendDemoLog("Playback paused");
+      broadcastPlayback(false);
       return;
     }
     audioEngine.play();
     setIsPlaying(true);
     startPolling();
     appendDemoLog("Playback started");
+    broadcastPlayback(true);
   }
 
   async function handleStop() {
@@ -699,12 +768,14 @@ export default function PerformanceScreen() {
     endedLatchRef.current = false;
     setJumpStatus("Stopped.");
     appendDemoLog("Playback stopped");
+    broadcastPlayback(false, 0);
   }
 
   function handleSeek(seconds) {
     audioEngine.seek(seconds);
     setPosition(seconds);
     announcedSectionRef.current = "";
+    broadcastPlayback(isPlaying, seconds);
   }
 
   async function handleNextSong(autoplay = false) {
@@ -1023,6 +1094,26 @@ export default function PerformanceScreen() {
         <View style={styles.cardHeaderRow}>
           <Text style={styles.cardTitle}>Live Pipeline</Text>
           <View style={styles.pipelineHeaderRight}>
+            {/* Sync Toggle */}
+            <TouchableOpacity
+              style={[
+                styles.vgToggle, 
+                syncRole !== "OFF" && { borderColor: "#4F46E5", backgroundColor: "#1E1B4B" }
+              ]}
+              onPress={() => {
+                const nextRole = syncRole === "OFF" ? "FOLLOWER" : syncRole === "FOLLOWER" ? "HOST" : "OFF";
+                setSyncRole(nextRole);
+              }}
+            >
+              <Text style={[
+                  styles.vgToggleText, 
+                  syncRole !== "OFF" && { color: "#A5B4FC" }
+                ]}
+              >
+                {syncRole === "OFF" ? "SYNC OFF" : syncRole === "HOST" ? "MD HOST" : "FOLLOWER"}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.vgToggle, voiceGuideEnabled && styles.vgToggleOn]}
               onPress={() => {
@@ -1363,42 +1454,42 @@ const styles = StyleSheet.create({
   // ── Transport
   transportRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 14,
+    gap: 16,
+    marginBottom: 24,
     alignItems: "center",
   },
   stopBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#374151",
-    backgroundColor: "#0B1120",
+    paddingHorizontal: 32,
+    paddingVertical: 24,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#EF4444",
+    backgroundColor: "#7F1D1D30",
   },
-  stopBtnText: { color: "#F87171", fontWeight: "900", fontSize: 18 },
+  stopBtnText: { color: "#FCA5A5", fontWeight: "900", fontSize: 28 },
   playBtn: {
     flex: 1,
-    paddingVertical: 13,
-    borderRadius: 12,
+    paddingVertical: 24,
+    borderRadius: 16,
     backgroundColor: "#4F46E5",
     alignItems: "center",
     shadowColor: "#6366F1",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.8,
+    shadowRadius: 12,
+    elevation: 10,
   },
-  playBtnText: { color: "#FFFFFF", fontWeight: "900", fontSize: 22 },
+  playBtnText: { color: "#FFFFFF", fontWeight: "900", fontSize: 32 },
   nextBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1,
+    paddingHorizontal: 28,
+    paddingVertical: 24,
+    borderRadius: 16,
+    borderWidth: 2,
     borderColor: "#10B981",
-    backgroundColor: "#052E1C",
+    backgroundColor: "#064E3B",
     alignItems: "center",
   },
-  nextBtnText: { color: "#34D399", fontWeight: "800", fontSize: 14 },
+  nextBtnText: { color: "#A7F3D0", fontWeight: "900", fontSize: 20 },
 
   // ── Cards
   card: {

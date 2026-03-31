@@ -803,13 +803,14 @@ export default function WaveformTimeline({
           const isWorship = tapCount === 3;
           const color = sec.color;
           const canDragSection = typeof onSectionMarkerDrag === "function";
-          const pinHeight = MARKER_PIN_HEIGHT;
-          const pinMinWidth = 48;
-          const pinPaddingHorizontal = 7;
-          const pinPaddingVertical = 4;
-          const pinMarginLeft = -2;
-          const pinRadius = 5;
-          const pinGap = 3;
+          // Oversized touch targets for iPad mini / Stage use
+          const pinHeight = MARKER_PIN_HEIGHT + 14; 
+          const pinMinWidth = 64;
+          const pinPaddingHorizontal = 12;
+          const pinPaddingVertical = 10;
+          const pinMarginLeft = -4;
+          const pinRadius = 8;
+          const pinGap = 6;
           const lineTop = 0;
 
           // Pin icon based on tap state

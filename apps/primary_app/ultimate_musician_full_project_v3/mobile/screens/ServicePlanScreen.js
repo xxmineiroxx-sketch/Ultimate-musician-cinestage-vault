@@ -314,20 +314,36 @@ const tb = StyleSheet.create({
   row: {
     flexDirection: "row",
     backgroundColor: "#0B1120",
-    borderRadius: 12,
-    padding: 4,
-    marginHorizontal: 16,
-    marginBottom: 4,
+    borderRadius: 14,
+    padding: 6,
+    marginHorizontal: 24,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   tab: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 9,
+    paddingVertical: 12,
     borderRadius: 10,
+    backgroundColor: "transparent",
   },
-  tabActive: { backgroundColor: "#4F46E5" },
-  tabText: { color: "#6B7280", fontWeight: "700", fontSize: 13 },
-  tabTextActive: { color: "#fff" },
+  tabActive: { 
+    backgroundColor: "#1E1B4B", 
+    borderWidth: 1, 
+    borderColor: "#4F46E5",
+    shadowColor: "#4F46E5",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+  },
+  tabText: { color: "#94A3B8", fontWeight: "700", fontSize: 14, letterSpacing: 0.5 },
+  tabTextActive: { color: "#fff", fontWeight: "800" },
 });
 
 // ─── Song row ─────────────────────────────────────────────────────────────────
@@ -350,71 +366,73 @@ function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
     <TouchableOpacity
       style={styles.songRow}
       onPress={onPress}
-      activeOpacity={0.75}
+      activeOpacity={0.8}
     >
-      <View style={styles.songIndex}>
+      <View style={styles.songIndexWrap}>
         <Text style={styles.songIndexText}>{index + 1}</Text>
       </View>
-      <View style={styles.songInfo}>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <Text style={styles.songTitle}>{item.title}</Text>
-          {hasVocals && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                🎤 {item.vocalAssignments.length}
+      
+      <View style={styles.songMain}>
+        <View style={styles.songHeaderRow}>
+          <Text style={styles.songTitle} numberOfLines={1}>{item.title}</Text>
+          <View style={styles.badgeRow}>
+            {hasVocals && (
+              <View style={[styles.proBadge, { borderColor: '#F43F5E' }]}>
+                <Text style={[styles.proBadgeText, { color: '#FDA4AF' }]}>🎤 {item.vocalAssignments.length}</Text>
+              </View>
+            )}
+            {hasLyrics && (
+              <View style={[styles.proBadge, { borderColor: '#10B981' }]}>
+                <Text style={[styles.proBadgeText, { color: '#A7F3D0' }]}>📝</Text>
+              </View>
+            )}
+            {hasNotes && (
+              <View style={[styles.proBadge, { borderColor: '#6366F1' }]}>
+                <Text style={[styles.proBadgeText, { color: '#C7D2FE' }]}>🎸</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <Text style={styles.songMeta}>
+          {item.artist ? `${item.artist}  •  ` : ""}
+          <Text style={{ color: '#E2E8F0', fontWeight: '800' }}>
+            Key: {item.transposedKey ? `${item.transposedKey} (orig ${item.key})` : item.key || "—"}
+          </Text>
+          {item.bpm ? `  •  ${item.bpm} BPM` : ""}
+        </Text>
+
+        <View style={styles.songActionRow}>
+          {editing ? (
+            <View style={styles.keyEditRow}>
+              <TextInput
+                style={styles.keyInput}
+                value={transposedKey}
+                onChangeText={setTransposedKey}
+                placeholder="Key"
+                placeholderTextColor="#4B5563"
+                autoCapitalize="characters"
+                maxLength={4}
+              />
+              <TouchableOpacity style={styles.keyEditSave} onPress={save}>
+                <Text style={styles.keyEditSaveText}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keyEditCancel} onPress={() => setEditing(false)}>
+                <Text style={styles.keyEditCancelText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity onPress={() => setEditing(true)} style={styles.keyEditBtn}>
+              <Text style={styles.keyEditBtnText}>
+                {item.transposedKey ? "⚡ Change Key" : "+ Set Transposed Key"}
               </Text>
-            </View>
-          )}
-          {hasLyrics && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>📝</Text>
-            </View>
-          )}
-          {hasNotes && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>🎸</Text>
-            </View>
+            </TouchableOpacity>
           )}
         </View>
-        <Text style={styles.songMeta}>
-          {item.artist ? `${item.artist} · ` : ""}
-          Key:{" "}
-          {item.transposedKey
-            ? `${item.transposedKey} (orig ${item.key})`
-            : item.key || "—"}
-          {item.bpm ? ` · ${item.bpm} BPM` : ""}
-        </Text>
-        {editing ? (
-          <View style={styles.keyEditRow}>
-            <TextInput
-              style={styles.keyInput}
-              value={transposedKey}
-              onChangeText={setTransposedKey}
-              placeholder="Transposed key (e.g. G)"
-              placeholderTextColor="#4B5563"
-              autoCapitalize="characters"
-              maxLength={4}
-            />
-            <TouchableOpacity style={styles.keyEditSave} onPress={save}>
-              <Text style={styles.keyEditSaveText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <TouchableOpacity onPress={() => setEditing(true)}>
-            <Text style={styles.keyEditLink}>
-              {item.transposedKey ? "Edit key" : "+ Set transposed key"}
-            </Text>
-          </TouchableOpacity>
-        )}
       </View>
-      <TouchableOpacity style={styles.removeBtn} onPress={onRemove}>
-        <Text style={styles.removeBtnText}>✕</Text>
+
+      <TouchableOpacity style={styles.songRemoveBtn} onPress={onRemove}>
+        <Text style={styles.songRemoveBtnText}>✕</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -3386,203 +3404,240 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#020617",
   },
-  scroll: { padding: 16, paddingTop: 12 },
+  scroll: { padding: 24, paddingTop: 12 },
 
   // Header
   header: {
     backgroundColor: "#0B1120",
     borderBottomWidth: 1,
-    borderBottomColor: "#1F2937",
-    padding: 16,
-    paddingBottom: 12,
-    marginBottom: 10,
+    borderBottomColor: "#1E293B",
+    padding: 24,
+    paddingBottom: 20,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
   },
   headerTop: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 10,
-    gap: 10,
+    marginBottom: 16,
+    gap: 16,
   },
-  headerTitle: { color: "#F9FAFB", fontSize: 20, fontWeight: "900" },
-  headerMeta: { color: "#6B7280", fontSize: 12, marginTop: 3 },
-  headerCreatedBy: { color: "#4B5563", fontSize: 11, marginTop: 2, fontStyle: "italic" },
+  headerTitle: { color: "#F9FAFB", fontSize: 28, fontWeight: "900", letterSpacing: -0.5 },
+  headerMeta: { color: "#94A3B8", fontSize: 15, marginTop: 4, fontWeight: "500" },
+  headerCreatedBy: { color: "#475569", fontSize: 12, marginTop: 4, fontStyle: "italic" },
   statusBadge: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    alignSelf: "flex-start",
-  },
-  statusBadgeText: { fontSize: 12, fontWeight: "700" },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  statusRowLabel: { color: "#6B7280", fontSize: 12, fontWeight: "600" },
-  statusPill: {
+    borderRadius: 10,
+    borderWidth: 1.5,
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#374151",
-    backgroundColor: "transparent",
+    paddingVertical: 6,
+    alignSelf: "flex-start",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
-  statusPillText: { color: "#9CA3AF", fontSize: 12, fontWeight: "700" },
+  statusBadgeText: { fontSize: 13, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
+  statusRowLabel: { color: "#64748B", fontSize: 13, fontWeight: "700" },
+  statusPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 99,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    backgroundColor: "#0F172A",
+  },
+  statusPillActive: {
+    borderColor: "#4F46E5",
+    backgroundColor: "#1E1B4B",
+  },
+  statusPillText: { color: "#94A3B8", fontSize: 12, fontWeight: "800" },
+  statusPillTextActive: { color: "#A5B4FC" },
 
   // Section
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 16,
+    marginTop: 8,
   },
   sectionTitle: {
-    color: "#E5E7EB",
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 0.3,
+    color: "#F8FAFC",
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: -0.3,
   },
-  count: { color: "#6B7280", fontWeight: "400", fontSize: 13 },
+  count: { color: "#64748B", fontWeight: "600", fontSize: 15 },
 
   addBtn: {
     backgroundColor: "#1E3A5F",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: "#2563EB",
-  },
-  addBtnText: { color: "#60A5FA", fontWeight: "800", fontSize: 12 },
-  suggestBtn: {
-    backgroundColor: "#1A0A2E",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#7C3AED",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginLeft: 8,
-  },
-  suggestBtnText: { color: "#A78BFA", fontWeight: "800", fontSize: 12 },
-  servedBadge: {
-    backgroundColor: "#0F2A1A",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#10B981",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginLeft: 6,
-  },
-  servedBadgeText: { color: "#34D399", fontSize: 9, fontWeight: "800" },
-  publishBtn: {
-    backgroundColor: "#0F3D2E",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#10B981",
-    marginTop: 20,
-  },
-  publishBtnText: { color: "#10B981", fontWeight: "700", fontSize: 15 },
-  openRehearsalBtn: {
-    backgroundColor: "#1E1B4B",
-    borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#6366F1",
-    marginTop: 10,
-    shadowColor: "#6366F1",
+    shadowColor: "#2563EB",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  addBtnText: { color: "#60A5FA", fontWeight: "900", fontSize: 13 },
+  
+  // Song Row Redesign
+  songRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111827",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    padding: 20,
+    marginBottom: 16,
+    gap: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
   },
-  openRehearsalBtnText: { color: "#A5B4FC", fontWeight: "800", fontSize: 15 },
-  openPlaybackBtn: {
-    backgroundColor: "#0C1F12",
+  songIndexWrap: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    padding: 16,
-    alignItems: "center",
+    backgroundColor: "#050608",
     borderWidth: 1,
-    borderColor: "#10B981",
-    marginTop: 10,
-  },
-  openPlaybackBtnText: { color: "#34D399", fontWeight: "800", fontSize: 15 },
-  partSheetsBtn: {
-    backgroundColor: "#0B1120",
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#374151",
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  partSheetsBtnText: { color: "#9CA3AF", fontWeight: "700", fontSize: 14 },
-  downloadStemsBtn: {
-    backgroundColor: "#0F172A",
-    borderRadius: 12,
-    padding: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#3730A3",
-    marginTop: 4,
-    marginBottom: 16,
-  },
-  downloadStemsBtnInner: { flexDirection: "row", alignItems: "center" },
-  downloadStemsBtnText: { color: "#A78BFA", fontWeight: "700", fontSize: 14 },
-
-  // Song row
-  songRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: "#0B1120",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    padding: 12,
-    marginBottom: 8,
-    gap: 10,
-  },
-  songIndex: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: "#1F2937",
+    borderColor: "#1E293B",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 3,
   },
-  songIndexText: { color: "#9CA3AF", fontSize: 13, fontWeight: "700" },
-  songInfo: { flex: 1 },
-  songTitle: { color: "#F9FAFB", fontSize: 15, fontWeight: "800" },
-  songMeta: { color: "#6B7280", fontSize: 12, marginTop: 3 },
+  songIndexText: { color: "#64748B", fontSize: 16, fontWeight: "900" },
+  songMain: { flex: 1 },
+  songHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  songTitle: { color: "#F9FAFB", fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
+  badgeRow: { flexDirection: "row", gap: 6 },
+  proBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: "rgba(0,0,0,0.3)",
+  },
+  proBadgeText: { fontSize: 11, fontWeight: "800" },
+  songMeta: { color: "#94A3B8", fontSize: 13, fontWeight: "500", marginBottom: 12 },
+  songActionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  
+  keyEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#0F172A",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#334155",
+  },
+  keyEditBtnText: { color: "#818CF8", fontSize: 12, fontWeight: "800" },
+  
   keyEditRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginTop: 6,
+    backgroundColor: "#050608",
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#334155",
   },
   keyInput: {
-    flex: 1,
-    backgroundColor: "#1F2937",
-    borderRadius: 8,
+    width: 60,
+    height: 36,
+    backgroundColor: "#111827",
+    borderRadius: 6,
+    color: "#F8FAFC",
+    fontSize: 15,
+    fontWeight: "900",
+    textAlign: "center",
     borderWidth: 1,
-    borderColor: "#374151",
-    color: "#F9FAFB",
-    fontSize: 13,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderColor: "#4F46E5",
   },
   keyEditSave: {
     backgroundColor: "#4F46E5",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
   },
-  keyEditSaveText: { color: "#fff", fontWeight: "700", fontSize: 12 },
-  keyEditLink: {
-    color: "#818CF8",
-    fontSize: 12,
-    marginTop: 5,
-    fontWeight: "600",
+  keyEditSaveText: { color: "#FFF", fontSize: 12, fontWeight: "900" },
+  keyEditCancel: {
+    padding: 8,
   },
+  keyEditCancelText: { color: "#64748B", fontSize: 16, fontWeight: "900" },
+
+  songRemoveBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#7F1D1D22",
+    borderWidth: 1,
+    borderColor: "#EF444455",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  songRemoveBtnText: { color: "#F87171", fontSize: 18, fontWeight: "900" },
+
+  // Primary Action Buttons
+  publishBtn: {
+    backgroundColor: "#064E3B",
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#10B981",
+    marginTop: 24,
+    shadowColor: "#10B981",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+  },
+  publishBtnText: { color: "#10B981", fontWeight: "900", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 },
+  
+  openRehearsalBtn: {
+    backgroundColor: "#1E1B4B",
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#6366F1",
+    marginTop: 12,
+    shadowColor: "#6366F1",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  openRehearsalBtnText: { color: "#A5B4FC", fontWeight: "900", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 },
+
+  openPlaybackBtn: {
+    backgroundColor: "#022C22",
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#10B981",
+    marginTop: 12,
+  },
+  openPlaybackBtnText: { color: "#34D399", fontWeight: "900", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 },
 
   // Song detail badges
   badge: {

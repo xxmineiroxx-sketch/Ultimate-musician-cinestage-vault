@@ -204,6 +204,11 @@ export default function PersonProfileScreen({ navigation, route }) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    // Hot reload can preserve modal state across profile transitions.
+    setEditModal(false);
+  }, [person?.id]);
+
   if (!person) {
     return (
       <View style={s.root}>
@@ -464,7 +469,7 @@ export default function PersonProfileScreen({ navigation, route }) {
       >
         {/* ── Profile Card ───────────────────────────────────────── */}
         <View style={s.profileCard}>
-          <Avatar name={person.name} photo_url={person.photo_url} size={96} />
+          <Avatar name={person.name} photo_url={person.photo_url} size={112} />
 
           <Text style={s.profileName}>{person.name}</Text>
 
@@ -472,39 +477,26 @@ export default function PersonProfileScreen({ navigation, route }) {
           <View style={s.badgeRow}>
             {isFromPlayback && (
               <View style={s.upBadge}>
-                <Text style={s.upBadgeText}>Playback</Text>
-              </View>
-            )}
-            {grant && (
-              <View
-                style={[
-                  s.grantBadge,
-                  {
-                    backgroundColor: ROLE_COLOR[grant] + "22",
-                    borderColor: ROLE_COLOR[grant],
-                  },
-                ]}
-              >
-                <Text style={[s.grantBadgeText, { color: ROLE_COLOR[grant] }]}>
-                  {ROLE_ICON[grant]} {ROLE_LABEL[grant]}
-                </Text>
+                <Text style={s.upBadgeText}>PLAYBACK</Text>
               </View>
             )}
           </View>
 
           {/* Contact info */}
-          {person.email ? (
-            <View style={s.infoRow}>
-              <Text style={s.infoIcon}>✉️</Text>
-              <Text style={s.infoValue}>{person.email}</Text>
-            </View>
-          ) : null}
-          {person.phone ? (
-            <View style={s.infoRow}>
-              <Text style={s.infoIcon}>📱</Text>
-              <Text style={s.infoValue}>{person.phone}</Text>
-            </View>
-          ) : null}
+          <View style={s.contactBlock}>
+            {person.email ? (
+              <View style={s.infoRow}>
+                <Text style={s.infoIcon}>✉️</Text>
+                <Text style={s.infoValue}>{person.email}</Text>
+              </View>
+            ) : null}
+            {person.phone ? (
+              <View style={s.infoRow}>
+                <Text style={s.infoIcon}>📱</Text>
+                <Text style={s.infoValue}>{person.phone}</Text>
+              </View>
+            ) : null}
+          </View>
 
           {/* Roles */}
           <Text style={s.roleList}>{roleList}</Text>
@@ -556,15 +548,16 @@ export default function PersonProfileScreen({ navigation, route }) {
               ]}
               onPress={cycleGrant}
               disabled={grantSaving || grant === "org_owner"}
+              activeOpacity={0.8}
             >
               {grantSaving ? (
-                <ActivityIndicator color="#8B5CF6" />
+                <ActivityIndicator color="#8B5CF6" style={{ padding: 12 }} />
               ) : (
                 <View style={s.grantCycleInner}>
                   <Text style={s.grantCycleIcon}>
                     {grant ? ROLE_ICON[grant] : "🚫"}
                   </Text>
-                  <View style={{ flex: 1 }}>
+                  <View style={s.grantCycleTextWrap}>
                     <Text
                       style={[
                         s.grantCycleName,
@@ -607,8 +600,7 @@ export default function PersonProfileScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={s.legendLabel}>Worship Leader</Text>
                 <Text style={s.legendDesc}>
-                  Can plan services, add songs and assign team members in
-                  Playback
+                  Can plan services, add songs and assign team members in Playback
                 </Text>
               </View>
             </View>
@@ -617,8 +609,7 @@ export default function PersonProfileScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={s.legendLabel}>Music Director</Text>
                 <Text style={s.legendDesc}>
-                  Receives all team messages, can manage services, team & songs
-                  in Playback
+                  Receives all team messages, can manage services, team & songs in Playback
                 </Text>
               </View>
             </View>
@@ -744,6 +735,35 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#020617" },
   scroll: { padding: 16, paddingBottom: 40 },
 
+  // Avatar
+  avatar: {
+    backgroundColor: "#312E81",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#4F46E5",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+  },
+  avatarText: { color: "#C7D2FE", fontWeight: "900" },
+  avatarEditBadge: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    backgroundColor: "#1E1B4B",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    borderWidth: 1,
+    borderColor: "#4F46E5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarEditBadgeText: { fontSize: 12 },
+
   // Profile card
   profileCard: {
     backgroundColor: "#0B1120",
@@ -782,6 +802,11 @@ const s = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     textTransform: "uppercase",
+  },
+  contactBlock: {
+    width: "100%",
+    marginTop: 4,
+    marginBottom: 4,
   },
   grantBadge: {
     borderRadius: 8,
@@ -892,71 +917,53 @@ const s = StyleSheet.create({
 
   // Grant cycle card
   grantCycleCard: {
-    backgroundColor: "#1F2937",
-    borderRadius: 12,
+    backgroundColor: "#111827",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#374151",
-    padding: 14,
-    marginBottom: 16,
+    borderColor: "#334155",
+    padding: 20,
+    marginBottom: 24,
   },
-  grantCycleInner: { flexDirection: "row", alignItems: "center", gap: 12 },
-  grantCycleIcon: { fontSize: 28 },
+  grantCycleInner: { flexDirection: "row", alignItems: "center", gap: 16 },
+  grantCycleTextWrap: { flex: 1 },
+  grantCycleIcon: { fontSize: 32 },
   grantCycleName: {
-    color: "#E5E7EB",
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 2,
+    color: "#F8FAFC",
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 4,
+    letterSpacing: -0.3,
   },
-  grantCycleHint: { color: "#6B7280", fontSize: 11 },
-  grantCycleArrow: { fontSize: 20, color: "#4B5563", fontWeight: "700" },
+  grantCycleHint: { color: "#64748B", fontSize: 13, fontWeight: "500" },
+  grantCycleArrow: { fontSize: 24, color: "#475569", fontWeight: "300" },
 
   // Legend
-  legendRow: { gap: 10 },
-  legendItem: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
-  legendIcon: { fontSize: 18, marginTop: 2 },
+  legendRow: { gap: 16, marginTop: 8 },
+  legendItem: { flexDirection: "row", gap: 16, alignItems: "flex-start" },
+  legendIcon: { fontSize: 20, marginTop: 2 },
   legendLabel: {
-    color: "#E5E7EB",
-    fontSize: 13,
-    fontWeight: "700",
-    marginBottom: 2,
+    color: "#E2E8F0",
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 4,
   },
-  legendDesc: { color: "#6B7280", fontSize: 11, lineHeight: 16 },
+  legendDesc: { color: "#64748B", fontSize: 13, lineHeight: 18 },
 
   // Remove
   removeBtn: {
     borderWidth: 1,
-    borderColor: "#7F1D1D",
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderColor: "#EF444455",
+    backgroundColor: "#7F1D1D22",
+    borderRadius: 16,
+    paddingVertical: 18,
     alignItems: "center",
   },
-  removeBtnText: { color: "#EF4444", fontWeight: "800", fontSize: 15 },
-
-  // Avatar
-  avatar: {
-    backgroundColor: "#312E81",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  avatarText: { color: "#A5B4FC", fontWeight: "900" },
-  avatarEditBadge: {
-    position: "absolute",
-    bottom: 0,
-    right: 0,
-    backgroundColor: "#1E3A5F",
-    borderRadius: 8,
-    width: 22,
-    height: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarEditBadgeText: { fontSize: 11 },
+  removeBtnText: { color: "#F87171", fontWeight: "900", fontSize: 16, letterSpacing: 0.5 },
 
   // Edit modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor: "rgba(0,0,0,0.82)",
     justifyContent: "flex-end",
   },
   modalCard: {
@@ -964,52 +971,80 @@ const s = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
-    borderColor: "#1F2937",
-    padding: 20,
+    borderColor: "#1E293B",
+    padding: 28,
+    paddingBottom: 36,
     maxHeight: "92%",
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  modalTitle: { color: "#F9FAFB", fontSize: 18, fontWeight: "900" },
-  modalClose: { color: "#6B7280", fontWeight: "700", fontSize: 14 },
-
-  photoRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
-  photoHint: { color: "#6B7280", fontSize: 12 },
+  modalTitle: {
+    color: "#F8FAFC",
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  modalClose: { color: "#94A3B8", fontWeight: "700", fontSize: 16 },
+  photoRow: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
+  photoHint: {
+    color: "#64748B",
+    fontSize: 13,
+    fontWeight: "500",
+    marginLeft: 16,
+  },
   removePhotoLink: {
     color: "#EF4444",
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: "600",
-  },
-
-  fieldLabel: {
-    color: "#6B7280",
-    fontSize: 12,
+    fontSize: 13,
+    marginTop: 6,
     fontWeight: "700",
-    marginBottom: 6,
-    marginTop: 12,
+    marginLeft: 16,
+  },
+  fieldLabel: {
+    color: "#64748B",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 8,
+    marginTop: 16,
+    letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: "#020617",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#E5E7EB",
-    fontSize: 14,
-  },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 4 },
-
-  saveBtn: {
-    backgroundColor: "#16A34A",
+    backgroundColor: "#050608",
     borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "500",
   },
-  saveBtnText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  chipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+    gap: 8,
+  },
+  saveBtn: {
+    backgroundColor: "#064E3B",
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: "center",
+    marginTop: 24,
+    borderWidth: 1,
+    borderColor: "#10B981",
+    shadowColor: "#10B981",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+  },
+  saveBtnText: {
+    color: "#34D399",
+    fontWeight: "900",
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
 });

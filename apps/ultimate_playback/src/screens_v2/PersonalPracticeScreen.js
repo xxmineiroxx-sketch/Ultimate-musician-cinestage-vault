@@ -19,6 +19,7 @@ import {
   RefreshControl,
   Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import audioEngine from '../services/audioEngine';
 import { getUserProfile, getAssignments } from '../services/storage';
 import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY, CINESTAGE_URL } from '../../config/syncConfig';
@@ -437,7 +438,9 @@ function buildPersonalTracks(role, song) {
 
   // ── Instrument roles (keys, drums, bass, guitar, etc.) ────────────────────
   const canonicalStem = INSTRUMENT_STEM_MAP[role] || 'other';
-  const myStemEntry = findStemEntry(stemEntries, [canonicalStem]);
+  // Primary: look for the exact stem (piano/guitar from htdemucs_6s).
+  // Fallback: 'other' — used when mdx_extra was run (no piano/guitar split).
+  const myStemEntry = findStemEntry(stemEntries, [canonicalStem, 'other']);
   const stemLabel = ROLE_DISPLAY[role] || myStemEntry?.label || 'Your Part';
 
   // Track A: all named stems except the player's stem and 'other'.
@@ -447,7 +450,7 @@ function buildPersonalTracks(role, song) {
   // only hears cleanly separated stems.
   const accompanimentEntries = stemEntries.filter((entry) => {
     if (myStemEntry && entry.uri === myStemEntry.uri) return false; // skip player's own stem
-    if (entry.key === 'other') return false;                        // skip catch-all
+    if (entry.key === 'other') return false;  // always skip 'other' from Track A (catch-all may contain player)
     return true;
   });
 
@@ -502,6 +505,7 @@ function findSongIndex(list = [], song) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function PersonalPracticeScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
   // Read params fresh on every render (focus re-navigation updates them)
   const paramsRef = useRef(route?.params || {});
   paramsRef.current = route?.params || {};
@@ -1071,7 +1075,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       {/* ── Top bar ── */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: Math.max(insets.top + 8, 20) }]}>
         <View>
           <Text style={styles.screenTitle}>My Practice</Text>
           {role ? (

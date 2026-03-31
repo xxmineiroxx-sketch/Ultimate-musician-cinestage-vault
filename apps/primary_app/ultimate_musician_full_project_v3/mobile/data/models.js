@@ -285,7 +285,11 @@ export const LYRIC_SOFTWARE_OPTIONS = [
   },
 ];
 
+import { CINESTAGE_URL, WS_URL } from "../screens/config";
+
 export const makeDefaultSettings = () => ({
+  apiBase: CINESTAGE_URL,
+  defaultUserId: "demo-user",
   audio: {
     clickEnabled: true,
     guideEnabled: true,
@@ -321,7 +325,7 @@ export const makeDefaultSettings = () => ({
     midiChannel: 1,
   },
   sync: {
-    wsUrl: "ws://localhost:8000/ws",
+    wsUrl: WS_URL,
     debug: false,
   },
   general: {

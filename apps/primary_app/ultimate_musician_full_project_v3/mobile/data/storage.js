@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
-import { SYNC_URL, syncHeaders } from "../screens/config";
+import { CINESTAGE_URL, SYNC_URL, WS_URL, syncHeaders } from "../screens/config";
 
 import { ensureCifrasSeeded } from "./cifrasSeed";
 import {
@@ -36,6 +36,42 @@ const safeJsonParse = (value, fallback) => {
 
 const nowIso = () => new Date().toISOString();
 const trimLeadingSlashes = (value = "") => String(value || "").replace(/^\/+/, "");
+const LEGACY_CINESTAGE_HOSTS = [
+  "http://localhost:8000",
+  "https://localhost:8000",
+  "http://127.0.0.1:8000",
+  "https://127.0.0.1:8000",
+  "https://railway.ultimatemusician",
+];
+
+const sanitizeSettings = (settings = {}) => {
+  const next = { ...(settings || {}) };
+  const rawApiBase = String(next.apiBase || "").trim();
+  const normalizedApiBase = rawApiBase.replace(/\/+$/, "");
+
+  if (!normalizedApiBase || LEGACY_CINESTAGE_HOSTS.includes(normalizedApiBase)) {
+    next.apiBase = CINESTAGE_URL;
+  } else {
+    next.apiBase = normalizedApiBase;
+  }
+
+  const rawWsUrl = String(next.sync?.wsUrl || "").trim();
+  const shouldReplaceWs =
+    !rawWsUrl
+    || /^ws:\/\/localhost:8000\/ws\/?$/i.test(rawWsUrl)
+    || /^wss?:\/\/127\.0\.0\.1:8000\/ws\/?$/i.test(rawWsUrl);
+
+  next.sync = {
+    ...(next.sync || {}),
+    wsUrl: shouldReplaceWs ? WS_URL : rawWsUrl,
+  };
+
+  if (!next.defaultUserId) {
+    next.defaultUserId = "demo-user";
+  }
+
+  return next;
+};
 
 const stemRelativePathFromUri = (value) => {
   const normalized = String(value || "")
@@ -498,20 +534,26 @@ const mergePeopleRecords = (localPeople, sharedMembers) => {
 };
 
 export const getSettings = async () => {
+  const fallback = sanitizeSettings({
+    apiBase: CINESTAGE_URL,
+    defaultUserId: "demo-user",
+  });
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
-    return safeJsonParse(raw, {
-      apiBase: "http://localhost:8000",
-      defaultUserId: "demo-user",
-    });
+    const parsed = safeJsonParse(raw, fallback);
+    const next = sanitizeSettings(parsed);
+    if (JSON.stringify(next) !== JSON.stringify(parsed)) {
+      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    }
+    return next;
   } catch {
-    return { apiBase: "http://localhost:8000", defaultUserId: "demo-user" };
+    return fallback;
   }
 };
 
 export const saveSettings = async (next) => {
   try {
-    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitizeSettings(next)));
   } catch (err) {
     console.warn("[storage] saveSettings failed:", err);
   }

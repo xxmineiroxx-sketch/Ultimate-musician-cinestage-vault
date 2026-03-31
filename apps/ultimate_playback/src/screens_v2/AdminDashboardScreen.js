@@ -108,9 +108,12 @@ const cal = StyleSheet.create({
   cellTxtToday:    { color: '#818CF8', fontWeight: '700' },
 });
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserProfile } from '../services/storage';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+
+const ADMIN_LIBRARY_CACHE_KEY = '@up_admin_library_cache_v1';
 const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
@@ -556,6 +559,35 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    // Restore from local cache first so UI shows instantly on Metro reload
+    try {
+      const cached = await AsyncStorage.getItem(ADMIN_LIBRARY_CACHE_KEY);
+      if (cached) {
+        const lib = JSON.parse(cached);
+        if (lib.services?.length || lib.people?.length || lib.songs?.length) {
+          setServices(lib.services || []);
+          setPlans(lib.plans     || {});
+          setSongs(lib.songs     || []);
+          setVocalAssignments(lib.vocalAssignments || {});
+          // Include orphaned team members (assigned in plans but not in people[])
+          const cacheEmails = new Set((lib.people||[]).map(p=>(p.email||'').toLowerCase()).filter(Boolean));
+          const cacheNames  = new Set((lib.people||[]).map(p=>(p.name||'').toLowerCase().trim()).filter(Boolean));
+          const cacheOrphans = [];
+          Object.values(lib.plans||{}).forEach(plan=>{
+            (plan.team||[]).forEach(tm=>{
+              const em=(tm.email||'').toLowerCase(), nm=(tm.name||'').toLowerCase().trim();
+              if(!nm) return;
+              if((em&&cacheEmails.has(em))||cacheNames.has(nm)) return;
+              cacheOrphans.push({id:tm.personId||`orphan_${nm.replace(/\s/g,'_')}`,name:tm.name||'',email:tm.email||'',roles:tm.role?[tm.role]:[],inviteStatus:'plan_only'});
+              if(em) cacheEmails.add(em); cacheNames.add(nm);
+            });
+          });
+          setPeople([...(lib.people||[]), ...cacheOrphans]);
+        }
+      }
+    } catch (_) {}
+
     try {
       const hdrs = syncHeaders();
       const [prof, msgs, lib, props, pSvcs, pSongs] = await Promise.all([
@@ -568,11 +600,51 @@ export default function AdminDashboardScreen({ navigation, route }) {
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
-      setServices(lib.services || []);
-      setPeople(lib.people   || []);
-      setPlans(lib.plans     || {});
-      setSongs(lib.songs     || []);
-      setVocalAssignments(lib.vocalAssignments || {});
+
+      // Only update state + cache if server returned real data (non-empty arrays).
+      // An empty server response (e.g. network error → catch → {}) must never
+      // override the local cache we already restored above.
+      const serverHasData =
+        (lib.people?.length > 0) ||
+        (lib.services?.length > 0) ||
+        (lib.songs?.length > 0);
+      if (serverHasData) {
+        setServices(lib.services || []);
+        setPlans(lib.plans     || {});
+        setSongs(lib.songs     || []);
+        setVocalAssignments(lib.vocalAssignments || {});
+
+        // Surface team members who appear in plan.team but not in people[] —
+        // they were assigned from UM without being added to the people list.
+        const knownEmails = new Set(
+          (lib.people || []).map(p => (p.email || '').toLowerCase()).filter(Boolean)
+        );
+        const knownNames = new Set(
+          (lib.people || []).map(p => (p.name || '').toLowerCase().trim()).filter(Boolean)
+        );
+        const orphans = [];
+        Object.values(lib.plans || {}).forEach(plan => {
+          (plan.team || []).forEach(tm => {
+            const email = (tm.email || '').toLowerCase();
+            const name  = (tm.name  || '').toLowerCase().trim();
+            if (!name) return;
+            if ((email && knownEmails.has(email)) || knownNames.has(name)) return;
+            orphans.push({
+              id: tm.personId || `orphan_${name.replace(/\s/g,'_')}`,
+              name: tm.name || '',
+              email: tm.email || '',
+              roles: tm.role ? [tm.role] : [],
+              inviteStatus: 'plan_only',
+            });
+            if (email) knownEmails.add(email);
+            knownNames.add(name);
+          });
+        });
+        setPeople([...(lib.people || []), ...orphans]);
+
+        AsyncStorage.setItem(ADMIN_LIBRARY_CACHE_KEY, JSON.stringify(lib)).catch(() => {});
+      }
+
       setProposals(Array.isArray(props) ? props : []);
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
@@ -642,16 +714,19 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const publishUpdate = async (updatedPlans, updatedServices, updatedPeople) => {
     const hdrs = syncHeaders();
     const lib = await fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: hdrs });
+    const payload = {
+      services: updatedServices || lib.services,
+      people:   updatedPeople   || lib.people,
+      plans:    updatedPlans    || lib.plans,
+      songs:    lib.songs       || [],
+    };
     await fetchJson(`${SYNC_URL}/sync/library-push`, {
       method: 'POST',
       headers: hdrs,
-      body: JSON.stringify({
-        services: updatedServices || lib.services,
-        people:   updatedPeople   || lib.people,
-        plans:    updatedPlans    || lib.plans,
-        songs:    lib.songs       || [],
-      }),
+      body: JSON.stringify(payload),
     });
+    // Cache locally so Metro reloads don't lose data
+    AsyncStorage.setItem(ADMIN_LIBRARY_CACHE_KEY, JSON.stringify(payload)).catch(() => {});
   };
 
   const closeServiceSwipe = useCallback((serviceId) => {
@@ -1722,7 +1797,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={s.personAvatarText}>{(person.name || '?')[0]}</Text>
           </View>
           <View style={s.personBody}>
-            <Text style={s.personName}>{person.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={s.personName}>{person.name}</Text>
+              {person.inviteStatus === 'plan_only' && (
+                <View style={{ backgroundColor: '#78350F', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                  <Text style={{ fontSize: 9, color: '#FCD34D', fontWeight: '700' }}>NOT REGISTERED</Text>
+                </View>
+              )}
+            </View>
             <Text style={s.personEmail}>{person.email || 'no email'}</Text>
             {(person.roles || []).length > 0 && (
               <Text style={s.personRoles}>{person.roles.join(' · ')}</Text>

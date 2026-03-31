@@ -663,12 +663,28 @@ export default function SongDetailScreen({ route, navigation }) {
         instrument: aiChartInstrument === 'Acoustic' ? 'acoustic_guitar' : aiChartInstrument,
         style: "worship",
       };
-      const res = await fetchWithRetry(`${apiBase}/ai/instrument-charts/generate-text`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`AI Chart API ${res.status}`);
+      const bases = Array.from(
+        new Set(
+          [apiBase, CINESTAGE_URL]
+            .map((value) => String(value || "").trim().replace(/\/+$/, ""))
+            .filter(Boolean),
+        ),
+      );
+
+      let res = null;
+      let lastStatus = null;
+      for (const base of bases) {
+        res = await fetchWithRetry(`${base}/ai/instrument-charts/generate-text`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) break;
+        lastStatus = res.status;
+        if (res.status !== 404 || base === CINESTAGE_URL) break;
+      }
+
+      if (!res?.ok) throw new Error(`AI Chart API ${lastStatus || res?.status || "request failed"}`);
       const data = await res.json();
       const chartText = data.chart_text || data.content || data.chart || JSON.stringify(data);
       setAiChartResult({ instrument: aiChartInstrument, text: chartText });

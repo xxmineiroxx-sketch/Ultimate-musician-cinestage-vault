@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import ChartReferencePanel from '../components/ChartReferencePanel';
 
 // All known instrument parts
 const ALL_INSTRUMENTS = [
@@ -501,6 +502,16 @@ export default function ContentEditorScreen({ navigation, route }) {
             autoCorrect={isLyrics}
             autoCapitalize={isLyrics ? 'sentences' : 'none'}
             spellCheck={isLyrics}
+          />
+        )}
+
+        {/* Live fingering / reference panel — bass & guitar only */}
+        {!isLyrics && (
+          <ChartReferencePanel
+            role={instrument}
+            songKey={song?.key || song?.originalKey || ''}
+            timeSig={song?.timeSig || song?.timeSignature || '4/4'}
+            chordText={content}
           />
         )}
 

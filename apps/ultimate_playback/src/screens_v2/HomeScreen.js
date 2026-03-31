@@ -499,21 +499,22 @@ export default function HomeScreen({ navigation }) {
         try { res = await fetch(_assignUrl, { headers: syncHeaders(), signal: _ctrl.signal }); } finally { clearTimeout(_tid); }
         if (res.ok) {
           const remote = await res.json();
-          // Always replace local cache with server's authoritative list.
-          // Preserve only stronger local decisions; never let a stale local
-          // "pending" overwrite a real accepted/declined server response.
-          const localMap = Object.fromEntries(userAssignments.map(a => [a.id, a]));
-          const merged = dedupAssignments(remote.map(r =>
-            localMap[r.id]
-              ? {
-                  ...r,
-                  status: pickPreferredAssignmentStatus(localMap[r.id].status, r.status),
-                  readiness: localMap[r.id].readiness,
-                }
-              : r
-          ));
-          await saveAssignments(merged);
-          userAssignments = merged;
+          // Only sync if server returned actual assignments — an empty response
+          // (e.g. server unreachable or org mismatch) must never wipe local data.
+          if (Array.isArray(remote) && remote.length > 0) {
+            const localMap = Object.fromEntries(userAssignments.map(a => [a.id, a]));
+            const merged = dedupAssignments(remote.map(r =>
+              localMap[r.id]
+                ? {
+                    ...r,
+                    status: pickPreferredAssignmentStatus(localMap[r.id].status, r.status),
+                    readiness: localMap[r.id].readiness,
+                  }
+                : r
+            ));
+            await saveAssignments(merged);
+            userAssignments = merged;
+          }
         }
       } catch (_) {}
     }

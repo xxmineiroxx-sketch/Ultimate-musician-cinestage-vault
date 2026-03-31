@@ -1042,6 +1042,7 @@ export default function RehearsalScreen({ route, navigation }) {
   // User-edited sections — null = use auto-computed, array = user has customized
   const [userSections, setUserSections] = useState(null);
   const [setlistPanelOpen, setSetlistPanelOpen] = useState(false);
+  const [showMixer, setShowMixer] = useState(false); // Collapsible mixer for iPad mini layout
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -3221,26 +3222,20 @@ export default function RehearsalScreen({ route, navigation }) {
             {padActive && <Text style={styles.padActiveDot}>● PAD</Text>}
           </View>
         )}
-        {/* Row 1: Song name + setlist pill + timer */}
+        {/* Row 1: Song name + timer (Clean borderless header) */}
         <View style={styles.transportBarTop}>
-          {/* ‹ Back button */}
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => navigation.goBack()}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Text style={styles.backBtnText}>‹</Text>
-          </TouchableOpacity>
           <TouchableOpacity
             style={styles.setlistPill}
             onPress={() => setlist.length > 1 && setSetlistPanelOpen((v) => !v)}
-            activeOpacity={setlist.length > 1 ? 0.7 : 1}
+            activeOpacity={0.7}
           >
-            {setlist.length > 1 && (
-              <Text style={styles.setlistPillIdx}>
-                {setlistIndex + 1}/{setlist.length}
-              </Text>
-            )}
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.backBtnText}>‹</Text>
+            </TouchableOpacity>
+
             <Text style={styles.transportSongName} numberOfLines={1}>
               {song?.title || "Rehearsal"}
             </Text>
@@ -3252,10 +3247,7 @@ export default function RehearsalScreen({ route, navigation }) {
           </TouchableOpacity>
           <Text style={styles.transportTimer}>
             <Text style={styles.transportPos}>{formatTime(position)}</Text>
-            <Text style={styles.transportDur}>
-              {" "}
-              / {formatTime(effectiveDuration)}
-            </Text>
+            <Text style={styles.transportDur}> / {formatTime(effectiveDuration)}</Text>
           </Text>
         </View>
 
@@ -3310,37 +3302,39 @@ export default function RehearsalScreen({ route, navigation }) {
             })}
           </View>
         )}
-        {/* Single scrollable control row */}
+
+        {/* Transport Controls & Pills Row */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.tbRow3Scroll}
           contentContainerStyle={styles.tbRow3Content}
         >
-          <TouchableOpacity style={styles.tbBtn} disabled>
-            <Text style={[styles.tbBtnText, { opacity: 0.3 }]}>⏮</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tbBtn} onPress={handleStop}>
-            <Text style={[styles.tbBtnText, { color: "#F87171" }]}>■</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.tbPlayBtn, !audioLoaded && tracks.length > 0 && { borderColor: '#EF4444' }]} onPress={handlePlayPause}>
-            <Text style={styles.tbPlayBtnText}>{isPlaying ? "⏸" : "▶"}</Text>
-            {!audioLoaded && tracks.length > 0 && (
-              <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 6, paddingHorizontal: 4, paddingVertical: 1 }}>
-                <Text style={{ color: '#fff', fontSize: 7, fontWeight: '900' }}>NO AUDIO</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tbBtn, !setlistNextSong && { opacity: 0.3 }]}
-            disabled={!setlistNextSong}
-            onPress={() =>
-              setlistNextSong && jumpToSetlistSong(setlistIndex + 1)
-            }
-          >
-            <Text style={[styles.tbBtnText, { color: "#34D399" }]}>⏭</Text>
-          </TouchableOpacity>
-          <View style={styles.tbDivider} />
+          {/* Playback Controls Group */}
+          <View style={styles.tbPlaybackGroup}>
+            <TouchableOpacity style={styles.tbBtn} disabled>
+              <Text style={[styles.tbBtnText, { opacity: 0.3 }]}>⏮</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tbBtn} onPress={handleStop}>
+              <Text style={[styles.tbBtnText, { color: "#F87171", fontSize: 10, marginTop: 2 }]}>■</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.tbPlayBtn, !audioLoaded && tracks.length > 0 && { borderColor: '#EF4444' }]} onPress={handlePlayPause}>
+              <Text style={styles.tbPlayBtnText}>{isPlaying ? "⏸" : "▶"}</Text>
+              {!audioLoaded && tracks.length > 0 && (
+                <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 6, paddingHorizontal: 4, paddingVertical: 1 }}>
+                  <Text style={{ color: '#fff', fontSize: 7, fontWeight: '900' }}>NO AUDIO</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tbBtn, !setlistNextSong && { opacity: 0.3 }]}
+              disabled={!setlistNextSong}
+              onPress={() => setlistNextSong && jumpToSetlistSong(setlistIndex + 1)}
+            >
+              <Text style={styles.tbBtnText}>⏭</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* BPM */}
           <View style={styles.tbMenuPill}>
             <Text style={styles.tbMenuPillLabel}>BPM</Text>
@@ -3368,45 +3362,49 @@ export default function RehearsalScreen({ route, navigation }) {
               selectTextOnFocus
             />
           </View>
+
           {/* TAP */}
           <TouchableOpacity style={styles.tbMenuBtn} onPress={handleTapTempo}>
             <Text style={styles.tbMenuBtnText}>TAP</Text>
           </TouchableOpacity>
+
           {/* Time Sig */}
           <TouchableOpacity
-            style={[styles.tbMenuBtn, { borderColor: "#14B8A6" }]}
+            style={[styles.tbMenuBtn, { borderColor: "#14B8A6", backgroundColor: "#0F766E22" }]}
             onPress={cycleSig}
           >
             <Text style={[styles.tbMenuBtnText, { color: "#5EEAD4" }]}>
               {localTimeSig}
             </Text>
           </TouchableOpacity>
+
           {/* Key / Pad (merged key picker + drone) */}
           <TouchableOpacity
             style={[
               styles.tbMenuBtn,
               droneNote
                 ? { borderColor: "#F59E0B", backgroundColor: "#1A100A" }
-                : { borderColor: "#6366F1" },
+                : { borderColor: "#6366F1", backgroundColor: "#4F46E520" },
               keyPickerOpen && !droneNote && { backgroundColor: "#1A1A3A" },
             ]}
             onPress={() => { setKeyPickerOpen((v) => !v); setDronePickerVisible(false); }}
           >
             {droneNote ? (
               <View style={{ alignItems: "center", gap: 1 }}>
-                <Text style={{ color: "#FCD34D", fontSize: 15, fontWeight: "900" }}>{droneNote}</Text>
-                <Text style={{ color: "#F59E0B", fontSize: 9, fontWeight: "700" }}>♩ PAD</Text>
+                <Text style={{ color: "#FCD34D", fontSize: 13, fontWeight: "900" }}>{droneNote}</Text>
+                <Text style={{ color: "#F59E0B", fontSize: 8, fontWeight: "700" }}>♩ PAD</Text>
               </View>
             ) : (
               <Text style={[styles.tbMenuBtnText, { color: "#A5B4FC" }]}>♪ {transposedKey}</Text>
             )}
           </TouchableOpacity>
-          {/* Markers — tap to toggle cue bar */}
+
+          {/* Markers */}
           <TouchableOpacity
             style={[
               styles.tbMenuBtn,
               markersPanelOpen && styles.tbMenuBtnActive,
-              markers.length > 0 && !markersPanelOpen && { borderColor: '#F59E0B' },
+              markers.length > 0 && !markersPanelOpen && { borderColor: '#F59E0B', backgroundColor: '#92400E22' },
             ]}
             onPress={() => {
               setMarkersPanelOpen((v) => !v);
@@ -3418,7 +3416,7 @@ export default function RehearsalScreen({ route, navigation }) {
               📍 MARKS{markers.length > 0 ? ` (${markers.length})` : ''}
             </Text>
           </TouchableOpacity>
-          <View style={styles.tbDivider} />
+
           {/* REC */}
           <TouchableOpacity
             style={[styles.tbMenuBtn, isRecording && { borderColor: '#EF4444', backgroundColor: '#3A0A0A' }]}
@@ -3431,34 +3429,28 @@ export default function RehearsalScreen({ route, navigation }) {
               </Text>
             </View>
           </TouchableOpacity>
+
           {/* Lights */}
           <TouchableOpacity
             style={[styles.tbMenuBtn, lightPanelOpen && { borderColor: '#FCD34D', backgroundColor: '#1A1500' }]}
             onPress={() => { setLightPanelOpen((v) => !v); setMarkersPanelOpen(false); }}
           >
-            <Text style={[styles.tbMenuBtnText, lightPanelOpen && { color: '#FCD34D' }]}>💡 LIGHTS</Text>
+            <Text style={[styles.tbMenuBtnText, lightPanelOpen && { color: '#FCD34D' }]}>💡 LIC</Text>
           </TouchableOpacity>
+
           {/* + Track */}
-          <TouchableOpacity
-            style={styles.tbMenuBtn}
-            onPress={() => setAddTrackVisible(true)}
-          >
+          <TouchableOpacity style={styles.tbMenuBtn} onPress={() => setAddTrackVisible(true)}>
             <Text style={styles.tbMenuBtnText}>+ TRACK</Text>
           </TouchableOpacity>
+
           {/* Studio */}
-          <TouchableOpacity
-            style={[styles.tbMenuBtn, { borderColor: '#4F46E5' }]}
-            onPress={() => navigation.navigate('Studio', { song })}
-          >
+          <TouchableOpacity style={[styles.tbMenuBtn, { borderColor: '#4F46E5', backgroundColor: '#4F46E510' }]} onPress={() => navigation.navigate('Studio', { song })}>
             <Text style={[styles.tbMenuBtnText, { color: '#A5B4FC' }]}>🎛 STUDIO</Text>
           </TouchableOpacity>
-          <View style={styles.tbDivider} />
+
           {/* Settings */}
-          <TouchableOpacity
-            style={[styles.tbMenuBtn, { borderColor: '#334155' }]}
-            onPress={() => setSettingsModalVisible(true)}
-          >
-            <Text style={[styles.tbMenuBtnText, { color: '#94A3B8' }]}>⚙ SETTINGS</Text>
+          <TouchableOpacity style={styles.tbMenuBtn} onPress={() => setSettingsModalVisible(true)}>
+            <Text style={styles.tbMenuBtnText}>⚙ SETTINGS</Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -3490,16 +3482,6 @@ export default function RehearsalScreen({ route, navigation }) {
             positionSec={position}
             totalDuration={effectiveDuration}
           />
-
-          <View style={styles.rehWaveFooter}>
-            <Text style={styles.rehWaveFooterTime}>{formatTime(position)}</Text>
-            <View style={styles.rehWaveFooterTrack}>
-              <View style={[styles.rehWaveFooterProgress, {
-                width: `${Math.min(100, effectiveDuration > 0 ? (position / effectiveDuration) * 100 : 0)}%`,
-              }]} />
-            </View>
-            <Text style={styles.rehWaveFooterTime}>{formatTime(effectiveDuration)}</Text>
-          </View>
         </View>
 
         {/* ── Stem Mixer ────────────────────────────────────────────────────── */}
@@ -3508,50 +3490,56 @@ export default function RehearsalScreen({ route, navigation }) {
           const mixPreset = SECTION_MIX_PRESETS[activeNorm] || null;
           return (
           <View style={styles.rehStemDeck}>
-            <View style={styles.rehStemDeckHeader}>
-              <Text style={styles.rehStemDeckTitle}>Stem Mix</Text>
-              <Text style={styles.rehStemDeckCount}>{filteredTracks.length} tracks</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rehStemDeckRow}
+            <TouchableOpacity 
+              activeOpacity={0.7}
+              onPress={() => setShowMixer(prev => !prev)}
+              style={styles.rehStemDeckHeader}
             >
-              {filteredTracks.map((track) => (
-                <DawChannelStrip
-                  key={track.id}
-                  track={track}
-                  isPlaying={isPlaying}
-                  aiLevel={mixPreset ? (mixPreset[inferTrackType(track)] ?? null) : null}
-                  onMute={() => {
-                    setTracks((prev) =>
-                      prev.map((t) =>
-                        t.id === track.id ? { ...t, mute: !t.mute } : t,
-                      ),
-                    );
-                  }}
-                  onSolo={() => {
-                    setTracks((prev) => {
-                      const anySolo = prev.some((t) => t.id !== track.id && t.solo);
-                      return prev.map((t) =>
-                        t.id === track.id
-                          ? { ...t, solo: !t.solo }
-                          : anySolo
-                          ? t
-                          : { ...t, solo: false },
+              <Text style={styles.rehStemDeckTitle}>Stem Mix {showMixer ? "▾" : "▸"}</Text>
+              <Text style={styles.rehStemDeckCount}>{filteredTracks.length} tracks</Text>
+            </TouchableOpacity>            
+            {showMixer && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rehStemDeckRow}
+              >
+                {filteredTracks.map((track) => (
+                  <DawChannelStrip
+                    key={track.id}
+                    track={track}
+                    isPlaying={isPlaying}
+                    aiLevel={mixPreset ? (mixPreset[inferTrackType(track)] ?? null) : null}
+                    onMute={() => {
+                      setTracks((prev) =>
+                        prev.map((t) =>
+                          t.id === track.id ? { ...t, mute: !t.mute } : t,
+                        ),
                       );
-                    });
-                  }}
-                  onVolumeChange={(v) => {
-                    setTracks((prev) =>
-                      prev.map((t) =>
-                        t.id === track.id ? { ...t, volume: v } : t,
-                      ),
-                    );
-                  }}
-                />
-              ))}
-            </ScrollView>
+                    }}
+                    onSolo={() => {
+                      setTracks((prev) => {
+                        const anySolo = prev.some((t) => t.id !== track.id && t.solo);
+                        return prev.map((t) =>
+                          t.id === track.id
+                            ? { ...t, solo: !t.solo }
+                            : anySolo
+                            ? t
+                            : { ...t, solo: false },
+                        );
+                      });
+                    }}
+                    onVolumeChange={(v) => {
+                      setTracks((prev) =>
+                        prev.map((t) =>
+                          t.id === track.id ? { ...t, volume: v } : t,
+                        ),
+                      );
+                    }}
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
           );
         })()}
@@ -3897,22 +3885,16 @@ const styles = StyleSheet.create({
 
   // ── Compact Transport Bar
   transportBar: {
-    marginBottom: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#1E293B",
-    backgroundColor: "#080E1A",
-    overflow: "hidden",
+    marginBottom: 16,
+    backgroundColor: "transparent",
   },
   transportBarTop: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "#0F172A",
+    paddingHorizontal: 6,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   backBtn: {
     paddingRight: 10,
@@ -4159,7 +4141,7 @@ const styles = StyleSheet.create({
     gap: 5,
     flexWrap: "wrap",
   },
-  tbRow3Scroll: { borderTopWidth: 1, borderTopColor: "#0F172A", flexShrink: 0 },
+  tbRow3Scroll: { flexShrink: 0 },
   tbRow3Content: {
     flexDirection: "row",
     alignItems: "center",
@@ -5533,14 +5515,11 @@ const styles = StyleSheet.create({
 
   // ── Rehearsal waveform pipeline ──────────────────────────────────────────
   rehWaveCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#2A3350',
-    backgroundColor: '#060D1E',
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    marginTop: 8,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginTop: 0,
   },
   rehCuePadRow: {
     flexDirection: 'row',
@@ -5613,6 +5592,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
   rehStemDeckTitle: {
     color: '#F8FAFC',

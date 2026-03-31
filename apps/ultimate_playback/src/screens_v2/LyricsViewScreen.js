@@ -13,9 +13,12 @@ import {
   ScrollView,
   StatusBar,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
+import ChartReferencePanel from '../components/ChartReferencePanel';
+import { CINESTAGE_URL } from '../../config/syncConfig';
 
 // ── Chord / Lyric Renderer ──────────────────────────────────────────────────
 // Matches common chord tokens: C, Cm, C7, Cmaj7, C/E, C#m, Db7sus4, etc.
@@ -98,9 +101,41 @@ export default function LyricsViewScreen({ navigation, route }) {
   const { song, userRole, capo = 0, concertKey, myPart } = route.params || {};
   const [autoScroll, setAutoScroll] = useState(false);
   const [fontSize, setFontSize] = useState(20);
+  const [bassChart, setBassChart] = useState(null);   // AI-generated bass chart text
+  const [bassLoading, setBassLoading] = useState(false);
   const scrollRef = useRef(null);
   const scrollPos = useRef(0);
   const intervalRef = useRef(null);
+
+  // CineStage: convert chord chart → bass fingering chart
+  async function generateBassChart() {
+    if (bassLoading) return;
+    setBassLoading(true);
+    try {
+      const res = await fetch(`${CINESTAGE_URL}/ai/instrument-charts/generate-text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          song_title: song.title || '',
+          key:        concertKey || song.key || '',
+          time_sig:   song.timeSig || song.timeSignature || '4/4',
+          chord_chart: song.lyrics || '',
+          lyrics:     song.lyrics || '',
+          instrument: 'Bass',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBassChart(data.chart_text || data.notes || data.content || '');
+      } else {
+        setBassChart('Could not generate bass chart — check CineStage connection.');
+      }
+    } catch {
+      setBassChart('CineStage unreachable. Check your connection.');
+    } finally {
+      setBassLoading(false);
+    }
+  }
 
   // Auto-scroll logic
   useEffect(() => {
@@ -131,6 +166,7 @@ export default function LyricsViewScreen({ navigation, route }) {
   const lyrics = song.lyrics || '';
   const isInstrumentChart = !ROLE_LABELS[userRole] && !!userRole;
   const isVocal = !isInstrumentChart;
+  const isBassRole = (userRole || '').toLowerCase() === 'bass';
   const roleLabel = ROLE_LABELS[userRole] || userRole || 'Vocalist';
   const rolePillIcon = isInstrumentChart ? '🎼' : '🎤';
 
@@ -231,6 +267,41 @@ export default function LyricsViewScreen({ navigation, route }) {
         scrollEventThrottle={16}
       >
         {renderChartLines(lyrics, fontSize, isVocal)}
+
+        {/* ── Bass: CineStage AI conversion button ── */}
+        {isBassRole && (
+          <View style={styles.bassAiSection}>
+            <TouchableOpacity
+              style={[styles.bassAiBtn, bassLoading && { opacity: 0.6 }]}
+              onPress={generateBassChart}
+              disabled={bassLoading}
+            >
+              {bassLoading
+                ? <ActivityIndicator size="small" color="#14B8A6" />
+                : <Text style={styles.bassAiBtnText}>
+                    {bassChart ? '↻ Regenerate Bass Chart' : '✦ Convert to Bass Chart'}
+                  </Text>
+              }
+            </TouchableOpacity>
+
+            {bassChart ? (
+              <View style={styles.bassAiResult}>
+                <Text style={styles.bassAiLabel}>🎸 CINESTAGE™ BASS CHART</Text>
+                <Text style={styles.bassAiText}>{bassChart}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {/* Charts & Sheets reference panel — guitar & bass roles only */}
+        {!isVocal && (
+          <ChartReferencePanel
+            role={userRole}
+            songKey={concertKey || song.key || ''}
+            timeSig={song.timeSig || song.timeSignature || '4/4'}
+            chordText={lyrics}
+          />
+        )}
         {/* Extra space at bottom so last lines can scroll to center */}
         <View style={{ height: SCREEN_HEIGHT * 0.5 }} />
       </ScrollView>
@@ -460,5 +531,48 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#7C3AED',
     fontWeight: '600',
+  },
+
+  // Bass AI conversion
+  bassAiSection: {
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  bassAiBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    backgroundColor: '#042F2E',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#14B8A6',
+    gap: 8,
+  },
+  bassAiBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#14B8A6',
+  },
+  bassAiResult: {
+    marginTop: 14,
+    padding: 14,
+    backgroundColor: '#022020',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#0F766E',
+  },
+  bassAiLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#14B8A6',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  bassAiText: {
+    fontSize: 14,
+    color: '#CCFBF1',
+    lineHeight: 24,
+    fontFamily: 'Courier',
   },
 });

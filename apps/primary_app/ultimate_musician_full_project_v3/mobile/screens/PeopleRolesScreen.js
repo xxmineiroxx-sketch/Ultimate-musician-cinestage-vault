@@ -185,36 +185,36 @@ function PersonCard({
       style={styles.card}
       onPress={() => onViewProfile(person)}
       onLongPress={handleLongPress}
-      activeOpacity={0.75}
+      activeOpacity={0.8}
       delayLongPress={600}
     >
-      <Avatar name={person.name} photo_url={person.photo_url} size={48} />
+      <Avatar name={person.name} photo_url={person.photo_url} size={56} />
       <View style={styles.cardInfo}>
         <View style={styles.cardNameRow}>
           <Text style={styles.personName}>{person.name}</Text>
+          {isFromPlayback && (
+            <View style={styles.upBadge}>
+              <Text style={styles.upBadgeText}>PLAYBACK</Text>
+            </View>
+          )}
           {orgRole && (
             <View
               style={[
                 styles.orgRoleBadge,
                 {
-                  backgroundColor:
-                    (ORG_ROLE_COLORS[orgRole] || "#6B7280") + "25",
+                  borderColor: ORG_ROLE_COLORS[orgRole] || "#6B7280",
+                  backgroundColor: (ORG_ROLE_COLORS[orgRole] || "#6B7280") + "22",
                 },
               ]}
             >
               <Text
                 style={[
                   styles.orgRoleBadgeText,
-                  { color: ORG_ROLE_COLORS[orgRole] || "#6B7280" },
+                  { color: ORG_ROLE_COLORS[orgRole] || "#94A3B8" },
                 ]}
               >
                 {ORG_ROLE_LABELS[orgRole] || orgRole}
               </Text>
-            </View>
-          )}
-          {isFromPlayback && (
-            <View style={styles.upBadge}>
-              <Text style={styles.upBadgeText}>Playback</Text>
             </View>
           )}
           {getEffectiveInviteStatus(person) === "registered" &&
@@ -229,24 +229,26 @@ function PersonCard({
           <Text style={styles.personMeta}>{person.email || person.phone}</Text>
         ) : null}
         <Text style={styles.rolesText}>{roleList}</Text>
+        
         {servedTotal > 0 && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 6 }}>
+          <View style={styles.statsRow}>
             <View style={styles.servedBadge}>
               <Text style={styles.servedBadgeText}>Served {servedTotal}×</Text>
             </View>
             {lastServed ? (
-              <Text style={{ color: '#475569', fontSize: 10 }}>Last: {lastServed}</Text>
+              <Text style={styles.lastServedText}>Last: {lastServed}</Text>
             ) : null}
           </View>
         )}
+        
         {showInvite && (
           <View style={styles.cardActions}>
             <TouchableOpacity
               style={styles.cardInviteBtn}
               onPress={() => onInvite(person)}
-              activeOpacity={0.85}
+              activeOpacity={0.8}
             >
-              <Text style={styles.cardInviteBtnText}>Invite</Text>
+              <Text style={styles.cardInviteBtnText}>Send Invite</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -946,124 +948,161 @@ export default function PeopleRolesScreen({ navigation }) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#020617" },
-  scroll: { padding: 16, paddingBottom: 40 },
+  scroll: { padding: 24, paddingBottom: 80, maxWidth: 800, alignSelf: 'center', width: '100%' },
 
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 16,
+    marginBottom: 24,
   },
-  heading: { color: "#F9FAFB", fontSize: 22, fontWeight: "900" },
-  caption: { color: "#6B7280", fontSize: 12, marginTop: 3 },
+  heading: { color: "#F8FAFC", fontSize: 32, fontWeight: "900", letterSpacing: -0.5 },
+  caption: { color: "#94A3B8", fontSize: 15, marginTop: 4, fontWeight: "500" },
 
   addMemberBtn: {
-    backgroundColor: "#1E3A5F",
-    borderRadius: 20,
+    backgroundColor: "#1E1B4B",
+    borderRadius: 99,
     borderWidth: 1,
-    borderColor: "#2563EB",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderColor: "#4F46E5",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    shadowColor: "#4F46E5",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  addMemberBtnText: { color: "#60A5FA", fontWeight: "800", fontSize: 13 },
+  addMemberBtnText: { color: "#A5B4FC", fontWeight: "800", fontSize: 14 },
 
   // Add form
   formCard: {
     backgroundColor: "#0B1120",
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#1F2937",
-    padding: 16,
-    marginBottom: 16,
+    borderColor: "#1E293B",
+    padding: 24,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 6,
   },
   formTitle: {
-    color: "#E5E7EB",
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 16,
+    color: "#F8FAFC",
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 20,
+    letterSpacing: -0.3,
   },
 
-  photoRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
-  photoHint: { color: "#6B7280", fontSize: 12 },
+  photoRow: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
+  photoHint: { color: "#64748B", fontSize: 13, fontWeight: "500", marginLeft: 16 },
   removePhotoLink: {
     color: "#EF4444",
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: "600",
+    fontSize: 13,
+    marginTop: 6,
+    fontWeight: "700",
+    marginLeft: 16,
   },
 
   fieldLabel: {
-    color: "#6B7280",
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 6,
-    marginTop: 12,
+    color: "#64748B",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 8,
+    marginTop: 16,
+    letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: "#020617",
-    borderRadius: 10,
+    backgroundColor: "#050608",
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#1F2937",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#E5E7EB",
-    fontSize: 14,
+    borderColor: "#1E293B",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "500"
   },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 4 },
-  roleHint: { color: "#4B5563", fontSize: 11, marginTop: 4, marginBottom: 4 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8, gap: 8 },
+  roleHint: { color: "#475569", fontSize: 12, marginTop: 8, marginBottom: 8, fontStyle: "italic" },
 
   saveBtn: {
-    backgroundColor: "#16A34A",
+    backgroundColor: "#064E3B",
     borderRadius: 12,
-    paddingVertical: 13,
+    paddingVertical: 16,
     alignItems: "center",
-    marginTop: 16,
+    marginTop: 24,
+    borderWidth: 1,
+    borderColor: "#10B981",
+    shadowColor: "#10B981",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
-  saveBtnText: { color: "#fff", fontWeight: "900", fontSize: 15 },
+  saveBtnText: { color: "#34D399", fontWeight: "900", fontSize: 16, letterSpacing: 0.5 },
 
   // Person card
   card: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#0B1120",
-    borderRadius: 14,
+    backgroundColor: "#111827",
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: "#1F2937",
-    padding: 14,
-    marginBottom: 10,
-    gap: 12,
+    padding: 20,
+    marginBottom: 12,
+    gap: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   cardInfo: { flex: 1 },
-  cardNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  personName: { color: "#F9FAFB", fontSize: 15, fontWeight: "800" },
-  personMeta: { color: "#6B7280", fontSize: 12, marginTop: 2 },
+  cardNameRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  personName: { color: "#F8FAFC", fontSize: 18, fontWeight: "900", letterSpacing: -0.3 },
+  personMeta: { color: "#94A3B8", fontSize: 13, marginTop: 4, fontWeight: "500" },
   rolesText: {
-    color: "#818CF8",
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: "600",
+    color: "#6366F1",
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: "700",
   },
+  
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
+  lastServedText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontWeight: "600"
+  },
+
   cardActions: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 12,
   },
   cardInviteBtn: {
-    backgroundColor: "#1E3A5F",
-    borderRadius: 999,
+    backgroundColor: "#1E1B4B",
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#2563EB",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderColor: "#4F46E5",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   cardInviteBtnText: {
-    color: "#93C5FD",
+    color: "#A5B4FC",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  editHint: { color: "#374151", fontSize: 20, fontWeight: "700" },
+  editHint: { color: "#334155", fontSize: 24, fontWeight: "300" },
 
   // Avatar
   avatar: {
@@ -1071,57 +1110,67 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#4F46E5",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
-  avatarText: { color: "#A5B4FC", fontWeight: "900" },
+  avatarText: { color: "#C7D2FE", fontWeight: "900" },
   avatarEditBadge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
-    backgroundColor: "#1E3A5F",
-    borderRadius: 8,
-    width: 20,
-    height: 20,
+    bottom: -2,
+    right: -2,
+    backgroundColor: "#1E1B4B",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    borderWidth: 1,
+    borderColor: "#4F46E5",
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarEditBadgeText: { fontSize: 10 },
+  avatarEditBadgeText: { fontSize: 12 },
 
   // Badges
   upBadge: {
-    backgroundColor: "#1E3A5F",
+    backgroundColor: "#0F172A",
     borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderWidth: 1,
-    borderColor: "#2563EB",
+    borderColor: "#3B82F6",
   },
   upBadgeText: {
     color: "#60A5FA",
-    fontSize: 9,
-    fontWeight: "800",
-    textTransform: "uppercase",
-  },
-  orgRoleBadge: {
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    marginLeft: 4,
-  },
-  orgRoleBadgeText: {
     fontSize: 10,
     fontWeight: "800",
     textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  orgRoleBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
+  orgRoleBadgeText: {
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 
   // Empty
-  emptyState: { paddingVertical: 48, alignItems: "center" },
-  emptyText: { color: "#4B5563", fontSize: 16, fontWeight: "700" },
-  emptySubText: { color: "#374151", fontSize: 13, marginTop: 6 },
+  emptyState: { paddingVertical: 80, alignItems: "center" },
+  emptyText: { color: "#64748B", fontSize: 18, fontWeight: "800" },
+  emptySubText: { color: "#475569", fontSize: 14, marginTop: 8 },
 
   // Edit modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor: "rgba(0,0,0,0.85)",
     justifyContent: "flex-end",
   },
   modalCard: {
@@ -1129,39 +1178,41 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
-    borderColor: "#1F2937",
-    padding: 20,
+    borderColor: "#1E293B",
+    padding: 32,
+    paddingBottom: 40,
     maxHeight: "92%",
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 24,
   },
-  modalTitle: { color: "#F9FAFB", fontSize: 18, fontWeight: "900" },
-  modalClose: { color: "#6B7280", fontWeight: "700", fontSize: 14 },
+  modalTitle: { color: "#F8FAFC", fontSize: 24, fontWeight: "900", letterSpacing: -0.5 },
+  modalClose: { color: "#94A3B8", fontWeight: "700", fontSize: 16 },
 
-  modalActions: { gap: 10, marginTop: 4 },
+  modalActions: { gap: 12, marginTop: 8 },
   inviteBtn: {
     borderWidth: 1,
-    borderColor: "#2563EB",
-    backgroundColor: "#1E3A5F",
+    borderColor: "#3B82F6",
+    backgroundColor: "#0F172A",
     borderRadius: 12,
-    paddingVertical: 13,
+    paddingVertical: 16,
     alignItems: "center",
   },
-  inviteBtnText: { color: "#93C5FD", fontWeight: "800" },
+  inviteBtnText: { color: "#60A5FA", fontWeight: "900", fontSize: 15 },
   deleteBtn: {
     borderWidth: 1,
-    borderColor: "#7F1D1D",
+    borderColor: "#EF444455",
+    backgroundColor: "#7F1D1D22",
     borderRadius: 12,
-    paddingVertical: 13,
+    paddingVertical: 16,
     alignItems: "center",
   },
-  deleteBtnText: { color: "#EF4444", fontWeight: "800" },
-  joinedBadge: { backgroundColor: "#16A34A", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 6 },
-  joinedBadgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  servedBadge: { backgroundColor: "#0F2A1A", borderRadius: 999, borderWidth: 1, borderColor: "#10B981", paddingHorizontal: 7, paddingVertical: 2 },
-  servedBadgeText: { color: "#34D399", fontSize: 10, fontWeight: "800" },
+  deleteBtnText: { color: "#F87171", fontWeight: "900", fontSize: 15 },
+  joinedBadge: { backgroundColor: "#064E3B", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: "#10B981" },
+  joinedBadgeText: { color: "#34D399", fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  servedBadge: { backgroundColor: "#1E1B4B", borderRadius: 8, borderWidth: 1, borderColor: "#4F46E5", paddingHorizontal: 8, paddingVertical: 3 },
+  servedBadgeText: { color: "#A5B4FC", fontSize: 11, fontWeight: "800" },
 });

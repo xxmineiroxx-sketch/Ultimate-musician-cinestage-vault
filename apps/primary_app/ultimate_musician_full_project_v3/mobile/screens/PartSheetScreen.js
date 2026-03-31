@@ -20,6 +20,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CINESTAGE_URL } from "./config";
 import { formatRoleLabel } from "../data/models";
+import ChartReferencePanel from "../components/ChartReferencePanel";
+import { connectSync, disconnectSync, subscribeSync } from "../services/syncClient";
+import { SYNC_URL } from "./config";
 
 // Map role key → instrument name accepted by /ai/instrument-charts/generate-text
 const ROLE_TO_INSTRUMENT = {
@@ -78,10 +81,49 @@ export default function PartSheetScreen({ navigation, route }) {
   const [activeRole, setActiveRole] = useState(role || "vocals");
   const [aiNotes, setAiNotes] = useState({}); // songId → notes string
   const [loadingAi, setLoadingAi] = useState({}); // songId → bool
+  const [bassChart, setBassChart] = useState({}); // songId → AI bass chart text
+  const [loadingBass, setLoadingBass] = useState({}); // songId → bool
   const flatRef = useRef(null);
+  const scrollRef = useRef(null);
+  const scrollHeightRef = useRef(1000);
+  const viewportHeightRef = useRef(600);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [syncPos, setSyncPos] = useState(0);
+
+  // Connect to Sync Client to get MD playback updates
+  React.useEffect(() => {
+    connectSync(SYNC_URL, { role: "FOLLOWER", roomId: "main-stage", deviceId: `partsheet-${Date.now()}` });
+    const unsub = subscribeSync((evt) => {
+      if (evt.type === "SYNC_MESSAGE" && evt.message.type === "MD_PLAYBACK") {
+        const { isPlaying: playing, position } = evt.message;
+        setIsPlaying(playing);
+        if (position !== undefined) setSyncPos(position);
+      }
+    });
+    return () => {
+      unsub();
+      disconnectSync();
+    };
+  }, []);
+
+  // Map MD position to scroll position automatically
+  React.useEffect(() => {
+    if (!song || !scrollRef.current) return;
+    // Estimate total song length via BPM + Key or default 300s
+    const bpm = Number(song.bpm || 120);
+    const estDuration = song.durationSec || 300; 
+    
+    if (syncPos > 0 && isPlaying) {
+      const pct = Math.min(1, Math.max(0, syncPos / estDuration));
+      const maxScroll = Math.max(0, scrollHeightRef.current - viewportHeightRef.current);
+      const targetY = pct * maxScroll;
+      scrollRef.current.scrollTo({ y: targetY, animated: true });
+    }
+  }, [syncPos, isPlaying, song]);
 
   const song = songs[songIndex] || null;
   const vocal = isVocalRole(activeRole);
+  const isBassRole = (activeRole || '').toLowerCase().replace(/\s+/g, '_') === 'bass';
 
   // Distinct roles from the team
   const allRoles = teamMembers.length
@@ -120,6 +162,40 @@ export default function PartSheetScreen({ navigation, route }) {
     }
     return s.chordChart || "";
   };
+
+  const handleBassChart = useCallback(async () => {
+    if (!song) return;
+    const sid = song.id || song.title;
+    setLoadingBass((p) => ({ ...p, [sid]: true }));
+    try {
+      const res = await fetch(
+        `${CINESTAGE_URL}/ai/instrument-charts/generate-text`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            song_title: song.title || song.name || "",
+            key:        song.key || song.originalKey || "",
+            time_sig:   song.timeSig || song.timeSignature || "4/4",
+            chord_chart: song.chordChart || song.chordSheet || "",
+            lyrics:     song.lyrics || "",
+            instrument: "Bass",
+          }),
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.chart_text || data.notes || data.content || "";
+        setBassChart((p) => ({ ...p, [sid]: text }));
+      } else {
+        Alert.alert("CineStage Error", `HTTP ${res.status}`);
+      }
+    } catch {
+      Alert.alert("CineStage", "Could not reach CineStage. Check your connection.");
+    } finally {
+      setLoadingBass((p) => ({ ...p, [sid]: false }));
+    }
+  }, [song]);
 
   const handleAiEnhance = useCallback(async () => {
     if (!song) return;
@@ -278,9 +354,12 @@ export default function PartSheetScreen({ navigation, route }) {
       {/* Song content */}
       {song ? (
         <ScrollView
+          ref={scrollRef}
           style={styles.contentScroll}
           contentContainerStyle={styles.contentInner}
           key={`${song.id}-${activeRole}`}
+          onContentSizeChange={(w, h) => scrollHeightRef.current = h}
+          onLayout={(e) => viewportHeightRef.current = e.nativeEvent.layout.height}
         >
           {/* Song title row */}
           <View style={styles.songTitleRow}>
@@ -346,6 +425,41 @@ export default function PartSheetScreen({ navigation, route }) {
               </View>
             );
           })()}
+
+          {/* Charts & Sheets reference panel */}
+          {!vocal && (
+            <ChartReferencePanel
+              role={activeRole}
+              songKey={song.key || song.originalKey || ''}
+              timeSig={song.timeSig || song.timeSignature || '4/4'}
+              chordText={song.chordChart || song.chordSheet || ''}
+            />
+          )}
+
+          {/* Bass: CineStage AI conversion */}
+          {isBassRole && (
+            <View style={styles.bassAiSection}>
+              <TouchableOpacity
+                style={[styles.bassAiBtn, loadingBass[song.id || song.title] && { opacity: 0.6 }]}
+                onPress={handleBassChart}
+                disabled={!!loadingBass[song.id || song.title]}
+              >
+                {loadingBass[song.id || song.title] ? (
+                  <ActivityIndicator size="small" color="#14B8A6" />
+                ) : (
+                  <Text style={styles.bassAiBtnText}>
+                    {bassChart[song.id || song.title] ? '↻ Regenerate Bass Chart' : '✦ Convert to Bass Chart'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+              {bassChart[song.id || song.title] ? (
+                <View style={styles.bassAiResult}>
+                  <Text style={styles.bassAiLabel}>🎸 CINESTAGE™ BASS CHART</Text>
+                  <Text style={styles.bassAiText}>{bassChart[song.id || song.title]}</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
 
           {/* AI Notes (if generated) */}
           {aiNotes[song.id || song.title] ? (
@@ -586,6 +700,34 @@ const styles = StyleSheet.create({
     borderColor: "#374151",
   },
   aiBtnText: { fontSize: 14, fontWeight: "600", color: "#818CF8" },
+
+  // Bass AI chart
+  bassAiSection: { marginTop: 20 },
+  bassAiBtn: {
+    paddingVertical: 12,
+    alignItems: "center",
+    backgroundColor: "#0B1F1F",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#14B8A6",
+  },
+  bassAiBtnText: { fontSize: 14, fontWeight: "600", color: "#14B8A6" },
+  bassAiResult: {
+    marginTop: 12,
+    padding: 14,
+    backgroundColor: "#061212",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#0D9488",
+  },
+  bassAiLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#14B8A6",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  bassAiText: { fontSize: 14, color: "#99F6E4", lineHeight: 22, fontFamily: "Courier" },
 
   bottomBar: {
     flexDirection: "row",

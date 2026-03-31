@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useState, useCallback } from "react";
 import {
   Alert,
+  AppState,
   View,
   Text,
   StyleSheet,
@@ -236,53 +237,40 @@ const MODES = [
   {
     route: "PlanningCenter",
     icon: "📅",
-    title: "Planning Service",
-    subtitle: "Build your setlist, assign roles, and prep the service.",
-    accent: "#4F46E5",
+    title: "Planning Center",
+    subtitle: "Build setlists & assign roles",
+    accent: "#6366F1", // Indigo
+    gradient: ["#312E81", "#4338CA"],
     border: "#1E1B4B",
   },
   {
     route: "Setlist",
-    icon: "🎵",
-    title: "Rehearsal",
-    subtitle: "Open your service setlist and rehearse each song.",
-    accent: "#047857",
-    border: "#064E3B",
+    icon: "🎧",
+    title: "Rehearsal Mode",
+    subtitle: "Stem mixing & personal practice",
+    accent: "#10B981", // Emerald
+    gradient: ["#064E3B", "#059669"],
+    border: "#022C22",
   },
   {
     route: "Live",
     icon: "🎭",
     title: "Live Performance",
-    subtitle: "Waveform pipeline · Cue markers · Section queue · Worship Free mode.",
-    accent: "#6366F1",
-    border: "#1E1B4B",
+    subtitle: "Waveforms, cues & live sync",
+    accent: "#F43F5E", // Rose
+    gradient: ["#881337", "#E11D48"],
+    border: "#4C0519",
     params: { song: {}, mixerState: [] },
   },
-  ...(Platform.OS === "web"
-    ? [
-        {
-          route: "Studio",
-          icon: "🎛️",
-          title: "Studio Workspace",
-          subtitle: "Multi-track recording, mixing, EQ, and waveform pipeline.",
-          accent: "#0E7490",
-          border: "#0C4A6E",
-        },
-      ]
-    : []),
-  ...(Platform.OS !== "web"
-    ? [
-        {
-          route: "MixerConsole",
-          icon: "🎚️",
-          title: "Mixer Console",
-          subtitle:
-            "X32-style channel strips, scene recall, and hardware OSC bridge.",
-          accent: "#0E7490",
-          border: "#0C4A6E",
-        },
-      ]
-    : []),
+  {
+    route: "MixerConsole",
+    icon: "🎚️",
+    title: "Digital Mixer",
+    subtitle: "X32/M32 stage control",
+    accent: "#0EA5E9", // Sky
+    gradient: ["#082F49", "#0284C7"],
+    border: "#042F2E",
+  },
 ];
 
 export default function HomeScreen({ navigation }) {
@@ -308,6 +296,14 @@ export default function HomeScreen({ navigation }) {
       /* silent */
     }
   }
+
+  // Re-sync whenever app returns to foreground (e.g. switched from Playback)
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') backgroundSync();
+    });
+    return () => sub.remove();
+  }, []);
 
   // Auto-sync on every app open — silent, no alerts
   useEffect(() => {
@@ -351,7 +347,7 @@ export default function HomeScreen({ navigation }) {
     <ScrollView
       contentContainerStyle={[
         styles.container,
-        { paddingTop: insets.top + 16, paddingHorizontal: padH },
+        { paddingTop: insets.top + 24, paddingHorizontal: padH },
       ]}
       refreshControl={
         <RefreshControl
@@ -367,13 +363,13 @@ export default function HomeScreen({ navigation }) {
           <Text
             style={[
               styles.badge,
-              R.isAnyTablet && { fontSize: R.font(13), letterSpacing: 1.5 },
+              R.isAnyTablet && { fontSize: R.font(14), letterSpacing: 2 },
             ]}
           >
-            CineStage™
+            CINESTAGE™ ECOSYSTEM
           </Text>
           <Text
-            style={[styles.title, R.isAnyTablet && { fontSize: R.font(36) }]}
+            style={[styles.title, R.isAnyTablet && { fontSize: R.font(38) }]}
           >
             Ultimate Musician
           </Text>
@@ -385,7 +381,7 @@ export default function HomeScreen({ navigation }) {
           <Text
             style={[
               styles.userPillText,
-              R.isAnyTablet && { fontSize: R.font(14) },
+              R.isAnyTablet && { fontSize: R.font(16) },
             ]}
           >
             {displayName}
@@ -393,74 +389,59 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Hero Action for iPad (Mocking next upcoming event) */}
+      {R.isAnyTablet && (
+        <TouchableOpacity 
+          style={styles.heroCard}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate("Setlist")}
+        >
+          <View style={styles.heroContent}>
+            <Text style={styles.heroSub}>UPCOMING EVENT</Text>
+            <Text style={styles.heroTitle}>Sunday Morning Worship</Text>
+            <Text style={styles.heroDesc}>5 Songs • Role: Keys / Synth</Text>
+          </View>
+          <View style={styles.heroBtn}>
+            <Text style={styles.heroBtnText}>Start Rehearsal ▶</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
       {/* Mode tiles */}
       <Text
         style={[
           styles.sectionLabel,
-          R.isAnyTablet && { fontSize: R.font(12), marginBottom: 16 },
+          R.isAnyTablet && { fontSize: R.font(14), marginBottom: 20 },
         ]}
       >
-        Choose a Mode
+        Performance Modes
       </Text>
 
-      {/* Two-column grid on tablets — vertical cards */}
-      <View style={R.modeCols === 2 ? styles.tileGrid : null}>
+      {/* Grid Layout for Tablet (2x2 or 4x1) */}
+      <View style={styles.tileGrid}>
         {MODES.map((m) => (
           <TouchableOpacity
             key={m.route}
             style={[
               styles.modeCard,
-              { borderColor: m.border },
-              R.modeCols === 2 && styles.modeCardHalf,
+              { borderColor: m.border, backgroundColor: m.gradient[0] + "99" },
               R.isAnyTablet && styles.modeCardTablet,
             ]}
-            activeOpacity={0.75}
+            activeOpacity={0.8}
             onPress={() => navigation.navigate(m.route, m.params || {})}
           >
-            {R.isAnyTablet ? (
-              /* Tablet: vertical layout — big icon top, text below, arrow bottom-right */
-              <>
-                <View
-                  style={[
-                    styles.modeIconWrapTablet,
-                    { backgroundColor: m.accent + "28" },
-                  ]}
-                >
-                  <Text style={styles.modeIconTablet}>{m.icon}</Text>
-                </View>
-                <Text style={styles.modeTitleTablet}>{m.title}</Text>
-                <Text style={styles.modeSubTablet}>{m.subtitle}</Text>
-                <View style={styles.modeArrowRowTablet}>
-                  <View
-                    style={[
-                      styles.modeArrowTablet,
-                      { backgroundColor: m.accent },
-                    ]}
-                  >
-                    <Text style={styles.modeArrowText}>›</Text>
-                  </View>
-                </View>
-              </>
-            ) : (
-              /* Phone: original horizontal layout */
-              <>
-                <View
-                  style={[
-                    styles.modeIconWrap,
-                    { backgroundColor: m.accent + "22" },
-                  ]}
-                >
-                  <Text style={styles.modeIcon}>{m.icon}</Text>
-                </View>
-                <View style={styles.modeText}>
-                  <Text style={styles.modeTitle}>{m.title}</Text>
-                  <Text style={styles.modeSub}>{m.subtitle}</Text>
-                </View>
-                <View style={[styles.modeArrow, { backgroundColor: m.accent }]}>
-                  <Text style={styles.modeArrowText}>›</Text>
-                </View>
-              </>
-            )}
+            <View style={styles.modeCardInner}>
+              <View
+                style={[
+                  styles.modeIconWrapTablet,
+                  { backgroundColor: m.accent + "33", borderColor: m.accent + "80" },
+                ]}
+              >
+                <Text style={styles.modeIconTablet}>{m.icon}</Text>
+              </View>
+              <Text style={styles.modeTitleTablet}>{m.title}</Text>
+              <Text style={styles.modeSubTablet}>{m.subtitle}</Text>
+            </View>
           </TouchableOpacity>
         ))}
       </View>
@@ -470,13 +451,13 @@ export default function HomeScreen({ navigation }) {
         style={[
           styles.sectionLabel,
           R.isAnyTablet && {
-            fontSize: R.font(12),
-            marginTop: 8,
-            marginBottom: 14,
+            fontSize: R.font(14),
+            marginTop: 16,
+            marginBottom: 20,
           },
         ]}
       >
-        Quick Access
+        System Configuration
       </Text>
       <View style={[styles.quickRow, R.isAnyTablet && styles.quickRowTablet]}>
         {[
@@ -622,7 +603,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   syncBtnText: { color: "#E2E8F0", fontSize: 13, fontWeight: "800" },
-  tileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  tileGrid: { 
+    flexDirection: "row", 
+    flexWrap: "wrap", 
+    gap: 16,
+    justifyContent: "space-between" 
+  },
   modeCardHalf: { flex: 1, minWidth: "45%" },
   modeCard: {
     flexDirection: "row",
@@ -634,16 +620,23 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 14,
   },
-  // Tablet: vertical card, no row direction
   modeCardTablet: {
+    width: "48%", // 2 columns with gap
     flexDirection: "column",
     alignItems: "flex-start",
     padding: 24,
     marginBottom: 0,
-    borderRadius: 22,
-    minHeight: 200,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    minHeight: 220,
     gap: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
+    elevation: 8,
   },
+  modeCardInner: { flex: 1, width: "100%" },
   modeIconWrap: {
     width: 52,
     height: 52,
@@ -652,15 +645,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modeIconWrapTablet: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
   },
   modeIcon: { fontSize: 26 },
-  modeIconTablet: { fontSize: 38 },
+  modeIconTablet: { fontSize: 32 },
   modeText: { flex: 1 },
   modeTitle: {
     color: "#F9FAFB",
@@ -669,10 +667,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   modeTitleTablet: {
-    color: "#F9FAFB",
-    fontSize: 20,
+    color: "#FFFFFF",
+    fontSize: 22,
     fontWeight: "900",
-    marginBottom: 6,
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
   modeSub: {
     color: "#6B7280",
@@ -680,33 +679,55 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   modeSubTablet: {
-    color: "#6B7280",
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 18,
+    color: "#94A3B8",
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "500",
   },
-  modeArrowRowTablet: { flexDirection: "row", justifyContent: "flex-end" },
-  modeArrow: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    justifyContent: "center",
+  // Hero Section Styles
+  heroCard: {
+    backgroundColor: "#111827",
+    borderRadius: 24,
+    padding: 32,
+    marginBottom: 32,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    shadowColor: "#4F46E5",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
   },
-  modeArrowTablet: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
+  heroContent: { flex: 1 },
+  heroSub: {
+    color: "#10B981",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 2,
+    marginBottom: 8,
   },
-  modeArrowText: {
-    color: "#fff",
-    fontSize: 22,
+  heroTitle: {
+    color: "#F8FAFC",
+    fontSize: 32,
     fontWeight: "900",
-    lineHeight: 28,
-    marginTop: -2,
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
+  heroDesc: { color: "#94A3B8", fontSize: 16, fontWeight: "500" },
+  heroBtn: {
+    backgroundColor: "#4F46E5",
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 16,
+    shadowColor: "#6366F1",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+  },
+  heroBtnText: { color: "#FFF", fontSize: 16, fontWeight: "800" },
   quickRow: {
     flexDirection: "row",
     flexWrap: "wrap",

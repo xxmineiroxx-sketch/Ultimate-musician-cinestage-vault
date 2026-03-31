@@ -1165,6 +1165,11 @@ export default function SetlistScreen({ navigation, route }) {
               );
             }
             if (status === 'none') {
+              const canRequestStems =
+                profile?.grantedRole === 'md' ||
+                profile?.grantedRole === 'admin' ||
+                (selectedAssignment?.role || '').toLowerCase().replace(/\s+/g, '_') === 'worship_leader';
+              if (!canRequestStems) return null;
               return (
                 <TouchableOpacity
                   style={styles.stemsSubmitBtn}
