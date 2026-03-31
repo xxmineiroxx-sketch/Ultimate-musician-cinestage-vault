@@ -12,7 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 
 export default function LoginScreen({ navigation }) {
-  const { login, continueAsGuest, pendingVerification, ready, userId } =
+  const { login, pendingVerification, ready, userId } =
     useAuth();
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -48,11 +48,6 @@ export default function LoginScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGuest = async () => {
-    await continueAsGuest();
-    navigation.reset({ index: 0, routes: [{ name: "Home" }] });
   };
 
   return (
@@ -98,13 +93,10 @@ export default function LoginScreen({ navigation }) {
       >
         <Text style={styles.linkText}>Create an account</Text>
       </TouchableOpacity>
-
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleGuest}>
-        <Text style={styles.secondaryButtonText}>Continue as guest</Text>
-      </TouchableOpacity>
     </View>
   );
 }
+
 
 const makeStyles = (colors) =>
   StyleSheet.create({

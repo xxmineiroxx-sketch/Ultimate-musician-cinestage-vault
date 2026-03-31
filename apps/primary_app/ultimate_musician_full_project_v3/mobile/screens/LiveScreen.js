@@ -699,36 +699,59 @@ function lapFmt(sec) {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
-function LiveActionsPanel({ sectionList, activeSectionLabel }) {
+function LiveActionsPanel({ sectionList, activeSectionLabel, position, duration }) {
   if (!Array.isArray(sectionList) || sectionList.length === 0) return null;
   const activeIdx = sectionList.findIndex(s => s.label === activeSectionLabel);
   const current = sectionList[Math.max(0, activeIdx)];
-  const upcoming = sectionList.slice(Math.max(0, activeIdx) + 1, Math.max(0, activeIdx) + 4);
+  const upcoming = sectionList.slice(Math.max(0, activeIdx) + 1, Math.max(0, activeIdx) + 5);
   if (!current) return null;
+
+  // Calculate current section progress
+  const secStart = current.timeSec || 0;
+  const secEnd = current.endTimeSec || duration || (secStart + 10);
+  const secLen = Math.max(0.1, secEnd - secStart);
+  const secElapsed = Math.max(0, position - secStart);
+  const secProgress = Math.min(1, secElapsed / secLen);
 
   return (
     <View style={lapSt.panel}>
-      <Text style={lapSt.title}>UP NEXT</Text>
+      <View style={lapSt.header}>
+        <Text style={lapSt.title}>UP NEXT</Text>
+        <Text style={lapSt.meta}>{upcoming.length} sections remaining</Text>
+      </View>
+      
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={lapSt.row}>
         {(() => {
           const c = lapSecColor(current.label);
           return (
-            <View style={[lapSt.card, lapSt.cardNow, { borderColor: c + '80' }]}>
-              <View style={[lapSt.dot, { backgroundColor: c }]} />
-              <Text style={[lapSt.name, { color: c }]} numberOfLines={1}>{current.label}</Text>
-              <Text style={lapSt.time}>{lapFmt(current.timeSec)}</Text>
-              <View style={[lapSt.badge, { backgroundColor: c + '22' }]}>
-                <Text style={[lapSt.badgeTxt, { color: c }]}>NOW</Text>
+            <View style={[lapSt.card, lapSt.cardNow, { borderColor: c + '60' }]}>
+              <View style={lapSt.cardHeader}>
+                <View style={[lapSt.dot, { backgroundColor: c }]} />
+                <Text style={[lapSt.name, { color: c }]} numberOfLines={1}>{current.label}</Text>
+              </View>
+              
+              <View style={lapSt.progressTrack}>
+                <View style={[lapSt.progressFill, { width: `${secProgress * 100}%`, backgroundColor: c }]} />
+              </View>
+              
+              <View style={lapSt.cardFooter}>
+                <Text style={lapSt.time}>{lapFmt(position)}</Text>
+                <View style={[lapSt.badge, { backgroundColor: c + '22' }]}>
+                  <Text style={[lapSt.badgeTxt, { color: c }]}>NOW</Text>
+                </View>
               </View>
             </View>
           );
         })()}
+        
         {upcoming.map((sec, i) => {
           const c = lapSecColor(sec.label);
           return (
             <View key={`${sec.label}${i}`} style={[lapSt.card, { borderColor: '#1E293B' }]}>
-              <View style={[lapSt.dot, { backgroundColor: c + '70' }]} />
-              <Text style={[lapSt.name, { color: '#64748B' }]} numberOfLines={1}>{sec.label}</Text>
+              <View style={lapSt.cardHeader}>
+                <View style={[lapSt.dot, { backgroundColor: c + '70' }]} />
+                <Text style={[lapSt.name, { color: '#94A3B8' }]} numberOfLines={1}>{sec.label}</Text>
+              </View>
               <Text style={lapSt.time}>{lapFmt(sec.timeSec)}</Text>
             </View>
           );
@@ -738,20 +761,75 @@ function LiveActionsPanel({ sectionList, activeSectionLabel }) {
   );
 }
 
+
 const lapSt = StyleSheet.create({
-  panel: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 4 },
-  title: { color: '#1E3A5F', fontSize: 7, fontWeight: '800', letterSpacing: 1.5, marginBottom: 5 },
-  row: { flexDirection: 'row', gap: 8 },
-  card: {
-    backgroundColor: '#060D1E', borderRadius: 8, borderWidth: 1,
-    paddingHorizontal: 12, paddingVertical: 7, minWidth: 88, alignItems: 'center', gap: 3,
+  panel: { 
+    paddingHorizontal: 16, 
+    paddingTop: 12, 
+    paddingBottom: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#1A2540',
+    marginTop: 8,
   },
-  cardNow: { borderWidth: 1.5 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  name: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  time: { fontSize: 9, color: '#334155', fontWeight: '600' },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  title: { 
+    color: '#4F46E5', 
+    fontSize: 8, 
+    fontWeight: '900', 
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  meta: {
+    color: '#475569',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  row: { flexDirection: 'row', gap: 10 },
+  card: {
+    backgroundColor: '#0F172A', 
+    borderRadius: 12, 
+    borderWidth: 1,
+    paddingHorizontal: 14, 
+    paddingVertical: 10, 
+    minWidth: 110, 
+    gap: 6,
+  },
+  cardNow: { 
+    backgroundColor: '#0B1120',
+    borderWidth: 1.5,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  name: { fontSize: 13, fontWeight: '800' },
+  time: { fontSize: 10, color: '#64748B', fontWeight: '700', fontVariant: ['tabular-nums'] },
+  progressTrack: {
+    height: 3,
+    backgroundColor: '#1E293B',
+    borderRadius: 2,
+    width: '100%',
+    overflow: 'hidden',
+    marginVertical: 2,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
   badge: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
-  badgeTxt: { fontSize: 7, fontWeight: '800', letterSpacing: 1 },
+  badgeTxt: { fontSize: 8, fontWeight: '900', letterSpacing: 1 },
 });
 
 // ── Component ───────────────────────────────────────────────────────────────────
@@ -2042,19 +2120,54 @@ export default function LiveScreen({ route, navigation }) {
                 onMarkerDrag={handleWaveMarkerDrag}
                 height={waveformH}
                 userRole={userRole}
+                worshipFreeActive={isWorshipFree}
               />
 
               <View style={s.waveFooter}>
-                <Text style={s.waveFooterTime}>{fmtSec(position)}</Text>
-                <View style={s.waveFooterTrack}>
-                  <View style={[s.waveFooterProgress, { width: `${Math.min(100, playheadPct * 100)}%` }]} />
+                <View style={s.waveFooterTimeContainer}>
+                  <Text style={s.waveFooterTimeElapsed}>{fmtSec(position)}</Text>
+                  <Text style={s.waveFooterTimeTotal}> / {fmtSec(effectiveDuration)}</Text>
                 </View>
-                <Text style={s.waveFooterTime}>{fmtSec(effectiveDuration)}</Text>
+                
+                <View style={s.waveFooterTrack}>
+                  {/* Background track */}
+                  <View style={s.waveFooterTrackBg} />
+                  
+                  {/* Section boundaries in the mini progress bar */}
+                  {sectionJumpList.map((sec, idx) => {
+                    const left = `${(sec.timeSec / effectiveDuration) * 100}%`;
+                    return (
+                      <View 
+                        key={`mini-sec-${idx}`}
+                        style={[s.waveFooterSectionDivider, { left }]} 
+                      />
+                    );
+                  })}
+
+                  {/* Progress fill */}
+                  <View style={[s.waveFooterProgress, { width: `${Math.min(100, playheadPct * 100)}%` }]}>
+                    <View style={s.waveFooterProgressGlow} />
+                  </View>
+                  
+                  {/* Mini Playhead thumb */}
+                  <View style={[s.waveFooterThumb, { left: `${Math.min(100, playheadPct * 100)}%` }]} />
+                </View>
+                
+                <View style={s.waveFooterStatus}>
+                  {isPlaying && (
+                    <View style={s.waveFooterLiveIndicator}>
+                      <View style={s.waveFooterLiveDot} />
+                      <Text style={s.waveFooterLiveText}>LIVE</Text>
+                    </View>
+                  )}
+                </View>
               </View>
 
               <LiveActionsPanel
                 sectionList={sectionJumpList}
                 activeSectionLabel={activeSectionLabel}
+                position={position}
+                duration={effectiveDuration}
               />
             </View>
 
@@ -2737,28 +2850,102 @@ const s = StyleSheet.create({
   waveFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 6,
-    paddingTop: 8,
+    gap: 12,
+    paddingHorizontal: 8,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
-  waveFooterTime: {
+  waveFooterTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    minWidth: 80,
+  },
+  waveFooterTimeElapsed: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  waveFooterTimeTotal: {
     color: '#64748B',
     fontSize: 11,
-    fontWeight: '800',
-    minWidth: 40,
-    textAlign: 'center',
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   waveFooterTrack: {
     flex: 1,
-    height: 6,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: '#16233B',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#1E293B',
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  waveFooterTrackBg: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#0F172A',
+    borderRadius: 4,
+    opacity: 0.5,
+  },
+  waveFooterSectionDivider: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    zIndex: 2,
   },
   waveFooterProgress: {
     height: '100%',
-    borderRadius: 999,
+    borderRadius: 4,
     backgroundColor: '#38BDF8',
+    zIndex: 3,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  waveFooterProgressGlow: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#7DD3FC',
+    opacity: 0.3,
+  },
+  waveFooterThumb: {
+    position: 'absolute',
+    top: -4,
+    bottom: -4,
+    width: 3,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 2,
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  waveFooterStatus: {
+    minWidth: 50,
+    alignItems: 'flex-end',
+  },
+  waveFooterLiveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  waveFooterLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#EF4444',
+  },
+  waveFooterLiveText: {
+    color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   stemDeckSection: {
     marginTop: 16,

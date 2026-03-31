@@ -58,7 +58,6 @@ export default function LandingScreen({ navigation }) {
   const {
     login,
     loginWithApple,
-    continueAsGuest,
     pendingVerification,
     userId,
     ready,
@@ -145,16 +144,6 @@ export default function LandingScreen({ navigation }) {
       } else {
         Alert.alert("Sign In Failed", String(e.message || e));
       }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGuest = async () => {
-    setLoading(true);
-    try {
-      await continueAsGuest();
-      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
     } finally {
       setLoading(false);
     }
@@ -252,19 +241,6 @@ export default function LandingScreen({ navigation }) {
             onPress={handleAppleSignIn}
           />
         )}
-
-        {/* Guest */}
-        <TouchableOpacity
-          style={[styles.guestBtn, loading && { opacity: 0.6 }]}
-          onPress={handleGuest}
-          disabled={loading}
-        >
-          <Text style={styles.guestBtnText}>Continue as Guest</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.footerNote}>
-          Guest mode saves locally on this device only.
-        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -375,22 +351,5 @@ const styles = StyleSheet.create({
     height: 50,
     marginBottom: 12,
   },
-  guestBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    paddingVertical: 14,
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  guestBtnText: {
-    color: "#9CA3AF",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  footerNote: {
-    color: "#374151",
-    fontSize: 12,
-    textAlign: "center",
-  },
 });
+

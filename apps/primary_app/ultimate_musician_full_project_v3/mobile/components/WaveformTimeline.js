@@ -1,5 +1,5 @@
-import React, { useRef, useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useRef, useMemo, useEffect, useState } from "react";
+import { StyleSheet, Text, TouchableOpacity, View, Animated, Easing } from "react-native";
 
 import {
   normalizePeaksRange,
@@ -171,11 +171,38 @@ export default function WaveformTimeline({
   // Role-aware coloring
   userRole = null,
   roleCue = null,
+  // Worship Free / Flow state
+  worshipFreeActive = false,
 }) {
   const total = lengthSeconds || 1;
   const widthRef = useRef(300);
   const containerRef = useRef(null);
   const containerPageXRef = useRef(0);
+
+  // ── Worship Free Pulse ──────────────────────────────────────────────────
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (worshipFreeActive) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: false,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 0,
+            duration: 1500,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: false,
+          }),
+        ]),
+      ).start();
+    } else {
+      pulseAnim.setValue(0);
+    }
+  }, [worshipFreeActive, pulseAnim]);
 
   // ── Per-marker tap counting (1=jump, 2=loop, 3=worship loop) ─────────────
   const tapCountRef = useRef({}); // { [label]: count }
@@ -364,6 +391,22 @@ export default function WaveformTimeline({
         }).filter(Boolean)
       : [];
 
+  // ── Time Ticks (DAW-style) ─────────────────────────────────────────────
+  const timeTicks = useMemo(() => {
+    if (total <= 0) return [];
+    // Show a tick every 30s or 60s depending on length
+    const interval = total > 600 ? 60 : 30;
+    const count = Math.floor(total / interval);
+    return Array.from({ length: count }, (_, i) => {
+      const s = (i + 1) * interval;
+      return {
+        key: `t-${s}`,
+        label: fmtSec(s),
+        pct: (s / total) * 100,
+      };
+    });
+  }, [total]);
+
   function updateContainerMetrics() {
     if (!containerRef.current?.measureInWindow) return;
     containerRef.current.measureInWindow((x) => {
@@ -506,6 +549,7 @@ export default function WaveformTimeline({
             const segKey = normLabel(seg?.label || "");
             const sectionColor =
               seg?.color || SECTION_COLORS[segKey] || "#6366F1";
+            const highColor = HIGH_FREQ_COLORS[segKey] || sectionColor;
             const baseColor = sectionColor;
 
             // Active section focus: playing section = bright, others = very dim
@@ -529,6 +573,13 @@ export default function WaveformTimeline({
                 key={`b${idx}`}
                 style={[styles.peakBar, { height: `${Math.max(5, v * 100)}%` }]}
               >
+                {/* Simulated high-frequency zone (lighter top) */}
+                <View
+                  style={[
+                    styles.barHighFreq,
+                    { backgroundColor: highColor, opacity: barAlpha },
+                  ]}
+                />
                 <View
                   style={[
                     styles.barSolid,
@@ -539,6 +590,17 @@ export default function WaveformTimeline({
             );
           })}
         </View>
+
+        {/* Time Scale — subtle markers across bottom */}
+        {timeTicks.map((tick) => (
+          <View
+            key={tick.key}
+            pointerEvents="none"
+            style={[styles.timeTickLine, { left: `${tick.pct}%` }]}
+          >
+            <Text style={styles.timeTickLabel}>{tick.label}</Text>
+          </View>
+        ))}
 
         {/* Played region shading */}
         {clampedPlayhead != null && clampedPlayhead > 0 && (
@@ -982,6 +1044,26 @@ export default function WaveformTimeline({
             <View style={styles.playheadDiamond} />
           </View>
         )}
+
+        {/* Worship Free / Flow State Overlay */}
+        {worshipFreeActive && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.worshipFreeOverlay,
+              {
+                opacity: pulseAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.05, 0.25],
+                }),
+              },
+            ]}
+          >
+            <View style={styles.worshipFreeBadge}>
+              <Text style={styles.worshipFreeBadgeText}>🙏 AMBIENT FLOW ACTIVE</Text>
+            </View>
+          </Animated.View>
+        )}
       </TouchableOpacity>
 
       {/* ── Automation lane ─────────────────────────────────────────────── */}
@@ -1076,6 +1158,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     flexDirection: "column",
   },
+  barHighFreq: { height: "35%", opacity: 0.8 },
   barSolid: { flex: 1 },
 
   // Section boundary line — full height through entire waveform
@@ -1084,6 +1167,24 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
+  },
+
+  // Time Scale Ticks
+  timeTickLine: {
+    position: "absolute",
+    bottom: 0,
+    height: 14,
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  timeTickLabel: {
+    position: "absolute",
+    bottom: 16,
+    left: 4,
+    fontSize: 9,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.4)",
+    fontVariant: ["tabular-nums"],
   },
 
   // Played region
@@ -1255,6 +1356,29 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: "#FFFFFF",
     transform: [{ rotate: "45deg" }],
+  },
+
+  // Worship Free / Flow State
+  worshipFreeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#8B5CF6",
+    zIndex: 99,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  worshipFreeBadge: {
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(139, 92, 246, 0.5)",
+  },
+  worshipFreeBadgeText: {
+    color: "#DDD6FE",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.5,
   },
 
   // Time corner

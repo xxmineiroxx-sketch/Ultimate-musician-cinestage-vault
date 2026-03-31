@@ -287,22 +287,6 @@ export function AuthProvider({ children }) {
     await persistPendingVerification(null);
   };
 
-  const continueAsGuest = async () => {
-    const guestId = `guest-${Date.now()}`;
-    setToken(null);
-    setUserId(guestId);
-    setUserRole(null);
-    setUserName(null);
-    await AsyncStorage.multiRemove([
-      STORAGE_KEYS.token,
-      STORAGE_KEYS.userEmail,
-      STORAGE_KEYS.userName,
-      STORAGE_KEYS.userRole,
-      STORAGE_KEYS.pendingVerification,
-    ]);
-    await AsyncStorage.setItem(STORAGE_KEYS.userId, guestId);
-  };
-
   const logout = async () => {
     setToken(null);
     setUserId(null);
@@ -339,12 +323,12 @@ export function AuthProvider({ children }) {
     verifyCode,
     resendVerification,
     clearPendingVerification,
-    continueAsGuest,
     logout,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+
 
 export function useAuth() {
   return useContext(AuthContext);
