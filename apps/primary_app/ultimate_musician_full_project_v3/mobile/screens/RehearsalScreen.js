@@ -3474,6 +3474,7 @@ export default function RehearsalScreen({ route, navigation }) {
             onMarkerTap={handleWaveformMarkerTap}
             onMarkerDrag={(marker, nextSec, isFinal) => handleMarkerDrag(marker, nextSec, isFinal)}
             height={waveH}
+            worshipFreeActive={worshipLoopActive}
           />
 
           <EnergyCurveStrip
