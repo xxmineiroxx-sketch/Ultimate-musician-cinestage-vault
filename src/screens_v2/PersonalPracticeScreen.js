@@ -19,6 +19,7 @@ import {
   RefreshControl,
   Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import audioEngine from '../services/audioEngine';
 import { getUserProfile, getAssignments } from '../services/storage';
 import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
@@ -478,6 +479,7 @@ function findSongIndex(list = [], song) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function PersonalPracticeScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
   // Read params fresh on every render (focus re-navigation updates them)
   const paramsRef = useRef(route?.params || {});
   paramsRef.current = route?.params || {};
@@ -993,7 +995,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       {/* ── Top bar ── */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: Math.max(insets.top + 8, 20) }]}>
         <View>
           <Text style={styles.screenTitle}>My Practice</Text>
           {role ? (
