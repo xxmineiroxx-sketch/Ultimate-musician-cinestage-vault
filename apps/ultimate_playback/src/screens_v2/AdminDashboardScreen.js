@@ -8,7 +8,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
-  Keyboard, Platform,
+  Keyboard, Platform, Share,
 } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
@@ -140,6 +140,12 @@ const VOCAL_TEAM_ROLES = new Set([
   'worship_leader', 'lead_vocal', 'lead_vocals', 'vocals', 'vocalist',
   'bgv', 'background_vocal', 'soprano', 'alto', 'tenor', 'baritone',
 ]);
+
+const AVATAR_COLORS = [
+  '#4F46E5', '#7C3AED', '#2563EB', '#0891B2',
+  '#059669', '#D97706', '#DC2626', '#DB2777',
+  '#9333EA', '#0284C7', '#16A34A', '#CA8A04',
+];
 
 const TEAM_STATUS_ORDER = {
   pending: 0,
@@ -972,7 +978,28 @@ export default function AdminDashboardScreen({ navigation, route }) {
       await publishUpdate(plans, services, [...people, newPerson]);
       setNewMemberName(''); setNewMemberEmail(''); setNewMemberRole('');
       setShowAddMember(false); loadAll();
-      Alert.alert('Added ✓', `${newPerson.name} added to team.`);
+
+      // Send invitation email automatically for new members with an email
+      const email = newPerson.email.trim().toLowerCase();
+      if (email) {
+        try {
+          await fetchJson(`${SYNC_URL}/sync/invite/create`, {
+            method: 'POST',
+            headers: syncHeaders(),
+            body: JSON.stringify({
+              name: newPerson.name,
+              email,
+              sendEmail: true,
+              invitedByName: profile?.name || 'Admin',
+            }),
+          });
+          Alert.alert('Added & Invited ✓', `${newPerson.name} was added and an invitation email was sent to ${email}.`);
+        } catch (_) {
+          Alert.alert('Added ✓', `${newPerson.name} added to team.\n⚠️ Invitation email could not be sent — check Resend config.`);
+        }
+      } else {
+        Alert.alert('Added ✓', `${newPerson.name} added.\nNo email provided — invitation not sent.`);
+      }
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingMember(false); }
   };
@@ -1040,10 +1067,50 @@ export default function AdminDashboardScreen({ navigation, route }) {
     Alert.alert('Remove member?', `Remove ${person.name} from the team?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
+        const pid   = (person.id    || '').toLowerCase();
+        const pem   = (person.email || '').toLowerCase();
+        const pname = (person.name  || '').toLowerCase().trim();
+
+        // Remove from people[]
+        const updatedPeople = people.filter(p => {
+          if (pid && (p.id || '').toLowerCase() === pid) return false;
+          if (pem && (p.email || '').toLowerCase() === pem) return false;
+          if (pname && (p.name || '').toLowerCase().trim() === pname) return false;
+          return true;
+        });
+
+        // Also strip from every plan.team so the orphan logic can't re-add them
+        const updatedPlans = {};
+        Object.entries(plans).forEach(([svcId, plan]) => {
+          updatedPlans[svcId] = {
+            ...plan,
+            team: (plan.team || []).filter(tm => {
+              if (pid && (tm.personId || '').toLowerCase() === pid) return false;
+              if (pem && (tm.email   || '').toLowerCase() === pem) return false;
+              if (pname && (tm.name  || '').toLowerCase().trim() === pname) return false;
+              return true;
+            }),
+          };
+        });
+
+        // Optimistic UI update
+        setPeople(updatedPeople);
+        setPlans(updatedPlans);
+
         try {
-          await publishUpdate(plans, services, people.filter(p => p.id !== person.id));
-          loadAll();
-        } catch (e) { Alert.alert('Error', e.message); }
+          const payload = { services, people: updatedPeople, plans: updatedPlans, songs: [] };
+          await fetchJson(`${SYNC_URL}/sync/library-push`, {
+            method: 'POST',
+            headers: syncHeaders(),
+            body: JSON.stringify(payload),
+          });
+          AsyncStorage.setItem(ADMIN_LIBRARY_CACHE_KEY, JSON.stringify(payload)).catch(() => {});
+        } catch (e) {
+          // Revert on failure
+          setPeople(people);
+          setPlans(plans);
+          Alert.alert('Error', e.message);
+        }
       }},
     ]);
   };
@@ -1574,271 +1641,340 @@ export default function AdminDashboardScreen({ navigation, route }) {
   };
 
   // ── Render: Services (flat list) ────────────────────────────────────────
-  const renderServices = () => (
-    <ScrollView
-      contentContainerStyle={s.tabContent}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
-    >
-      {/* ── Pending Approvals from Leaders ── */}
-      {canApprove && pendingServices.length > 0 && (
-        <View style={s.pendingApprovalSection}>
-          <Text style={s.pendingApprovalHeader}>⏳ Pending Approval ({pendingServices.length})</Text>
-          {pendingServices.map(svc => (
-            <View key={svc.id} style={s.pendingApprovalCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.pendingApprovalTitle}>{svc.name}</Text>
-                <Text style={s.pendingApprovalMeta}>{formatServiceDate(svc.date)}{svc.time ? ` · ${svc.time}` : ''} · by {svc.created_by_name || 'Leader'}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={s.approveBtn} onPress={() => handleApprovePendingService(svc)} disabled={approvingSvcId === svc.id}>
-                  {approvingSvcId === svc.id ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={s.approveBtnTxt}>✓ Approve</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={s.rejectBtn} onPress={() => handleRejectPendingService(svc)}>
-                  <Text style={s.rejectBtnTxt}>✕</Text>
-                </TouchableOpacity>
-              </View>
+  const renderServices = () => {
+    const today = todayDateStr();
+    const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
+    const upcomingSvcs = allSvcs.filter((svc) => !isPastService(svc, today));
+    const archivedSvcs = [...allSvcs]
+      .filter((svc) => isPastService(svc, today))
+      .sort((a, b) => serviceSortKey(b).localeCompare(serviceSortKey(a)));
+
+    const STATUS_CONFIG = {
+      accepted:  { color: '#10B981', bg: '#052E16', label: 'Accepted',  dot: '●' },
+      declined:  { color: '#EF4444', bg: '#1F0A0A', label: 'Declined',  dot: '●' },
+      pending:   { color: '#F59E0B', bg: '#1C1207', label: 'Pending',   dot: '●' },
+    };
+
+    const getMemberStatus = (svcId, tm) =>
+      assignmentResponses[`${svcId}_${tm.personId}`]?.status ||
+      assignmentResponses[`${svcId}_${(tm.email||'').toLowerCase()}`]?.status ||
+      tm.status || 'pending';
+
+    const renderSvcCard = (svc) => {
+      const plan  = plans[svc.id] || {};
+      const team  = plan.team || [];
+      const songs = plan.songs || [];
+      const cfg   = STATUS_CONFIG;
+
+      return (
+        <View key={svc.id} style={s.svc2Card}>
+          {/* ── Header ── */}
+          <View style={s.svc2Header}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.svc2Name}>{svc.name || svc.title || 'Service'}</Text>
+              <Text style={s.svc2Date}>
+                {formatServiceDate(svc.date)}{svc.time ? `  ·  ${svc.time}` : ''}
+                {songs.length > 0 ? `  ·  ${songs.length} songs` : ''}
+              </Text>
             </View>
-          ))}
-        </View>
-      )}
-
-      {(() => {
-        const today = todayDateStr();
-        const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
-        const upcomingSvcs = allSvcs.filter((svc) => !isPastService(svc, today));
-        const archivedSvcs = [...allSvcs]
-          .filter((svc) => isPastService(svc, today))
-          .sort((a, b) => serviceSortKey(b).localeCompare(serviceSortKey(a)));
-
-        if (allSvcs.length === 0 && !loading) return (
-          <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No services yet. Create one from the Calendar tab.</Text></View>
-        );
-
-        const renderServiceCard = (svc) => {
-          const plan = plans[svc.id] || {};
-          const isOpen = expandedSvc?.id === svc.id;
-          const card = (
-            <View style={[s.svcCard, isOpen && s.svcCardOpen]}>
-              <TouchableOpacity
-                style={s.svcCardTap}
-                onPress={() => setExpandedSvc(isOpen ? null : svc)}
-                onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
-                delayLongPress={450}
-              >
-                <View style={s.svcHeaderRow}>
-                  <Text style={s.svcName}>{svc.name || svc.title}</Text>
-                  <Text style={s.svcDate}>{formatServiceDate(svc.date)}</Text>
-                </View>
-                <Text style={s.svcMeta}>
-                  🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
-                </Text>
-                {svc.created_by_name ? (
-                  <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
-                ) : null}
-                {canDeleteServices ? (
-                  <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
-                ) : null}
-                <Text style={s.svcExpandHint}>{isOpen ? '▲ Close Plan' : '▼ Manage Plan'}</Text>
-              </TouchableOpacity>
-              {isOpen && renderPlanSection(svc)}
-            </View>
-          );
-          if (!canDeleteServices) {
-            return <View key={svc.id}>{card}</View>;
-          }
-          return (
-            <Swipeable
-              key={svc.id}
-              ref={(ref) => {
-                if (ref) serviceSwipeRefs.current[svc.id] = ref;
-                else delete serviceSwipeRefs.current[svc.id];
-              }}
-              overshootRight={false}
-              friction={2}
-              rightThreshold={40}
-              onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
-              onSwipeableClose={() => {
-                if (openServiceSwipeIdRef.current === svc.id) {
-                  openServiceSwipeIdRef.current = null;
-                }
-              }}
-              renderRightActions={() => (
-                <TouchableOpacity
-                  style={[
-                    s.serviceDeleteAction,
-                    deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
-                  ]}
-                  activeOpacity={0.9}
-                  disabled={deletingServiceId === svc.id}
-                  onPress={() => confirmDeleteService(svc)}
-                >
-                  {deletingServiceId === svc.id ? (
-                    <ActivityIndicator color="#FFF" size="small" />
-                  ) : (
-                    <>
-                      <Text style={s.serviceDeleteActionIcon}>🗑</Text>
-                      <Text style={s.serviceDeleteActionText}>Delete</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
+            <TouchableOpacity
+              style={[s.svc2PublishBtn, publishingId === svc.id && { opacity: 0.5 }]}
+              onPress={() => handlePublish(svc)}
+              disabled={publishingId === svc.id}
             >
-              {card}
-            </Swipeable>
-          );
-        };
+              {publishingId === svc.id
+                ? <ActivityIndicator size="small" color="#A78BFA" />
+                : <Text style={s.svc2PublishTxt}>📤 Publish</Text>}
+            </TouchableOpacity>
+          </View>
 
-        return (
+          {/* ── Team roster ── */}
+          {team.length > 0 ? (
+            <View style={s.svc2Roster}>
+              {team.map((tm, idx) => {
+                const st   = getMemberStatus(svc.id, tm);
+                const conf = cfg[st] || cfg.pending;
+                return (
+                  <View key={tm.id || idx} style={[s.svc2Row, idx < team.length - 1 && s.svc2RowBorder]}>
+                    {/* Avatar */}
+                    <View style={[s.svc2Avatar, { backgroundColor: AVATAR_COLORS[(tm.name||'?').charCodeAt(0) % AVATAR_COLORS.length] }]}>
+                      <Text style={s.svc2AvatarTxt}>{(tm.name || '?')[0].toUpperCase()}</Text>
+                    </View>
+                    {/* Name + role */}
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.svc2MemberName}>{tm.name || 'Unknown'}</Text>
+                      <View style={s.svc2RoleChip}>
+                        <Text style={s.svc2RoleChipTxt}>{tm.role || '—'}</Text>
+                      </View>
+                    </View>
+                    {/* Status badge */}
+                    <View style={[s.svc2StatusBadge, { backgroundColor: conf.bg, borderColor: conf.color }]}>
+                      <Text style={[s.svc2StatusDot, { color: conf.color }]}>{conf.dot}</Text>
+                      <Text style={[s.svc2StatusTxt, { color: conf.color }]}>{conf.label}</Text>
+                    </View>
+                    {/* Remove from service */}
+                    {canManageMembers && (
+                      <TouchableOpacity
+                        style={s.svc2RemoveBtn}
+                        onPress={() => Alert.alert(
+                          'Remove from Service',
+                          `Remove ${tm.name || 'this member'} from this service?`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Remove', style: 'destructive', onPress: () => handleRemoveFromService(svc.id, tm.personId, tm.role) },
+                          ]
+                        )}
+                      >
+                        <Text style={s.svc2RemoveBtnTxt}>✕</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={s.svc2EmptyTeam}>
+              <Text style={s.svc2EmptyTeamTxt}>No team assigned — use Calendar to build the plan.</Text>
+            </View>
+          )}
+        </View>
+      );
+    };
+
+    return (
+      <ScrollView
+        contentContainerStyle={s.tabContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
+      >
+        {/* Pending approvals */}
+        {canApprove && pendingServices.length > 0 && (
+          <View style={s.pendingApprovalSection}>
+            <Text style={s.pendingApprovalHeader}>⏳ Pending Approval ({pendingServices.length})</Text>
+            {pendingServices.map(svc => (
+              <View key={svc.id} style={s.pendingApprovalCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.pendingApprovalTitle}>{svc.name}</Text>
+                  <Text style={s.pendingApprovalMeta}>{formatServiceDate(svc.date)}{svc.time ? ` · ${svc.time}` : ''} · by {svc.created_by_name || 'Leader'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity style={s.approveBtn} onPress={() => handleApprovePendingService(svc)} disabled={approvingSvcId === svc.id}>
+                    {approvingSvcId === svc.id ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={s.approveBtnTxt}>✓ Approve</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.rejectBtn} onPress={() => handleRejectPendingService(svc)}>
+                    <Text style={s.rejectBtnTxt}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {allSvcs.length === 0 && !loading ? (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>🗓</Text>
+            <Text style={s.emptyText}>No services yet.{'\n'}Create one from the Calendar tab.</Text>
+          </View>
+        ) : (
           <View>
-            {upcomingSvcs.length === 0 ? (
+            {upcomingSvcs.length === 0 && (
               <View style={s.empty}>
                 <Text style={s.emptyIcon}>🗓</Text>
-                <Text style={s.emptyText}>No active or upcoming services.</Text>
+                <Text style={s.emptyText}>No upcoming services.</Text>
               </View>
-            ) : (
-              upcomingSvcs.map(renderServiceCard)
             )}
+            {upcomingSvcs.map(renderSvcCard)}
 
             {archivedSvcs.length > 0 && (
               <View style={s.archiveSection}>
                 <TouchableOpacity
                   style={[s.archiveCard, showArchivedServices && s.archiveCardOpen]}
-                  onPress={() => setShowArchivedServices((value) => !value)}
+                  onPress={() => setShowArchivedServices(v => !v)}
                   activeOpacity={0.85}
                 >
                   <View style={s.archiveHeaderRow}>
-                    <Text style={s.archiveTitle}>🗂 Archived Services</Text>
-                    <View style={s.archiveCountBadge}>
-                      <Text style={s.archiveCountText}>{archivedSvcs.length}</Text>
-                    </View>
+                    <Text style={s.archiveTitle}>🗂 Past Services</Text>
+                    <View style={s.archiveCountBadge}><Text style={s.archiveCountText}>{archivedSvcs.length}</Text></View>
                   </View>
-                  <Text style={s.archiveSubtitle}>
-                    {showArchivedServices ? 'Hide previous services' : 'Show previous services'}
-                  </Text>
-                  <Text style={s.svcExpandHint}>
-                    {showArchivedServices ? '▲ Collapse Archive' : '▼ Open Archive'}
-                  </Text>
+                  <Text style={s.svcExpandHint}>{showArchivedServices ? '▲ Hide' : '▼ Show'}</Text>
                 </TouchableOpacity>
-                {showArchivedServices && archivedSvcs.map(renderServiceCard)}
+                {showArchivedServices && archivedSvcs.map(renderSvcCard)}
               </View>
             )}
           </View>
-        );
-      })()}
-    </ScrollView>
-  );
+        )}
+      </ScrollView>
+    );
+  };
 
   // ── Render: Team ────────────────────────────────────────────────────────
-  const renderTeam = () => (
-    <ScrollView
-      contentContainerStyle={s.tabContent}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
-    >
-      {/* Permission notice */}
-      {isManager && !isAdmin && (
-        <View style={s.mdNoticeBanner}>
-          <Text style={s.mdNoticeText}>
-            🛡 Worship Leader/Manager: You can add, edit & assign members, and grant Leader roles. Only Admins can delete members or grant Admin/Manager roles.
-          </Text>
-        </View>
-      )}
-      {!isAdmin && !isManager && (
-        <View style={s.mdNoticeBanner}>
-          <Text style={s.mdNoticeText}>
-            🔐 You can add and assign members. Contact an Admin to manage roles.
-          </Text>
-        </View>
-      )}
+  const renderTeam = () => {
+    const MEMBER_STATUS = {
+      registered: { label: 'Registered',     color: '#60A5FA', bg: '#1D3557', dot: '●' },
+      accepted:   { label: 'Invite Accepted', color: '#A78BFA', bg: '#2D1B6B', dot: '●' },
+      pending:    { label: 'Pending Invite',  color: '#FBBF24', bg: '#3D2A00', dot: '○' },
+      plan_only:  { label: 'Not Registered',  color: '#F97316', bg: '#3B1306', dot: '○' },
+    };
 
-      {/* Add Member — available to MD + Admin */}
-      <TouchableOpacity style={s.addBtn} onPress={() => setShowAddMember(v => !v)}>
-        <Text style={s.addBtnText}>{showAddMember ? '✕ Cancel' : '+ Add Member'}</Text>
-      </TouchableOpacity>
+    const getMemberStatusKey = (person) => {
+      if (person.inviteStatus === 'plan_only') return 'plan_only';
+      const eff = getEffectiveInviteTeamStatus(person);
+      if (eff === 'registered') return 'registered';
+      if (eff === 'accepted') return 'accepted';
+      return 'pending';
+    };
 
-      {showAddMember && (
-        <View style={s.formCard}>
-          <Text style={s.formLabel}>Name *</Text>
-          <TextInput style={s.formInput} value={newMemberName} onChangeText={setNewMemberName}
-            placeholder="Full name" placeholderTextColor="#6B7280" />
-          <Text style={s.formLabel}>Email</Text>
-          <TextInput style={s.formInput} value={newMemberEmail} onChangeText={setNewMemberEmail}
-            placeholder="email@example.com" placeholderTextColor="#6B7280"
-            keyboardType="email-address" autoCapitalize="none" />
-          <Text style={s.formLabel}>Role (optional)</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={s.chipRow}>
-              {ROLE_CHIPS.map(r => (
-                <TouchableOpacity key={r}
-                  style={[s.roleChipBtn, newMemberRole === r && s.roleChipBtnActive]}
-                  onPress={() => setNewMemberRole(newMemberRole === r ? '' : r)}>
-                  <Text style={[s.roleChipBtnText, newMemberRole === r && s.roleChipBtnTextActive]}>{r}</Text>
-                </TouchableOpacity>
-              ))}
+    const avatarColor = (name) =>
+      AVATAR_COLORS[(name || '?').charCodeAt(0) % AVATAR_COLORS.length];
+
+    const joinLink = `${SYNC_URL}/join`;
+
+    return (
+      <ScrollView
+        contentContainerStyle={s.tabContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
+      >
+        {/* ── Register / Invite Card ── */}
+        <View style={s.teamRegisterCard}>
+          <View style={s.teamRegisterTop}>
+            <View style={s.teamRegisterIconWrap}>
+              <Text style={s.teamRegisterIcon}>🔗</Text>
             </View>
-          </ScrollView>
-          <TouchableOpacity style={[s.saveBtn, savingMember && s.saveBtnDisabled]}
-            onPress={handleAddMember} disabled={savingMember}>
-            {savingMember ? <ActivityIndicator size="small" color="#FFF" />
-              : <Text style={s.saveBtnText}>Add to Team</Text>}
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {people.length === 0 && !loading && (
-        <View style={s.empty}>
-          <Text style={s.emptyIcon}>👥</Text>
-          <Text style={s.emptyText}>No team members yet{'\n'}Publish from Musician or add one above</Text>
-        </View>
-      )}
-
-      {people.map(person => (
-        <View key={person.id || person.name} style={s.personCard}>
-          <View style={s.personAvatar}>
-            <Text style={s.personAvatarText}>{(person.name || '?')[0]}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.teamRegisterTitle}>Invite Members</Text>
+              <Text style={s.teamRegisterSub}>Share the link or add manually below</Text>
+            </View>
           </View>
-          <View style={s.personBody}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={s.personName}>{person.name}</Text>
-              {person.inviteStatus === 'plan_only' && (
-                <View style={{ backgroundColor: '#78350F', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
-                  <Text style={{ fontSize: 9, color: '#FCD34D', fontWeight: '700' }}>NOT REGISTERED</Text>
+          <View style={s.teamRegisterLinkRow}>
+            <Text style={s.teamRegisterLink} numberOfLines={1}>{joinLink}</Text>
+            <TouchableOpacity
+              style={s.teamRegisterShareBtn}
+              onPress={() => Share.share({ message: `Join our team on Ultimate Playback: ${joinLink}` })}
+            >
+              <Text style={s.teamRegisterShareTxt}>Share</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Add Member form ── */}
+        <TouchableOpacity style={s.teamAddBtn} onPress={() => setShowAddMember(v => !v)}>
+          <Text style={s.teamAddBtnTxt}>{showAddMember ? '✕  Cancel' : '+  Add Member'}</Text>
+        </TouchableOpacity>
+
+        {showAddMember && (
+          <View style={s.formCard}>
+            <Text style={s.formLabel}>Name *</Text>
+            <TextInput style={s.formInput} value={newMemberName} onChangeText={setNewMemberName}
+              placeholder="Full name" placeholderTextColor="#6B7280" />
+            <Text style={s.formLabel}>Email</Text>
+            <TextInput style={s.formInput} value={newMemberEmail} onChangeText={setNewMemberEmail}
+              placeholder="email@example.com" placeholderTextColor="#6B7280"
+              keyboardType="email-address" autoCapitalize="none" />
+            <Text style={s.formLabel}>Role (optional)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={s.chipRow}>
+                {ROLE_CHIPS.map(r => (
+                  <TouchableOpacity key={r}
+                    style={[s.roleChipBtn, newMemberRole === r && s.roleChipBtnActive]}
+                    onPress={() => setNewMemberRole(newMemberRole === r ? '' : r)}>
+                    <Text style={[s.roleChipBtnText, newMemberRole === r && s.roleChipBtnTextActive]}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={[s.saveBtn, savingMember && s.saveBtnDisabled]}
+              onPress={handleAddMember} disabled={savingMember}>
+              {savingMember ? <ActivityIndicator size="small" color="#FFF" />
+                : <Text style={s.saveBtnText}>Add & Send Invite</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Permission notice ── */}
+        {isManager && !isAdmin && (
+          <View style={s.mdNoticeBanner}>
+            <Text style={s.mdNoticeText}>
+              🛡 Manager: You can add, edit & assign members. Only Admins can delete or grant Admin roles.
+            </Text>
+          </View>
+        )}
+
+        {/* ── Member count ── */}
+        {people.length > 0 && (
+          <Text style={s.teamCountLabel}>{people.length} MEMBER{people.length !== 1 ? 'S' : ''}</Text>
+        )}
+
+        {people.length === 0 && !loading && (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>👥</Text>
+            <Text style={s.emptyText}>No team members yet{'\n'}Add one above or publish from Musician</Text>
+          </View>
+        )}
+
+        {/* ── Member Cards ── */}
+        {people.map((person, idx) => {
+          const stKey  = getMemberStatusKey(person);
+          const stConf = MEMBER_STATUS[stKey] || MEMBER_STATUS.pending;
+          const initials = (person.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+          const roles = person.roles || (person.role ? [person.role] : []);
+
+          return (
+            <View key={person.id || person.name || idx} style={s.tmCard}>
+              {/* Avatar + info */}
+              <View style={s.tmCardBody}>
+                <View style={[s.tmAvatar, { backgroundColor: avatarColor(person.name) }]}>
+                  <Text style={s.tmAvatarTxt}>{initials || '?'}</Text>
                 </View>
-              )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={s.tmNameRow}>
+                    <Text style={s.tmName} numberOfLines={1}>{person.name || 'Unknown'}</Text>
+                    <View style={[s.tmStatusBadge, { backgroundColor: stConf.bg, borderColor: stConf.color }]}>
+                      <Text style={[s.tmStatusDot, { color: stConf.color }]}>{stConf.dot}</Text>
+                      <Text style={[s.tmStatusTxt, { color: stConf.color }]}>{stConf.label}</Text>
+                    </View>
+                  </View>
+                  {person.email ? (
+                    <Text style={s.tmEmail} numberOfLines={1}>{person.email}</Text>
+                  ) : null}
+                  {roles.length > 0 && (
+                    <View style={s.tmRoleRow}>
+                      {roles.slice(0, 3).map((r, i) => (
+                        <View key={i} style={s.tmRoleChip}>
+                          <Text style={s.tmRoleChipTxt}>{r}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+              {/* Actions */}
+              <View style={s.tmActions}>
+                {canManageMembers && (
+                  <TouchableOpacity style={s.tmActionBtn} onPress={() => {
+                    setShowEditMember(person);
+                    setEditName(person.name || '');
+                    setEditEmail(person.email || '');
+                    setEditRole((person.roles || [])[0] || '');
+                  }}>
+                    <Text style={s.tmActionBtnTxt}>✏️</Text>
+                  </TouchableOpacity>
+                )}
+                {canManageMembers && (
+                  <TouchableOpacity style={[s.tmActionBtn, s.tmActionBtnPurple]} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
+                    <Text style={s.tmActionBtnTxt}>🔑</Text>
+                  </TouchableOpacity>
+                )}
+                {isAdmin && (
+                  <TouchableOpacity style={[s.tmActionBtn, s.tmActionBtnRed]} onPress={() => handleDeleteMember(person)}>
+                    <Text style={[s.tmActionBtnTxt, { color: '#F87171' }]}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-            <Text style={s.personEmail}>{person.email || 'no email'}</Text>
-            {(person.roles || []).length > 0 && (
-              <Text style={s.personRoles}>{person.roles.join(' · ')}</Text>
-            )}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-            {/* Edit — Admin + Manager */}
-            {canManageMembers && (
-              <TouchableOpacity style={s.editMemberBtn} onPress={() => {
-                setShowEditMember(person);
-                setEditName(person.name || '');
-                setEditEmail(person.email || '');
-                setEditRole((person.roles || [])[0] || '');
-              }}>
-                <Text style={s.editMemberBtnTxt}>✏️</Text>
-              </TouchableOpacity>
-            )}
-            {/* Grant Role — Admin + Manager (manager limited to leader) */}
-            {canManageMembers && (
-              <TouchableOpacity style={s.grantRoleBtn} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
-                <Text style={s.grantRoleBtnTxt}>🔑</Text>
-              </TouchableOpacity>
-            )}
-            {/* Delete — Admin only */}
-            {isAdmin && (
-              <TouchableOpacity style={s.deleteMemberBtn} onPress={() => handleDeleteMember(person)}>
-                <Text style={s.deleteMemberBtnText}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      ))}
-    </ScrollView>
-  );
+          );
+        })}
+      </ScrollView>
+    );
+  };
 
   // ── Render: Library ─────────────────────────────────────────────────────
   const renderLibrary = () => (
@@ -3107,4 +3243,60 @@ const s = StyleSheet.create({
   addSongTabTextActive:{ color: '#818CF8', fontWeight: '700' },
   multilineInput:      { minHeight: 220, textAlignVertical: 'top' },
   monoInput:           { fontFamily: 'Courier', fontSize: 13, lineHeight: 20 },
+
+  // Services v2 (roster view)
+  svc2Card:          { backgroundColor: '#0B1120', borderRadius: 14, borderWidth: 1, borderColor: '#1E2A40', marginBottom: 14, overflow: 'hidden' },
+  svc2Header:        { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1E2A40' },
+  svc2Name:          { fontSize: 15, fontWeight: '800', color: '#F0F4FF' },
+  svc2Date:          { fontSize: 11, color: '#6B7280', marginTop: 3 },
+  svc2PublishBtn:    { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#4C1D9530', borderRadius: 10, borderWidth: 1, borderColor: '#7C3AED', marginLeft: 10 },
+  svc2PublishTxt:    { fontSize: 12, fontWeight: '700', color: '#A78BFA' },
+  svc2Roster:        { paddingHorizontal: 14, paddingBottom: 8, paddingTop: 4 },
+  svc2Row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  svc2RowBorder:     { borderBottomWidth: 1, borderBottomColor: '#111827' },
+  svc2Avatar:        { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  svc2AvatarTxt:     { fontSize: 13, fontWeight: '800', color: '#FFF' },
+  svc2MemberName:    { fontSize: 13, fontWeight: '700', color: '#E5E7EB' },
+  svc2RoleChip:      { alignSelf: 'flex-start', backgroundColor: '#1F2937', borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2, marginTop: 3 },
+  svc2RoleChipTxt:   { fontSize: 10, color: '#9CA3AF', fontWeight: '600' },
+  svc2StatusBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
+  svc2StatusDot:     { fontSize: 8, lineHeight: 10 },
+  svc2StatusTxt:     { fontSize: 11, fontWeight: '700' },
+  svc2EmptyTeam:     { padding: 14, paddingTop: 10 },
+  svc2EmptyTeamTxt:  { fontSize: 12, color: '#4B5563', fontStyle: 'italic' },
+  svc2RemoveBtn:     { width: 28, height: 28, borderRadius: 7, backgroundColor: '#1F0A0A', borderWidth: 1, borderColor: '#EF444440', alignItems: 'center', justifyContent: 'center', marginLeft: 6 },
+  svc2RemoveBtnTxt:  { fontSize: 13, fontWeight: '700', color: '#F87171' },
+
+  // Team v2 (professional member cards)
+  teamRegisterCard:      { backgroundColor: '#0D1426', borderRadius: 14, borderWidth: 1, borderColor: '#2D3B58', marginBottom: 14, padding: 14 },
+  teamRegisterTop:       { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  teamRegisterIconWrap:  { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1E1B4B', borderWidth: 1, borderColor: '#4F46E5', alignItems: 'center', justifyContent: 'center' },
+  teamRegisterIcon:      { fontSize: 18 },
+  teamRegisterTitle:     { fontSize: 15, fontWeight: '800', color: '#E0E7FF' },
+  teamRegisterSub:       { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  teamRegisterLinkRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#060C1A', borderRadius: 10, borderWidth: 1, borderColor: '#1E2A40', paddingHorizontal: 12, paddingVertical: 8 },
+  teamRegisterLink:      { flex: 1, fontSize: 12, color: '#818CF8', fontFamily: 'Courier' },
+  teamRegisterShareBtn:  { backgroundColor: '#4F46E5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  teamRegisterShareTxt:  { fontSize: 12, fontWeight: '700', color: '#FFF' },
+  teamAddBtn:            { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#111827', borderWidth: 1, borderColor: '#374151', borderRadius: 12, paddingVertical: 13, marginBottom: 10 },
+  teamAddBtnTxt:         { fontSize: 14, fontWeight: '700', color: '#818CF8' },
+  teamCountLabel:        { fontSize: 10, fontWeight: '800', color: '#4B5563', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 10, marginTop: 4 },
+  tmCard:                { backgroundColor: '#0B1120', borderRadius: 14, borderWidth: 1, borderColor: '#1E2A40', marginBottom: 10, padding: 14 },
+  tmCardBody:            { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  tmAvatar:              { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  tmAvatarTxt:           { fontSize: 17, fontWeight: '800', color: '#FFF' },
+  tmNameRow:             { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 3 },
+  tmName:                { fontSize: 15, fontWeight: '700', color: '#F0F4FF', flexShrink: 1 },
+  tmEmail:               { fontSize: 12, color: '#6B7280', marginBottom: 4 },
+  tmRoleRow:             { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 4 },
+  tmRoleChip:            { backgroundColor: '#1A1F36', borderRadius: 6, borderWidth: 1, borderColor: '#2D3B58', paddingHorizontal: 8, paddingVertical: 3 },
+  tmRoleChipTxt:         { fontSize: 11, fontWeight: '600', color: '#818CF8' },
+  tmStatusBadge:         { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
+  tmStatusDot:           { fontSize: 8, lineHeight: 10 },
+  tmStatusTxt:           { fontSize: 10, fontWeight: '700' },
+  tmActions:             { flexDirection: 'row', gap: 8, justifyContent: 'flex-end' },
+  tmActionBtn:           { width: 36, height: 36, borderRadius: 9, backgroundColor: '#111827', borderWidth: 1, borderColor: '#374151', alignItems: 'center', justifyContent: 'center' },
+  tmActionBtnPurple:     { backgroundColor: '#2D1B6B20', borderColor: '#7C3AED' },
+  tmActionBtnRed:        { backgroundColor: '#1F0A0A', borderColor: '#EF444440' },
+  tmActionBtnTxt:        { fontSize: 15 },
 });
