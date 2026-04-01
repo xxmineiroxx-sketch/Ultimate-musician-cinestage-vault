@@ -1,8 +1,7 @@
 /**
  * Setlist Runner - Ultimate Playback
- * Live performance view: songs advance one after the other.
- * Vocalists see lyrics + cues. Instrumentalists see chord charts + notes.
- * Multiple roles supported via tabs.
+ * Rehearsal view: vocalists see lyrics, instrumentalists see chord charts.
+ * Simple transport controls for live/rehearsal use.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -19,42 +18,43 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
+import { SYNC_URL } from '../../config/syncConfig';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const SWIPE_THRESHOLD = 60;
-const SCROLL_INTERVAL = 70;    // ms per tick
-const AUTO_ADVANCE_DELAY = 3000; // ms after reaching song end
+const SWIPE_THRESHOLD   = 60;
+const SCROLL_INTERVAL   = 70;     // ms per tick
+const AUTO_ADVANCE_DELAY = 3000;  // ms after reaching song end
 
-// ── Instrument mapping ───────────────────────────────────────────────────────
+// ── Instrument mapping ────────────────────────────────────────────────────────
 
 const ROLE_TO_INSTRUMENT = {
-  keyboard: 'Keys',
-  piano: 'Keys',
-  synth: 'Synth/Pad',
+  keyboard:        'Keys',
+  piano:           'Keys',
+  synth:           'Synth/Pad',
   electric_guitar: 'Electric Guitar',
-  rhythm_guitar: 'Electric Guitar',
+  rhythm_guitar:   'Electric Guitar',
   acoustic_guitar: 'Acoustic Guitar',
-  bass: 'Bass',
-  drums: 'Drums',
-  percussion: 'Drums',
-  strings: 'Keys',
-  brass: 'Keys',
-  worship_leader: 'Acoustic Guitar',
-  music_director: 'Keys',
+  bass:            'Bass',
+  drums:           'Drums',
+  percussion:      'Drums',
+  strings:         'Keys',
+  brass:           'Keys',
+  worship_leader:  'Acoustic Guitar',
+  music_director:  'Keys',
 };
 
 const CHART_INSTRUMENTS = ['Keys', 'Acoustic Guitar', 'Electric Guitar', 'Bass', 'Synth/Pad', 'Drums'];
 
 const INSTRUMENT_ICON = {
-  'Keys': '🎹',
+  'Keys':            '🎹',
   'Acoustic Guitar': '🎸',
   'Electric Guitar': '🎸',
-  'Bass': '🎸',
-  'Synth/Pad': '🎛',
-  'Drums': '🥁',
+  'Bass':            '🎸',
+  'Synth/Pad':       '🎛',
+  'Drums':           '🥁',
 };
 
-// ── Role helpers ────────────────────────────────────────────────────────────
+// ── Role helpers ──────────────────────────────────────────────────────────────
 
 function detectRoleType(role) {
   if (!role) return 'general';
@@ -62,7 +62,7 @@ function detectRoleType(role) {
   if (
     r.includes('vocal') || r.includes('leader') || r.includes('worship') ||
     r.includes('director') || r.includes('singer') || r.includes('bgv') ||
-    r.includes('bgv') || r.includes('lead')
+    r.includes('lead')
   ) return 'vocal';
   if (
     r.includes('key') || r.includes('piano') || r.includes('synth') ||
@@ -87,15 +87,37 @@ function getRoleIcon(role) {
   return '🎵';
 }
 
-// ── Main Component ───────────────────────────────────────────────────────────
+// ── Section detection (for MIDI section-jump) ─────────────────────────────────
+// Matches common section headers in lyrics / chord charts
+const SECTION_RE = /^(verse|chorus|bridge|pre.?chorus|intro|outro|tag|vamp|refrain|hook|interlude|breakdown|turn|ending)\b/i;
+
+function parseSections(text) {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const sections = [];
+  let charOffset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (SECTION_RE.test(trimmed)) {
+      sections.push({ name: trimmed, charOffset, lineIndex: i });
+    }
+    charOffset += lines[i].length + 1; // +1 for \n
+  }
+  return sections;
+}
+
+// ── Convert http:// SYNC_URL to ws:// for WebSocket ──────────────────────────
+const WS_MIDI_URL = SYNC_URL.replace(/^http/, 'ws') + '/midi/ws';
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function SetlistRunnerScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const {
     songs = [],
     startIndex = 0,
-    userRole,          // primary role (string, backward compat)
-    userRoles,         // all roles (string[])
+    userRole,   // primary role (string, backward compat)
+    userRoles,  // all roles (string[])
   } = route.params || {};
 
   // Deduplicate and prepare role list
@@ -103,27 +125,36 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     ? [...new Set(userRoles)]
     : userRole ? [userRole] : [];
 
-  const [currentIndex, setCurrentIndex] = useState(startIndex);
-  const [activeRole, setActiveRole] = useState(allRoles[0] || null);
+  const [currentIndex, setCurrentIndex]     = useState(startIndex);
+  const [activeRole, setActiveRole]         = useState(allRoles[0] || null);
   const [selectedInstrument, setSelectedInstrument] = useState(
     () => ROLE_TO_INSTRUMENT[allRoles[0] || ''] || null
   );
-  const [autoScroll, setAutoScroll] = useState(false);
-  const [scrollSpeed, setScrollSpeed] = useState(1); // 1-3
-  const [reachedEnd, setReachedEnd] = useState(false);
+  const [autoScroll, setAutoScroll]   = useState(false);
+  const [scrollSpeed, setScrollSpeed] = useState(1);
+  const [reachedEnd, setReachedEnd]   = useState(false);
 
-  const scrollRef = useRef(null);
-  const scrollY = useRef(0);
-  const contentH = useRef(0);
-  const viewH = useRef(0);
-  const intervalRef = useRef(null);
+  // ── MIDI controller state ─────────────────────────────────────────────────
+  const [midiConnected, setMidiConnected] = useState(false);
+  const [midiDevice,    setMidiDevice]    = useState(''); // 'APC' | 'NANO' | ''
+  const loopSectionRef  = useRef(null); // { sectionIdx } or null — active loop section
+  const lastMidiPress   = useRef({ key: '', time: 0 });
+  const midiWsRef       = useRef(null);
+
+  const scrollRef     = useRef(null);
+  const scrollY       = useRef(0);
+  const contentH      = useRef(0);
+  const viewH         = useRef(0);
+  const intervalRef   = useRef(null);
   const autoAdvanceTimer = useRef(null);
-  const nextPulse = useRef(new Animated.Value(1)).current;
+  const nextPulse     = useRef(new Animated.Value(1)).current;
+  const currentIndexRef = useRef(startIndex);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
-  const song = songs[currentIndex] || null;
+  const song           = songs[currentIndex] || null;
   const activeRoleType = detectRoleType(activeRole);
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
+  // ── Navigation ──────────────────────────────────────────────────────────────
 
   const goTo = useCallback((index) => {
     clearTimeout(autoAdvanceTimer.current);
@@ -143,14 +174,121 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     if (currentIndex > 0) goTo(currentIndex - 1);
   }, [currentIndex, goTo]);
 
-  // ── Reset on song change ────────────────────────────────────────────────────
+  // ── Cleanup on unmount ──────────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current);
       clearTimeout(autoAdvanceTimer.current);
+      midiWsRef.current?.close();
     };
   }, []);
+
+  // ── Scroll to a section (0-indexed) in the current song ─────────────────────
+  // Uses refs only → stable callback, no stale closure issues
+  const scrollToSection = useCallback((sectionIdx) => {
+    const curSong = songs[currentIndexRef.current];
+    if (!curSong) return;
+    const text    = curSong.lyrics || curSong.chordChart || '';
+    const secs    = parseSections(text);
+    if (!secs.length || sectionIdx >= secs.length) return;
+    const sec      = secs[sectionIdx];
+    const totalLen = text.length || 1;
+    const targetY  = (sec.charOffset / totalLen) * contentH.current;
+    scrollY.current = Math.max(0, targetY - 40);
+    scrollRef.current?.scrollTo({ y: scrollY.current, animated: true });
+  }, []); // stable — only refs + route-level songs
+
+  // ── MIDI WebSocket — connect to sync server bridge ──────────────────────────
+  useEffect(() => {
+    let ws;
+    let reconnectTimer;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(WS_MIDI_URL);
+        midiWsRef.current = ws;
+
+        ws.onopen = () => setMidiConnected(true);
+        ws.onclose = () => {
+          setMidiConnected(false);
+          // Auto-reconnect every 5s
+          reconnectTimer = setTimeout(connect, 5000);
+        };
+        ws.onerror = () => { ws.close(); };
+
+        ws.onmessage = (e) => {
+          try {
+            const cmd = JSON.parse(e.data);
+            handleMidiCommand(cmd);
+          } catch {}
+        };
+      } catch {}
+    };
+
+    connect();
+    return () => { clearTimeout(reconnectTimer); ws?.close(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── MIDI command handler ─────────────────────────────────────────────────────
+  // No reference to derived 'content' or 'canAutoScroll' — uses setters + refs
+  const handleMidiCommand = useCallback((cmd) => {
+    switch (cmd.type) {
+      case 'MIDI_NEXT':
+        goNext();
+        break;
+      case 'MIDI_PREV':
+        goPrev();
+        break;
+      case 'MIDI_PLAY':
+      case 'MIDI_CYCLE':
+        setReachedEnd(false);
+        clearTimeout(autoAdvanceTimer.current);
+        nextPulse.stopAnimation();
+        nextPulse.setValue(1);
+        setAutoScroll(v => !v);
+        break;
+      case 'MIDI_STOP':
+        setAutoScroll(false);
+        setReachedEnd(false);
+        clearTimeout(autoAdvanceTimer.current);
+        break;
+      case 'MIDI_GOTO_SONG':
+        if (typeof cmd.index === 'number' && cmd.index >= 0 && cmd.index < songs.length) {
+          goTo(cmd.index);
+        }
+        break;
+      case 'MIDI_SECTION':
+        scrollToSection(cmd.sectionIdx || 0);
+        break;
+      case 'MIDI_LOOP_SECTION':
+        loopSectionRef.current = cmd.active ? { sectionIdx: cmd.sectionIdx } : null;
+        break;
+      case 'MIDI_SPEED_UP':
+        setScrollSpeed(s => Math.min(3, s + 1));
+        break;
+      case 'MIDI_SPEED_DOWN':
+        setScrollSpeed(s => Math.max(1, s - 1));
+        break;
+      default:
+        break;
+    }
+  }, [goNext, goPrev, goTo, scrollToSection, songs.length]);
+
+  // ── Broadcast song position → desktop updates APC Mini grid LEDs ─────────────
+  useEffect(() => {
+    if (!midiConnected) return;
+    fetch(`${SYNC_URL}/midi/command`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type:          'MIDI_SONG_POSITION',
+        currentIndex:  currentIndex,
+        songCount:     songs.length,
+        sectionCounts: songs.map(s => parseSections(s.lyrics || s.chordChart || '').length),
+      }),
+    }).catch(() => {});
+  }, [currentIndex, midiConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────────
 
@@ -163,7 +301,6 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         scrollRef.current?.scrollTo({ y: next, animated: false });
         scrollY.current = next;
 
-        // Detect end of content
         const remaining = contentH.current - (next + viewH.current);
         if (remaining < 80 && contentH.current > 0 && !reachedEnd) {
           setReachedEnd(true);
@@ -173,13 +310,20 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           Animated.loop(
             Animated.sequence([
               Animated.timing(nextPulse, { toValue: 1.06, duration: 400, useNativeDriver: true }),
-              Animated.timing(nextPulse, { toValue: 1, duration: 400, useNativeDriver: true }),
+              Animated.timing(nextPulse, { toValue: 1,    duration: 400, useNativeDriver: true }),
             ])
           ).start();
 
-          // Auto-advance to next song after delay
-          if (currentIndex < songs.length - 1) {
-            autoAdvanceTimer.current = setTimeout(() => goNext(), AUTO_ADVANCE_DELAY);
+          // Auto-advance — keep autoScroll=true for continuous playback
+          if (currentIndexRef.current < songs.length - 1) {
+            autoAdvanceTimer.current = setTimeout(() => {
+              nextPulse.stopAnimation();
+              nextPulse.setValue(1);
+              setCurrentIndex(prev => prev + 1);
+              setReachedEnd(false);
+              scrollY.current = 0;
+              scrollRef.current?.scrollTo({ y: 0, animated: false });
+            }, AUTO_ADVANCE_DELAY);
           }
         }
       }, SCROLL_INTERVAL);
@@ -211,10 +355,9 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     }
 
     if (activeRoleType === 'instrument') {
-      // Use instrument-specific chart first, fall back to master chart
-      const instrChart = selectedInstrument ? (song.instrumentNotes?.[selectedInstrument] || '') : '';
+      const instrChart  = selectedInstrument ? (song.instrumentNotes?.[selectedInstrument] || '') : '';
       const masterChart = song.chordChart || '';
-      const chartText = instrChart || masterChart;
+      const chartText   = instrChart || masterChart;
 
       if (chartText) {
         return {
@@ -233,8 +376,8 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     return { type: 'no_content', label: '🎵 No content for this song.' };
   };
 
-  const content = song ? getContent() : { type: 'none', text: '' };
-  const canAutoScroll = content.type === 'lyrics' || content.type === 'chord_chart';
+  const content        = song ? getContent() : { type: 'none', text: '' };
+  const canAutoScroll  = content.type === 'lyrics' || content.type === 'chord_chart';
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
@@ -275,24 +418,14 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         </View>
 
-        {/* Auto-scroll toggle — only when content supports it */}
-        <View style={styles.topRight}>
-          {canAutoScroll ? (
-            <TouchableOpacity
-              style={[styles.scrollToggle, autoScroll && styles.scrollToggleOn]}
-              onPress={() => {
-                setReachedEnd(false);
-                clearTimeout(autoAdvanceTimer.current);
-                nextPulse.stopAnimation();
-                nextPulse.setValue(1);
-                setAutoScroll((v) => !v);
-              }}
-            >
-              <Text style={[styles.scrollToggleText, autoScroll && styles.scrollToggleTextOn]}>
-                {autoScroll ? '⏸' : '▶'}
-              </Text>
-            </TouchableOpacity>
-          ) : <View style={{ width: 36 }} />}
+        {/* MIDI connection indicator */}
+        <View style={[styles.midiIndicator, midiConnected && styles.midiIndicatorOn]}>
+          <Text style={[styles.midiIndicatorIcon]}>
+            {activeRoleType === 'vocal' ? '🎤' : activeRoleType === 'instrument' ? getRoleIcon(activeRole) : '🎵'}
+          </Text>
+          {midiConnected && (
+            <View style={styles.midiDot} />
+          )}
         </View>
       </View>
 
@@ -305,7 +438,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
               <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>{song.key}</Text></View>
             ) : null}
             {song.tempo ? (
-              <View style={styles.tempoBadge}><Text style={styles.tempoBadgeText}>{song.tempo}</Text></View>
+              <View style={styles.tempoBadge}><Text style={styles.tempoBadgeText}>{song.tempo} BPM</Text></View>
             ) : null}
           </View>
         </View>
@@ -342,7 +475,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        {/* Instrument chart switcher — shown for instrument roles when song has per-instrument charts */}
+        {/* Instrument chart switcher */}
         {activeRoleType === 'instrument' && song && (() => {
           const available = CHART_INSTRUMENTS.filter(instr => song.instrumentNotes?.[instr]);
           if (!available.length) return null;
@@ -365,7 +498,6 @@ export default function SetlistRunnerScreen({ navigation, route }) {
                     </Text>
                   </TouchableOpacity>
                 ))}
-                {/* Master chart option */}
                 <TouchableOpacity
                   style={[styles.instrPill, selectedInstrument === null && styles.instrPillActive]}
                   onPress={() => {
@@ -392,9 +524,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         showsVerticalScrollIndicator={true}
         scrollIndicatorInsets={{ right: 1 }}
         scrollEventThrottle={16}
-        onScroll={(e) => {
-          scrollY.current = e.nativeEvent.contentOffset.y;
-        }}
+        onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
         onContentSizeChange={(_, h) => { contentH.current = h; }}
         onLayout={(e) => { viewH.current = e.nativeEvent.layout.height; }}
       >
@@ -439,7 +569,6 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         {/* ── CHORD CHART ── */}
         {content.type === 'chord_chart' ? (
           <View>
-            {/* Instrument label badge */}
             {content.instrumentName ? (
               <View style={styles.instrBadgeRow}>
                 <View style={styles.instrBadge}>
@@ -461,7 +590,9 @@ export default function SetlistRunnerScreen({ navigation, route }) {
                 isAdmin: false,
               })}
             >
-              <Text style={styles.editBtnText}>✏️ Edit {content.instrumentName ? content.instrumentName + ' ' : ''}Chart</Text>
+              <Text style={styles.editBtnText}>
+                ✏️ Edit {content.instrumentName ? content.instrumentName + ' ' : ''}Chart
+              </Text>
             </TouchableOpacity>
             <Text style={styles.chordChartText}>{content.text}</Text>
           </View>
@@ -482,7 +613,11 @@ export default function SetlistRunnerScreen({ navigation, route }) {
               {activeRoleType === 'vocal' ? '🎤' : activeRoleType === 'instrument' ? '🎼' : '🎵'}
             </Text>
             <Text style={styles.noContentTitle}>{song.title}</Text>
-            {song.key ? <Text style={styles.noContentSub}>Key of {song.key}{song.tempo ? ` • ${song.tempo} BPM` : ''}</Text> : null}
+            {song.key ? (
+              <Text style={styles.noContentSub}>
+                Key of {song.key}{song.tempo ? ` • ${song.tempo} BPM` : ''}
+              </Text>
+            ) : null}
             <Text style={styles.noContentHint}>{content.label}</Text>
             <Text style={styles.noContentHintSm}>
               Add {activeRoleType === 'vocal' ? 'lyrics' : 'chord chart'} in Ultimate Musician and republish.
@@ -490,7 +625,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         ) : null}
 
-        {/* End-of-content Next Song prompt */}
+        {/* End-of-song → next song prompt */}
         {reachedEnd && currentIndex < songs.length - 1 ? (
           <Animated.View style={[styles.nextSongPrompt, { transform: [{ scale: nextPulse }] }]}>
             <Text style={styles.nextSongPromptLabel}>UP NEXT</Text>
@@ -511,46 +646,67 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         <View style={{ height: SCREEN_H * 0.35 }} />
       </ScrollView>
 
-      {/* ── Bottom Navigation ─────────────────── */}
-      <View style={styles.bottomNav}>
-        {/* Prev */}
+      {/* ── Bottom Transport ─────────────────── */}
+      <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 6 }]}>
+        {/* Back */}
         <TouchableOpacity
-          style={[styles.navBtn, currentIndex === 0 && styles.navBtnDisabled]}
+          style={[styles.transportBtn, currentIndex === 0 && styles.transportBtnDisabled]}
           onPress={goPrev}
           disabled={currentIndex === 0}
         >
-          <Text style={[styles.navArrow, currentIndex === 0 && styles.navArrowDisabled]}>◀</Text>
-          <Text style={[styles.navLabel, currentIndex === 0 && styles.navLabelDisabled]} numberOfLines={1}>
-            {currentIndex > 0 ? songs[currentIndex - 1]?.title : 'Start'}
-          </Text>
+          <Text style={[styles.transportIcon, currentIndex === 0 && styles.transportIconDisabled]}>⏮</Text>
+          <Text style={[styles.transportLabel, currentIndex === 0 && styles.transportLabelDisabled]}>Back</Text>
         </TouchableOpacity>
 
-        {/* Center: current position */}
-        <View style={styles.navCenter}>
-          <Text style={styles.navNum}>{currentIndex + 1}</Text>
-          <Text style={styles.navOf}>of {songs.length}</Text>
-        </View>
+        {/* Play / Stop */}
+        <TouchableOpacity
+          style={[
+            styles.transportPlayBtn,
+            autoScroll && styles.transportPlayBtnActive,
+            !canAutoScroll && styles.transportPlayBtnDisabled,
+          ]}
+          onPress={() => {
+            if (!canAutoScroll) return;
+            setReachedEnd(false);
+            clearTimeout(autoAdvanceTimer.current);
+            nextPulse.stopAnimation();
+            nextPulse.setValue(1);
+            setAutoScroll((v) => !v);
+          }}
+        >
+          <Text style={styles.transportPlayIcon}>{autoScroll ? '⏸' : '▶'}</Text>
+          <Text style={styles.transportPlayLabel}>{autoScroll ? 'Stop' : 'Play'}</Text>
+        </TouchableOpacity>
 
         {/* Next */}
         <TouchableOpacity
-          style={[styles.navBtn, styles.navBtnRight, currentIndex === songs.length - 1 && styles.navBtnDisabled]}
+          style={[
+            styles.transportBtn,
+            currentIndex === songs.length - 1 && styles.transportBtnDisabled,
+          ]}
           onPress={goNext}
           disabled={currentIndex === songs.length - 1}
         >
-          <Text style={[styles.navArrow, currentIndex === songs.length - 1 && styles.navArrowDisabled]}>▶</Text>
-          <Text style={[styles.navLabel, styles.navLabelRight, currentIndex === songs.length - 1 && styles.navLabelDisabled]} numberOfLines={1}>
-            {currentIndex < songs.length - 1 ? songs[currentIndex + 1]?.title : 'End'}
-          </Text>
+          <Text style={[
+            styles.transportIcon,
+            currentIndex === songs.length - 1 && styles.transportIconDisabled,
+          ]}>⏭</Text>
+          <Text style={[
+            styles.transportLabel,
+            currentIndex === songs.length - 1 && styles.transportLabelDisabled,
+          ]}>Next</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-// ── Styles ──────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+
+  // Top bar
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -572,34 +728,43 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 5, flexWrap: 'wrap',
     justifyContent: 'center', maxWidth: SCREEN_W * 0.55,
   },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#374151' },
+  dot:       { width: 6, height: 6, borderRadius: 3, backgroundColor: '#374151' },
   dotActive: { width: 16, borderRadius: 3, backgroundColor: '#8B5CF6' },
-  topRight: { width: 36, alignItems: 'flex-end' },
-  scrollToggle: {
+
+  // MIDI indicator (top right) — shows role icon + green dot when connected
+  midiIndicator: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#1F2937',
+    backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#374151',
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: '#374151',
   },
-  scrollToggleOn: { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
-  scrollToggleText: { fontSize: 13, color: '#9CA3AF' },
-  scrollToggleTextOn: { color: '#FFF' },
+  midiIndicatorOn: { borderColor: '#10B981' },
+  midiIndicatorIcon: { fontSize: 16 },
+  midiDot: {
+    position: 'absolute', bottom: 2, right: 2,
+    width: 7, height: 7, borderRadius: 4,
+    backgroundColor: '#10B981',
+    borderWidth: 1, borderColor: '#000',
+  },
 
   // Song header
   songHeader: {
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    paddingBottom: 12,
+    paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12,
     backgroundColor: '#05101F',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1F2937',
+    borderBottomWidth: 1, borderBottomColor: '#1F2937',
   },
-  titleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 },
-  songTitle: { flex: 1, fontSize: 24, fontWeight: '800', color: '#F9FAFB', lineHeight: 30, marginRight: 10 },
+  titleRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    justifyContent: 'space-between', marginBottom: 4,
+  },
+  songTitle: {
+    flex: 1, fontSize: 24, fontWeight: '800',
+    color: '#F9FAFB', lineHeight: 30, marginRight: 10,
+  },
   badgesCol: { alignItems: 'flex-end', gap: 4, marginTop: 2 },
   keyBadge: {
     paddingHorizontal: 9, paddingVertical: 4,
-    backgroundColor: '#8B5CF6', borderRadius: 6, minWidth: 34, alignItems: 'center',
+    backgroundColor: '#8B5CF6', borderRadius: 6,
+    minWidth: 34, alignItems: 'center',
   },
   keyBadgeText: { fontSize: 14, fontWeight: '800', color: '#FFF' },
   tempoBadge: {
@@ -617,7 +782,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#374151', marginRight: 8,
   },
   roleTabActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-  roleTabText: { fontSize: 13, fontWeight: '600', color: '#9CA3AF' },
+  roleTabText:       { fontSize: 13, fontWeight: '600', color: '#9CA3AF' },
   roleTabTextActive: { color: '#FFF' },
   singleRole: {
     alignSelf: 'flex-start', marginTop: 6,
@@ -627,138 +792,128 @@ const styles = StyleSheet.create({
   },
   singleRoleText: { fontSize: 12, fontWeight: '600', color: '#818CF8' },
 
-  // Content scroll
-  contentScroll: { flex: 1 },
-  contentInner: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20 },
-
-  // Speed
-  speedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-  speedLabel: { fontSize: 11, color: '#6B7280', fontWeight: '700', textTransform: 'uppercase' },
-  speedBtn: { paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#1F2937', borderRadius: 6 },
-  speedBtnActive: { backgroundColor: '#7C3AED' },
-  speedBtnText: { fontSize: 11, color: '#9CA3AF', fontWeight: '700' },
-  speedBtnTextActive: { color: '#FFF' },
-
-  // Instrument switcher (in song header)
+  // Instrument switcher
   instrSwitcherWrap: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   instrSwitcherLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#6B7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 11, fontWeight: '700', color: '#6B7280',
+    textTransform: 'uppercase', letterSpacing: 0.5,
   },
   instrPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    backgroundColor: '#0F172A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#374151',
-    marginRight: 6,
+    paddingHorizontal: 12, paddingVertical: 5,
+    backgroundColor: '#0F172A', borderRadius: 16,
+    borderWidth: 1, borderColor: '#374151', marginRight: 6,
   },
   instrPillActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
-  instrPillText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
+  instrPillText:       { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
   instrPillTextActive: { color: '#FFF' },
 
-  // Instrument badge in content area
-  instrBadgeRow: { marginBottom: 10 },
-  instrBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    backgroundColor: '#1E1B4B',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#4F46E5',
-  },
-  instrBadgeText: { fontSize: 12, fontWeight: '700', color: '#818CF8' },
+  // Content scroll
+  contentScroll: { flex: 1 },
+  contentInner:  { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20 },
+
+  // Speed control
+  speedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  speedLabel: { fontSize: 11, color: '#6B7280', fontWeight: '700', textTransform: 'uppercase' },
+  speedBtn:       { paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#1F2937', borderRadius: 6 },
+  speedBtnActive: { backgroundColor: '#7C3AED' },
+  speedBtnText:       { fontSize: 11, color: '#9CA3AF', fontWeight: '700' },
+  speedBtnTextActive: { color: '#FFF' },
 
   // Edit button
-  editBtn: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#0F172A', borderRadius: 8, borderWidth: 1, borderColor: '#374151', marginBottom: 12 },
+  editBtn: {
+    alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: '#0F172A', borderRadius: 8,
+    borderWidth: 1, borderColor: '#374151', marginBottom: 12,
+  },
   editBtnText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
 
   // Lyrics
-  lyricsText: { fontSize: 20, color: '#F3F4F6', lineHeight: 38, fontWeight: '400', letterSpacing: 0.2 },
+  lyricsText: {
+    fontSize: 20, color: '#F3F4F6', lineHeight: 38,
+    fontWeight: '400', letterSpacing: 0.2,
+  },
 
   // Chord chart
   chordChartText: {
     fontSize: 15, color: '#E5E7EB', lineHeight: 26,
     fontFamily: 'Courier', letterSpacing: 0.3,
   },
-  instrNotesCard: {
-    padding: 12, backgroundColor: '#0B1120',
-    borderRadius: 8, borderWidth: 1, borderColor: '#374151', marginBottom: 16,
+
+  // Instrument badge in content
+  instrBadgeRow: { marginBottom: 10 },
+  instrBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12, paddingVertical: 5,
+    backgroundColor: '#1E1B4B', borderRadius: 10,
+    borderWidth: 1, borderColor: '#4F46E5',
   },
-  instrNotesLabel: { fontSize: 10, fontWeight: '700', color: '#6B7280', letterSpacing: 1, marginBottom: 6 },
-  instrNotesText: { fontSize: 14, color: '#E5E7EB', lineHeight: 22 },
+  instrBadgeText: { fontSize: 12, fontWeight: '700', color: '#818CF8' },
 
   // Notes
   notesCard: {
     padding: 16, backgroundColor: '#0B1120',
     borderRadius: 10, borderWidth: 1, borderColor: '#374151',
   },
-  notesLabel: { fontSize: 10, fontWeight: '700', color: '#6B7280', letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' },
+  notesLabel: {
+    fontSize: 10, fontWeight: '700', color: '#6B7280',
+    letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase',
+  },
   notesText: { fontSize: 15, color: '#E5E7EB', lineHeight: 24 },
 
   // No content
-  noContentState: { alignItems: 'center', paddingVertical: 48 },
-  noContentIcon: { fontSize: 56, marginBottom: 16 },
-  noContentTitle: { fontSize: 22, fontWeight: '800', color: '#F9FAFB', marginBottom: 6, textAlign: 'center' },
-  noContentSub: { fontSize: 14, color: '#6B7280', marginBottom: 16 },
-  noContentHint: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', marginBottom: 8 },
+  noContentState:  { alignItems: 'center', paddingVertical: 48 },
+  noContentIcon:   { fontSize: 56, marginBottom: 16 },
+  noContentTitle:  { fontSize: 22, fontWeight: '800', color: '#F9FAFB', marginBottom: 6, textAlign: 'center' },
+  noContentSub:    { fontSize: 14, color: '#6B7280', marginBottom: 16 },
+  noContentHint:   { fontSize: 14, color: '#9CA3AF', textAlign: 'center', marginBottom: 8 },
   noContentHintSm: { fontSize: 12, color: '#4B5563', textAlign: 'center', lineHeight: 18 },
 
-  // End-of-song next prompt
+  // End-of-song → next prompt
   nextSongPrompt: {
-    marginTop: 32,
-    padding: 20,
-    backgroundColor: '#0F172A',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#8B5CF6',
-    alignItems: 'center',
+    marginTop: 32, padding: 20,
+    backgroundColor: '#0F172A', borderRadius: 14,
+    borderWidth: 1, borderColor: '#8B5CF6', alignItems: 'center',
   },
-  nextSongPromptLabel: { fontSize: 10, fontWeight: '700', color: '#8B5CF6', letterSpacing: 1.5, marginBottom: 6 },
-  nextSongPromptTitle: { fontSize: 18, fontWeight: '700', color: '#F9FAFB', marginBottom: 14, textAlign: 'center' },
-  nextSongPromptBtn: {
-    paddingHorizontal: 28, paddingVertical: 12,
-    backgroundColor: '#8B5CF6', borderRadius: 10,
-  },
+  nextSongPromptLabel:   { fontSize: 10, fontWeight: '700', color: '#8B5CF6', letterSpacing: 1.5, marginBottom: 6 },
+  nextSongPromptTitle:   { fontSize: 18, fontWeight: '700', color: '#F9FAFB', marginBottom: 14, textAlign: 'center' },
+  nextSongPromptBtn:     { paddingHorizontal: 28, paddingVertical: 12, backgroundColor: '#8B5CF6', borderRadius: 10 },
   nextSongPromptBtnText: { fontSize: 15, fontWeight: '800', color: '#FFF' },
-  endOfSetlist: { alignItems: 'center', paddingVertical: 40 },
+
+  endOfSetlist:     { alignItems: 'center', paddingVertical: 40 },
   endOfSetlistIcon: { fontSize: 48, marginBottom: 12 },
   endOfSetlistText: { fontSize: 18, fontWeight: '700', color: '#6B7280' },
 
-  // Bottom nav
+  // Bottom transport
   bottomNav: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 10, paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+    paddingHorizontal: 20, paddingTop: 10,
     backgroundColor: '#0A0A0A', borderTopWidth: 1, borderTopColor: '#1F2937',
   },
-  navBtn: {
-    flex: 1, paddingVertical: 10, paddingHorizontal: 10,
-    backgroundColor: '#0F172A', borderRadius: 10,
-    borderWidth: 1, borderColor: '#374151', minHeight: 54,
-    justifyContent: 'center',
+  transportBtn: {
+    width: 72, height: 64, borderRadius: 14,
+    backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#374151',
+    alignItems: 'center', justifyContent: 'center',
   },
-  navBtnRight: { alignItems: 'flex-end' },
-  navBtnDisabled: { borderColor: '#1A2030', backgroundColor: '#050A12' },
-  navArrow: { fontSize: 16, fontWeight: '700', color: '#8B5CF6' },
-  navArrowDisabled: { color: '#2D3748' },
-  navLabel: { fontSize: 11, color: '#9CA3AF', marginTop: 2, maxWidth: 110 },
-  navLabelRight: { textAlign: 'right' },
-  navLabelDisabled: { color: '#374151' },
-  navCenter: { width: 60, alignItems: 'center' },
-  navNum: { fontSize: 26, fontWeight: '800', color: '#F9FAFB', lineHeight: 30 },
-  navOf: { fontSize: 10, color: '#6B7280' },
+  transportBtnDisabled: { backgroundColor: '#050A12', borderColor: '#1A2030' },
+  transportIcon:         { fontSize: 22, color: '#8B5CF6' },
+  transportIconDisabled: { color: '#2D3748' },
+  transportLabel:         { fontSize: 10, color: '#9CA3AF', marginTop: 3, fontWeight: '600' },
+  transportLabelDisabled: { color: '#374151' },
+  transportPlayBtn: {
+    width: 90, height: 72, borderRadius: 18,
+    backgroundColor: '#4F46E5',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#4F46E5', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
+  },
+  transportPlayBtnActive:   { backgroundColor: '#7C3AED', shadowColor: '#7C3AED' },
+  transportPlayBtnDisabled: { backgroundColor: '#1F2937', shadowOpacity: 0 },
+  transportPlayIcon: { fontSize: 26, color: '#FFF' },
+  transportPlayLabel: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 2, fontWeight: '700' },
 
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  emptyText: { fontSize: 16, color: '#9CA3AF' },
-  backLink: { fontSize: 15, color: '#7C3AED', fontWeight: '600' },
+  emptyText:  { fontSize: 16, color: '#9CA3AF' },
+  backLink:   { fontSize: 15, color: '#7C3AED', fontWeight: '600' },
 });

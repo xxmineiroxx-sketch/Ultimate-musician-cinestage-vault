@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, saveUserProfile } from '../services/storage';
+import { logout } from '../services/authAPI';
 
 export default function ProfileSetupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -87,6 +88,20 @@ export default function ProfileSetupScreen({ navigation }) {
       console.error('Error saving profile:', error);
       Alert.alert('Error', 'Failed to save profile. Please try again.');
     }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          navigation.getParent()?.reset({ index: 0, routes: [{ name: 'Login' }] });
+        },
+      },
+    ]);
   };
 
   const handleCancel = () => {
@@ -292,6 +307,11 @@ export default function ProfileSetupScreen({ navigation }) {
           </View>
         </View>
       )}
+
+      {/* Logout */}
+      <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+        <Text style={styles.logoutBtnText}>Sign Out</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -483,5 +503,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#F9FAFB',
     fontWeight: '500',
+  },
+  logoutBtn: {
+    marginTop: 24,
+    marginBottom: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#7F1D1D',
+    alignItems: 'center',
+  },
+  logoutBtnText: {
+    color: '#EF4444',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

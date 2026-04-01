@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 // Instruments matching Musician's INSTRUMENT_SHEETS
 const INSTRUMENT_PARTS = [
@@ -87,28 +87,20 @@ export default function ContentEditorScreen({ navigation, route }) {
       const profile = await getUserProfile();
 
       if (isAdmin) {
-        // Admin: apply directly via publish endpoint
-        const debug = await fetchJson(`${SYNC_URL}/sync/debug`);
-        const { services = [], people = [], plans = {} } = debug;
-        const plan      = plans[serviceId] || { songs: [] };
-        const songEntry = (plan.songs || []).find(s => s.id === song?.id);
-        if (songEntry) {
-          if (isLyrics) {
-            songEntry.lyrics = content.trim();
-          } else if (instrument) {
-            if (!songEntry.instrumentNotes) songEntry.instrumentNotes = {};
-            songEntry.instrumentNotes[instrument] = content.trim();
-          } else {
-            songEntry.chordChart = content.trim();
-            songEntry.chordSheet = content.trim();
-          }
-        }
-        await fetchJson(`${SYNC_URL}/sync/publish`, {
+        // Admin: patch just this song field directly — no need to re-publish everything
+        const field = isLyrics ? 'lyrics' : instrument ? 'instrumentNotes' : 'chordChart';
+        await fetchJson(`${SYNC_URL}/sync/song/patch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ services, people, plans }),
+          body: JSON.stringify({
+            serviceId: serviceId || '',
+            songId:    song?.id  || '',
+            field,
+            value:      content.trim(),
+            instrument: instrument || undefined,
+          }),
         });
-        Alert.alert('Applied ✓', 'Content updated and published.', [
+        Alert.alert('Applied ✓', 'Content updated and live.', [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
       } else {

@@ -16,8 +16,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, getAssignments } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
+import WaveformBar from '../components_v2/WaveformBar';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 // Roles that get lyrics access
 const VOCAL_ROLES = new Set([
@@ -59,6 +60,49 @@ const INSTRUMENT_ICON = {
   'Drums': '🥁',
 };
 
+const SETLIST_HIDE_AFTER_SERVICE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+function parseServiceEndMs(assignment) {
+  const explicitEnd = assignment?.service_end_at || assignment?.end_at || assignment?.completed_at || assignment?.serviceDateTime;
+  if (explicitEnd) {
+    const endMs = new Date(explicitEnd).getTime();
+    if (Number.isFinite(endMs)) return endMs;
+  }
+
+  const serviceDate = assignment?.service_date || assignment?.date;
+  if (!serviceDate) return null;
+
+  // If service_date already has time (ISO), use it directly.
+  if (String(serviceDate).includes('T')) {
+    const withTimeMs = new Date(serviceDate).getTime();
+    if (Number.isFinite(withTimeMs)) return withTimeMs;
+  }
+
+  const timeRaw = assignment?.service_time || assignment?.time || '';
+  const m = String(timeRaw).match(/(\d{1,2}):(\d{2})/);
+  if (m) {
+    const hh = Math.max(0, Math.min(23, Number(m[1] || 0)));
+    const mm = Math.max(0, Math.min(59, Number(m[2] || 0)));
+    const dt = new Date(serviceDate);
+    if (Number.isFinite(dt.getTime())) {
+      dt.setHours(hh, mm, 0, 0);
+      return dt.getTime();
+    }
+  }
+
+  // Safe fallback: if no time exists, treat service end as end-of-day local.
+  const dt = new Date(serviceDate);
+  if (!Number.isFinite(dt.getTime())) return null;
+  dt.setHours(23, 59, 59, 999);
+  return dt.getTime();
+}
+
+function isSetlistExpired(assignment, nowMs = Date.now()) {
+  const endMs = parseServiceEndMs(assignment);
+  if (!endMs) return false;
+  return nowMs > endMs + SETLIST_HIDE_AFTER_SERVICE_MS;
+}
+
 export default function SetlistScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [profile, setProfile] = useState(null);
@@ -68,6 +112,7 @@ export default function SetlistScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedInstrument, setSelectedInstrument] = useState(null);
+  const [expiredCount, setExpiredCount] = useState(0);
 
   useEffect(() => {
     loadData();
@@ -86,13 +131,17 @@ export default function SetlistScreen({ navigation, route }) {
     setProfile(userProfile);
 
     const accepted = userAssignments.filter((a) => a.status === 'accepted');
-    setAssignments(accepted);
+    const nowMs = Date.now();
+    const activeAccepted = accepted.filter((a) => !isSetlistExpired(a, nowMs));
+    const expiredAccepted = accepted.length - activeAccepted.length;
+    setAssignments(activeAccepted);
+    setExpiredCount(expiredAccepted);
 
     // Check if navigated with a specific serviceId (from Assignments screen)
     const incomingServiceId = route?.params?.serviceId;
     const target = incomingServiceId
-      ? accepted.find((a) => a.service_id === incomingServiceId) || accepted[0]
-      : accepted[0];
+      ? activeAccepted.find((a) => a.service_id === incomingServiceId) || activeAccepted[0]
+      : activeAccepted[0];
 
     if (target) {
       setSelectedAssignment(target);
@@ -257,6 +306,30 @@ export default function SetlistScreen({ navigation, route }) {
               ✏️{'  '}{isVocal ? (song.hasLyrics ? 'Edit Lyrics' : 'Add Lyrics') : (chartToShow ? `Edit ${selectedInstrument ? selectedInstrument + ' ' : ''}Chart` : 'Add Chart')}
             </Text>
           </TouchableOpacity>
+
+          {/* ── Waveform bar — tap section to jump, drag to seek ── */}
+          <WaveformBar
+            song={song}
+            userRole={userRole}
+            onSeek={(positionMs) =>
+              navigation.navigate('SetlistRunner', {
+                songs: setlist,
+                startIndex: song.order - 1,
+                userRole: selectedAssignment.role,
+                userRoles: selectedAssignment.roles || [selectedAssignment.role],
+                startAt: positionMs,
+              })
+            }
+            onSectionPress={(startMs) =>
+              navigation.navigate('SetlistRunner', {
+                songs: setlist,
+                startIndex: song.order - 1,
+                userRole: selectedAssignment.role,
+                userRoles: selectedAssignment.roles || [selectedAssignment.role],
+                startAt: startMs,
+              })
+            }
+          />
         </View>
       </TouchableOpacity>
     );
@@ -330,11 +403,19 @@ export default function SetlistScreen({ navigation, route }) {
         </View>
       )}
 
+      {expiredCount > 0 ? (
+        <View style={styles.expiredNotice}>
+          <Text style={styles.expiredNoticeText}>
+            ℹ️ {expiredCount} past service setlist{expiredCount > 1 ? 's were' : ' was'} hidden automatically (2h after service end).
+          </Text>
+        </View>
+      ) : null}
+
       {/* Service info card */}
       <View style={styles.serviceCard}>
         <Text style={styles.serviceDate}>
           📅{' '}
-          {new Date(selectedAssignment.service_date).toLocaleDateString('en-US', {
+          {new Date(String(selectedAssignment.service_date).includes('T') ? selectedAssignment.service_date : selectedAssignment.service_date + 'T00:00:00').toLocaleDateString('en-US', {
             weekday: 'long',
             year: 'numeric',
             month: 'long',
@@ -533,6 +614,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9CA3AF',
     fontStyle: 'italic',
+  },
+  expiredNotice: {
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#0B1120',
+  },
+  expiredNoticeText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    lineHeight: 18,
   },
   loadingState: {
     alignItems: 'center',

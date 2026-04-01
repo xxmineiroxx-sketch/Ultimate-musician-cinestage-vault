@@ -12,7 +12,9 @@
       "backgroundColor": "#020617"
     },
     "scheme": "ultimateplayback",
+    "newArchEnabled": true,
     "ios": {
+      "newArchEnabled": true,
       "supportsTablet": true,
       "bundleIdentifier": "com.ultimatemusician.playback",
       "infoPlist": {
@@ -24,6 +26,7 @@
       }
     },
     "android": {
+      "newArchEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#020617"

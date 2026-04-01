@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();

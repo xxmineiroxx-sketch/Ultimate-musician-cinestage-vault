@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 export default function AssignmentsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -43,11 +43,16 @@ export default function AssignmentsScreen({ navigation }) {
         return;
       }
 
+      const fullName = [profile?.name, profile?.lastName].filter(Boolean).join(' ').trim();
+      const assignUrl = fullName
+        ? `${SYNC_URL}/sync/assignments?email=${encodeURIComponent(email)}&name=${encodeURIComponent(fullName)}`
+        : `${SYNC_URL}/sync/assignments?email=${encodeURIComponent(email)}`;
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
       let res;
       try {
-        res = await fetch(`${SYNC_URL}/sync/assignments?email=${encodeURIComponent(email)}`, {
+        res = await fetch(assignUrl, {
           signal: controller.signal,
         });
       } finally {
@@ -140,7 +145,7 @@ export default function AssignmentsScreen({ navigation }) {
         </View>
 
         <Text style={styles.assignmentDate}>
-          📅 {new Date(assignment.service_date).toLocaleDateString('en-US', {
+          📅 {new Date(String(assignment.service_date).includes('T') ? assignment.service_date : assignment.service_date + 'T00:00:00').toLocaleDateString('en-US', {
             weekday: 'long',
             year: 'numeric',
             month: 'long',

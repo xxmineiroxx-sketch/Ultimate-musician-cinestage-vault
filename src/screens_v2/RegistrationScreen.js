@@ -1,198 +1,138 @@
-/**
- * Registration Screen - Phase 1
- * Phone + Email signup for team members
- */
-
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
-import { saveUserProfile } from '../services/storage';
-import { createUserProfile } from '../models_v2/models';
+import {
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { register } from '../services/authAPI';
 
-export default function RegistrationScreen({ navigation }) {
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
+const ROLES = ['Keys', 'Drums', 'Bass', 'Electric Guitar', 'Acoustic Guitar',
+  'Lead Vocals', 'BG Vocals', 'Music Director', 'Sound Engineer', 'Other'];
+
+export default function RegistrationScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
+  const prefillEmail = route?.params?.email || '';
+
+  const [form, setForm] = useState({
+    firstName: '', lastName: '', email: prefillEmail,
+    password: '', confirmPassword: '', phone: '', role: '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [showRoles, setShowRoles] = useState(false);
+
+  const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
   const handleRegister = async () => {
-    if (!phone || !email || !name) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
+    const { firstName, lastName, email, password, confirmPassword, phone, role } = form;
+    if (!firstName.trim() || !lastName.trim()) return Alert.alert('Required', 'First and last name are required.');
+    if (!email.trim()) return Alert.alert('Required', 'Email is required.');
+    if (!password) return Alert.alert('Required', 'Password is required.');
+    if (password.length < 6) return Alert.alert('Too short', 'Password must be at least 6 characters.');
+    if (password !== confirmPassword) return Alert.alert('Mismatch', 'Passwords do not match.');
 
+    setLoading(true);
     try {
-      const profile = createUserProfile(
-        `user_${Date.now()}`,
-        phone,
-        email,
-        name,
-        null
-      );
-
-      await saveUserProfile(profile);
-
-      Alert.alert(
-        'Success',
-        'Registration complete! Now set up your profile.',
-        [{ text: 'OK', onPress: () => navigation.replace('ProfileSetup') }]
-      );
-    } catch (error) {
-      Alert.alert('Error', 'Registration failed. Please try again.');
+      await register({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), password, phone, role });
+      navigation.navigate('Verify', { email: email.trim() });
+    } catch (err) {
+      Alert.alert('Registration Failed', err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      nestedScrollEnabled={true}
-    >
-      <View style={styles.header}>
-        <Text style={styles.headerIcon}>📝</Text>
-        <Text style={styles.title}>Team Member Registration</Text>
-        <Text style={styles.subtitle}>Join your worship team</Text>
-      </View>
-
-      <View style={styles.form}>
-        <Text style={styles.label}>Full Name</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Enter your full name"
-          placeholderTextColor="#6B7280"
-        />
-
-        <Text style={styles.label}>Phone Number</Text>
-        <TextInput
-          style={styles.input}
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="+1 (555) 123-4567"
-          placeholderTextColor="#6B7280"
-          keyboardType="phone-pad"
-        />
-
-        <Text style={styles.label}>Email Address</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="you@example.com"
-          placeholderTextColor="#6B7280"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-      </View>
-
-      <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
-        <Text style={styles.registerButtonText}>Register</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingTop: Math.max(insets.top + 16, 60) }]}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.backButtonText}>Back to Home</Text>
-      </TouchableOpacity>
+        {/* Brand */}
+        <View style={styles.brandBlock}>
+          <Text style={styles.badge}>CineStage™</Text>
+          <Text style={styles.title}>Create Account</Text>
+          <Text style={styles.subtitle}>Join your worship team on Ultimate Playback</Text>
+        </View>
 
-      <View style={styles.infoBox}>
-        <Text style={styles.infoText}>
-          After registration, you'll be able to:
-        </Text>
-        <Text style={styles.featureText}>• Select your musical roles</Text>
-        <Text style={styles.featureText}>• Receive service assignments</Text>
-        <Text style={styles.featureText}>• Access role-specific content</Text>
-        <Text style={styles.featureText}>• Communicate with your team</Text>
-      </View>
-    </ScrollView>
+        {/* Card */}
+        <View style={styles.card}>
+          {/* Name row */}
+          <View style={styles.row}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.label}>First Name *</Text>
+              <TextInput style={styles.input} value={form.firstName} onChangeText={v => update('firstName', v)} placeholder="First" placeholderTextColor="#4B5563" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Last Name *</Text>
+              <TextInput style={styles.input} value={form.lastName} onChangeText={v => update('lastName', v)} placeholder="Last" placeholderTextColor="#4B5563" />
+            </View>
+          </View>
+
+          <Text style={styles.label}>Email *</Text>
+          <TextInput style={styles.input} value={form.email} onChangeText={v => update('email', v)} placeholder="you@example.com" placeholderTextColor="#4B5563" autoCapitalize="none" keyboardType="email-address" autoCorrect={false} />
+
+          <Text style={styles.label}>Password *</Text>
+          <TextInput style={styles.input} value={form.password} onChangeText={v => update('password', v)} placeholder="Min. 6 characters" placeholderTextColor="#4B5563" secureTextEntry />
+
+          <Text style={styles.label}>Confirm Password *</Text>
+          <TextInput style={styles.input} value={form.confirmPassword} onChangeText={v => update('confirmPassword', v)} placeholder="Repeat password" placeholderTextColor="#4B5563" secureTextEntry />
+
+          <Text style={styles.label}>Phone</Text>
+          <TextInput style={styles.input} value={form.phone} onChangeText={v => update('phone', v)} placeholder="(555) 123-4567" placeholderTextColor="#4B5563" keyboardType="phone-pad" />
+
+          <Text style={styles.label}>Role / Instrument</Text>
+          <TouchableOpacity style={styles.input} onPress={() => setShowRoles(!showRoles)}>
+            <Text style={form.role ? styles.roleSelected : styles.rolePlaceholder}>
+              {form.role || 'Select your primary role'}
+            </Text>
+          </TouchableOpacity>
+
+          {showRoles && (
+            <View style={styles.rolesList}>
+              {ROLES.map(r => (
+                <TouchableOpacity key={r} style={[styles.roleItem, form.role === r && styles.roleItemActive]} onPress={() => { update('role', r); setShowRoles(false); }}>
+                  <Text style={[styles.roleItemText, form.role === r && styles.roleItemTextActive]}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.btn, loading && { opacity: 0.6 }]}
+            onPress={handleRegister}
+            disabled={loading}
+          >
+            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Create Account</Text>}
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.backLink} onPress={() => navigation.goBack()}>
+          <Text style={styles.backLinkText}>Already have an account? Sign in</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#020617',
-  },
-  content: {
-    padding: 20,
-    flexGrow: 1,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 32,
-    paddingTop: 20,
-  },
-  headerIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#F9FAFB',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#9CA3AF',
-    textAlign: 'center',
-  },
-  form: {
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#E5E7EB',
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: '#0B1120',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: '#F9FAFB',
-  },
-  registerButton: {
-    backgroundColor: '#4F46E5',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  registerButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  backButton: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  backButtonText: {
-    fontSize: 14,
-    color: '#9CA3AF',
-  },
-  infoBox: {
-    marginTop: 24,
-    padding: 16,
-    backgroundColor: '#0B1120',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#E5E7EB',
-    marginBottom: 12,
-  },
-  featureText: {
-    fontSize: 14,
-    color: '#9CA3AF',
-    marginBottom: 6,
-  },
+  container: { flexGrow: 1, backgroundColor: '#020617', paddingHorizontal: 24, paddingBottom: 48 },
+  brandBlock: { alignItems: 'center', marginBottom: 32 },
+  badge: { color: '#818CF8', fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
+  title: { color: '#F9FAFB', fontSize: 28, fontWeight: '900', textAlign: 'center' },
+  subtitle: { color: '#6B7280', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  card: { backgroundColor: '#0B1120', borderRadius: 20, borderWidth: 1, borderColor: '#1F2937', padding: 20, marginBottom: 16 },
+  row: { flexDirection: 'row', marginBottom: 0 },
+  label: { color: '#6B7280', fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12 },
+  input: { backgroundColor: '#020617', borderRadius: 12, borderWidth: 1, borderColor: '#1F2937', paddingHorizontal: 14, paddingVertical: 12, color: '#F9FAFB', fontSize: 15, marginBottom: 4 },
+  roleSelected: { color: '#F9FAFB', fontSize: 15 },
+  rolePlaceholder: { color: '#4B5563', fontSize: 15 },
+  rolesList: { backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#1F2937', marginBottom: 8, overflow: 'hidden' },
+  roleItem: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
+  roleItemActive: { backgroundColor: '#1E1B4B' },
+  roleItemText: { color: '#9CA3AF', fontSize: 14 },
+  roleItemTextActive: { color: '#818CF8', fontWeight: '700' },
+  btn: { backgroundColor: '#4F46E5', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
+  btnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  backLink: { alignItems: 'center', marginTop: 8 },
+  backLinkText: { color: '#818CF8', fontSize: 14, fontWeight: '600' },
 });

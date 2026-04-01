@@ -23,6 +23,8 @@ import LyricsViewScreen from './src/screens_v2/LyricsViewScreen';
 import SetlistRunnerScreen from './src/screens_v2/SetlistRunnerScreen';
 import AdminDashboardScreen from './src/screens_v2/AdminDashboardScreen';
 import ContentEditorScreen from './src/screens_v2/ContentEditorScreen';
+import RegistrationScreen from './src/screens_v2/RegistrationScreen';
+import VerifyScreen from './src/screens_v2/VerifyScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -31,6 +33,7 @@ const Tab = createBottomTabNavigator();
 function MainTabs() {
   return (
     <Tab.Navigator
+      initialRouteName="HomeTab"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -187,6 +190,16 @@ export default function App() {
         <Stack.Screen
           name="ContentEditor"
           component={ContentEditorScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Register"
+          component={RegistrationScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Verify"
+          component={VerifyScreen}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

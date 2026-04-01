@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { getUserProfile, saveUserProfile } from '../services/storage';
 
-const SYNC_URL = 'http://10.0.0.34:8099';
+import { SYNC_URL } from '../../config/syncConfig';
 
 async function serverBlockout(method, params = {}, body = null) {
   try {
