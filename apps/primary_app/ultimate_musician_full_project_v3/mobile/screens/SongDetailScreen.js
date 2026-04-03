@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
@@ -26,6 +27,7 @@ import {
   pollStemJob,
   submitStemJob,
 } from "../services/stemJobService";
+import { analyzeWorshipSong } from "../services/worshipFlowService";
 import {
   makeId,
   ROUTING_TRACKS,
@@ -55,6 +57,15 @@ const ROLE_COLORS = {
   Keys: "#A78BFA",
   Other: "#FBBF24",
 };
+const WORSHIP_FLOW_VIEWER_ROLES = new Set([
+  "admin",
+  "org_owner",
+  "worship_leader",
+  "md",
+  "music_director",
+  "sound_tech",
+  "sound",
+]);
 
 // ── Keyboard Rigs ─────────────────────────────────────────────────────────────
 const DEFAULT_KEYS_RIGS = [
@@ -253,6 +264,36 @@ function stripChordsFromSection(text) {
     .trim();
 }
 
+function normalizeRoleKey(role) {
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function canViewWorshipFlow(role) {
+  return WORSHIP_FLOW_VIEWER_ROLES.has(normalizeRoleKey(role));
+}
+
+function buildLyricsExcerpt(chartText, sectionList) {
+  const chartLyrics = stripChordsFromSection(chartText || "");
+  if (chartLyrics) return chartLyrics.slice(0, 1200);
+
+  const sectionLyrics = (sectionList || [])
+    .map((section) => {
+      const vocals =
+        section?.parts?.Vocals ||
+        section?.parts?.vocals ||
+        section?.content ||
+        "";
+      return stripChordsFromSection(vocals);
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  return sectionLyrics.slice(0, 1200);
+}
+
 // ── Parse BPM / Key / TimeSig from raw chart header text ─────────────────────
 function extractMetaFromChart(text) {
   const meta = { key: null, bpm: null, timeSig: null };
@@ -362,6 +403,11 @@ export default function SongDetailScreen({ route, navigation }) {
     global: {},
   });
   const [dirty, setDirty] = useState(isNew);
+  const [viewerRole, setViewerRole] = useState("");
+  const [worshipFlowLoading, setWorshipFlowLoading] = useState(false);
+  const [worshipFlowInsights, setWorshipFlowInsights] = useState(
+    incomingSong?.worshipFlowInsights || null,
+  );
 
   // Transposed key view (service context)
   const [showTransposedView, setShowTransposedView] = useState(false);
@@ -472,8 +518,10 @@ export default function SongDetailScreen({ route, navigation }) {
   useEffect(() => {
     (async () => {
       const settings = await getSettings();
+      const storedRole = await AsyncStorage.getItem("@user_role");
       if (settings.apiBase) setApiBase(settings.apiBase);
       if (settings.defaultUserId) setUserId(settings.defaultUserId);
+      if (storedRole) setViewerRole(storedRole);
       const defaults = makeDefaultSettings();
       setSettingsRouting({
         interfaceChannels:
@@ -510,6 +558,8 @@ export default function SongDetailScreen({ route, navigation }) {
       cueSync,
       keysRigs,
       keyboardRigs: keysRigs.map((r) => r.name),
+      worshipFlowInsights:
+        worshipFlowInsights || currentSong?.worshipFlowInsights || undefined,
       localStems: Object.keys(localStemsState).length > 0 ? localStemsState : undefined,
     };
   }
@@ -715,6 +765,51 @@ export default function SongDetailScreen({ route, navigation }) {
       Alert.alert('Preset Error', e.message);
     } finally {
       setKeysPresetLoading(false);
+    }
+  }
+
+  async function handleAnalyzeWorshipFlow() {
+    if (!title.trim() && !rawChart.trim()) {
+      Alert.alert(
+        "Song needed",
+        "Add the song title or paste the chart before running Worship Flow AI.",
+      );
+      return;
+    }
+
+    setWorshipFlowLoading(true);
+    try {
+      const payload = {
+        title: title.trim() || currentSong?.title || "Untitled",
+        artist: artist.trim() || currentSong?.artist || "",
+        key: serviceTransposedKey || key || currentSong?.originalKey || "",
+        bpm: bpm ? Number(bpm) : currentSong?.bpm || null,
+        lyrics: buildLyricsExcerpt(rawChart, sections),
+        chordChart: (rawChart || "").slice(0, 2000),
+        teamRoles: (route?.params?.teamRoles || []).filter(Boolean),
+        serviceContext:
+          route?.params?.serviceContext ||
+          route?.params?.serviceName ||
+          route?.params?.service?.title ||
+          "Worship service",
+      };
+
+      const data = await analyzeWorshipSong(payload);
+      const insights = data?.insights || data || null;
+      setWorshipFlowInsights(insights);
+
+      if (title.trim()) {
+        const saved = await addOrUpdateSong({
+          ...buildSongObject(),
+          worshipFlowInsights: insights,
+        });
+        setCurrentSong(saved);
+        if (isNew) navigation.setParams({ song: saved });
+      }
+    } catch (e) {
+      Alert.alert("Worship Flow Error", String(e?.message || e));
+    } finally {
+      setWorshipFlowLoading(false);
     }
   }
 
@@ -1431,6 +1526,389 @@ export default function SongDetailScreen({ route, navigation }) {
             <Text style={styles.cineBtnText}>Run CineStage™</Text>
           </TouchableOpacity>
         </View>
+
+        {canViewWorshipFlow(viewerRole) && (
+          <View
+            style={{
+              marginTop: 12,
+              backgroundColor: "#120A24",
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: "#6D28D9",
+              padding: 14,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    color: "#C4B5FD",
+                    fontSize: 11,
+                    fontWeight: "800",
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Worship Flow AI
+                </Text>
+                <Text
+                  style={{
+                    color: "#EDE9FE",
+                    fontSize: 15,
+                    fontWeight: "800",
+                    marginTop: 2,
+                  }}
+                >
+                  Live flow, arrangement, and FOH guidance
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 9,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: "#8B5CF6",
+                  backgroundColor: worshipFlowLoading ? "#2E1065" : "#3B1B71",
+                  opacity: worshipFlowLoading ? 0.75 : 1,
+                }}
+                onPress={handleAnalyzeWorshipFlow}
+                disabled={worshipFlowLoading}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={{ color: "#F5F3FF", fontSize: 12, fontWeight: "800" }}
+                >
+                  {worshipFlowLoading ? "Analyzing..." : "✦ Analyze"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {worshipFlowInsights ? (
+              <>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: "#A78BFA",
+                        fontSize: 11,
+                        fontWeight: "700",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Worship Freely Likelihood
+                    </Text>
+                    <View
+                      style={{
+                        height: 8,
+                        borderRadius: 999,
+                        backgroundColor: "#2E1065",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View
+                        style={{
+                          height: "100%",
+                          width: `${Math.round(
+                            Math.max(
+                              0,
+                              Math.min(
+                                1,
+                                Number(
+                                  worshipFlowInsights.worshipFreelyLikelihood || 0,
+                                ),
+                              ),
+                            ) * 100,
+                          )}%`,
+                          borderRadius: 999,
+                          backgroundColor: "#A855F7",
+                        }}
+                      />
+                    </View>
+                  </View>
+                  <View
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 999,
+                      backgroundColor: "#2E1065",
+                      borderWidth: 1,
+                      borderColor: "#8B5CF6",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#F5F3FF",
+                        fontSize: 12,
+                        fontWeight: "800",
+                      }}
+                    >
+                      {Math.round(
+                        Math.max(
+                          0,
+                          Math.min(
+                            1,
+                            Number(
+                              worshipFlowInsights.worshipFreelyLikelihood || 0,
+                            ),
+                          ),
+                        ) * 100,
+                      )}
+                      %
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {worshipFlowInsights.tempoFeel ? (
+                    <View
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 999,
+                        backgroundColor: "#1E1B4B",
+                        borderWidth: 1,
+                        borderColor: "#6366F1",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#A5B4FC",
+                          fontSize: 11,
+                          fontWeight: "800",
+                        }}
+                      >
+                        {String(worshipFlowInsights.tempoFeel).toUpperCase()}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {worshipFlowInsights.worshipFreelyMoment ? (
+                    <View
+                      style={{
+                        flex: 1,
+                        minWidth: 180,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
+                        borderRadius: 12,
+                        backgroundColor: "#1B1235",
+                        borderWidth: 1,
+                        borderColor: "#4C1D95",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#C4B5FD",
+                          fontSize: 10,
+                          fontWeight: "800",
+                          textTransform: "uppercase",
+                          marginBottom: 3,
+                        }}
+                      >
+                        Let It Flow
+                      </Text>
+                      <Text
+                        style={{
+                          color: "#F5F3FF",
+                          fontSize: 12,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {worshipFlowInsights.worshipFreelyMoment}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {Array.isArray(worshipFlowInsights.energyFlow) &&
+                worshipFlowInsights.energyFlow.length > 0 ? (
+                  <View>
+                    <Text
+                      style={{
+                        color: "#A78BFA",
+                        fontSize: 11,
+                        fontWeight: "800",
+                        marginBottom: 6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Section Energy
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {worshipFlowInsights.energyFlow.map((entry, index) => {
+                        const energy = String(entry?.energy || "medium").toLowerCase();
+                        const dotColor =
+                          energy === "peak"
+                            ? "#EC4899"
+                            : energy === "high"
+                              ? "#8B5CF6"
+                              : energy === "low"
+                                ? "#38BDF8"
+                                : "#A855F7";
+                        return (
+                          <View
+                            key={`${entry?.section || "section"}_${index}`}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 8,
+                              borderRadius: 12,
+                              backgroundColor: "#1B1235",
+                              borderWidth: 1,
+                              borderColor: "#4C1D95",
+                              minWidth: 110,
+                            }}
+                          >
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                              }}
+                            >
+                              <View
+                                style={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: 999,
+                                  backgroundColor: dotColor,
+                                }}
+                              />
+                              <Text
+                                style={{
+                                  color: "#F5F3FF",
+                                  fontSize: 12,
+                                  fontWeight: "800",
+                                }}
+                              >
+                                {entry?.section || `Section ${index + 1}`}
+                              </Text>
+                            </View>
+                            {entry?.note ? (
+                              <Text
+                                style={{
+                                  color: "#C4B5FD",
+                                  fontSize: 11,
+                                  marginTop: 5,
+                                  lineHeight: 16,
+                                }}
+                              >
+                                {entry.note}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {Array.isArray(worshipFlowInsights.mixingTips) &&
+                worshipFlowInsights.mixingTips.length > 0 ? (
+                  <View>
+                    <Text
+                      style={{
+                        color: "#A78BFA",
+                        fontSize: 11,
+                        fontWeight: "800",
+                        marginBottom: 6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      FOH Mixing Tips
+                    </Text>
+                    {worshipFlowInsights.mixingTips.slice(0, 5).map((tip, index) => (
+                      <Text
+                        key={`mix_tip_${index}`}
+                        style={{ color: "#E9D5FF", fontSize: 12, lineHeight: 18 }}
+                      >
+                        • {tip}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+
+                {Array.isArray(worshipFlowInsights.arrangementTips) &&
+                worshipFlowInsights.arrangementTips.length > 0 ? (
+                  <View>
+                    <Text
+                      style={{
+                        color: "#A78BFA",
+                        fontSize: 11,
+                        fontWeight: "800",
+                        marginBottom: 6,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Arrangement Tips
+                    </Text>
+                    {worshipFlowInsights.arrangementTips.slice(0, 4).map((tip, index) => (
+                      <Text
+                        key={`arrangement_tip_${index}`}
+                        style={{ color: "#E9D5FF", fontSize: 12, lineHeight: 18 }}
+                      >
+                        • {tip}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+
+                {worshipFlowInsights.transitionTip ? (
+                  <View
+                    style={{
+                      backgroundColor: "#1B1235",
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: "#4C1D95",
+                      padding: 10,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "#A78BFA",
+                        fontSize: 11,
+                        fontWeight: "800",
+                        textTransform: "uppercase",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Transition Advice
+                    </Text>
+                    <Text
+                      style={{ color: "#F5F3FF", fontSize: 12, lineHeight: 18 }}
+                    >
+                      {worshipFlowInsights.transitionTip}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <Text
+                style={{
+                  color: "#C4B5FD",
+                  fontSize: 12,
+                  lineHeight: 18,
+                }}
+              >
+                Analyze this song to get Worship Freely probability, section energy,
+                FOH tips, arrangement advice, and transition guidance.
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* ── AI Song Recommendations ── */}
         <TouchableOpacity

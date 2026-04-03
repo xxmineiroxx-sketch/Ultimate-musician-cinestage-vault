@@ -44,6 +44,7 @@ import {
   updateMarkerRange,
 } from "../services/rehearsalPipelineStore";
 import { resolveRoleFilteredTracks } from "../services/roleStemRouter";
+import { broadcastWorshipFreelyEvent } from "../services/worshipFlowService";
 import {
   buildJumpTargets,
   buildTransientMarkers,
@@ -267,6 +268,13 @@ const MUSICIAN_ROLES = new Set([
   "keys",
   "music_director",
 ]);
+const WORSHIP_FLOW_BROADCAST_ROLES = new Set([
+  "admin",
+  "org_owner",
+  "worship_leader",
+  "md",
+  "music_director",
+]);
 const ROLE_DISPLAY_NAME = {
   worship_leader: "Worship Leader",
   lead_vocal: "Lead Vocal",
@@ -291,6 +299,15 @@ const ROLE_DISPLAY_NAME = {
   guitar: "Guitar",
   music_director: "Music Director",
 };
+
+function canBroadcastWorshipFlow(role) {
+  return WORSHIP_FLOW_BROADCAST_ROLES.has(
+    String(role || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_"),
+  );
+}
 
 const VOCAL_PART_LABELS = {
   lead: "Lead Vocal",
@@ -1273,7 +1290,10 @@ export default function RehearsalScreen({ route, navigation }) {
     song?.latestStemsJob?.result?.waveformPeaks ||
     song?.latestStemsJob?.result?.waveform_peaks ||
     null;
-  const waveformPeaks = processPeaksForDisplay(waveformPeaksRaw, 200);
+  const waveformPeaks = processPeaksForDisplay(
+    waveformPeaksRaw,
+    R.isAnyTablet ? 1280 : 480,
+  );
 
   // Role cue for waveform display
   const waveRoleCue = (() => {
@@ -2569,6 +2589,18 @@ export default function RehearsalScreen({ route, navigation }) {
       speak('Free worship');
       setActiveCueLabel('✨  FREE WORSHIP');
       setTimeout(() => setActiveCueLabel(''), 4000);
+      if (canBroadcastWorshipFlow(userRole)) {
+        const roleKey = String(userRole || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[\s-]+/g, "_");
+        broadcastWorshipFreelyEvent({
+          songTitle: song?.title || sec.label || "Worship Flow",
+          triggeredBy:
+            ROLE_DISPLAY_NAME[roleKey] || userRole || "Worship Leader",
+          mode: "enter",
+        }).catch(() => {});
+      }
       return;
     }
 
@@ -2656,7 +2688,7 @@ export default function RehearsalScreen({ route, navigation }) {
     // ── SINGLE TAP → SEEK + CONTINUE / START PLAYING ─────────────────────
     // If coming from worship loop, restore all stems first
     if (worshipLoopActive) {
-      setTracks((prev) => prev.map((t) => ({ ...t, mute: false })));
+      exitWorshipLoop({ silent: true });
     }
     setLoopEnabled(false);
     setSectionLoopActive(false);
@@ -2713,12 +2745,26 @@ export default function RehearsalScreen({ route, navigation }) {
   }
 
   /** Exit Worship Loop — restore all stems */
-  function exitWorshipLoop() {
+  function exitWorshipLoop({ silent = false } = {}) {
     setWorshipLoopActive(false);
     setTracks((prev) => prev.map((t) => ({ ...t, mute: false })));
-    speak('Band in');
-    setActiveCueLabel('Band in');
-    setTimeout(() => setActiveCueLabel(''), 3000);
+    if (!silent) {
+      speak('Band in');
+      setActiveCueLabel('Band in');
+      setTimeout(() => setActiveCueLabel(''), 3000);
+    }
+    if (canBroadcastWorshipFlow(userRole)) {
+      const roleKey = String(userRole || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, "_");
+      broadcastWorshipFreelyEvent({
+        songTitle: song?.title || activeSectionLabel || "",
+        triggeredBy:
+          ROLE_DISPLAY_NAME[roleKey] || userRole || "Worship Leader",
+        mode: "exit",
+      }).catch(() => {});
+    }
   }
 
   function jumpToSetlistSong(idx) {
@@ -3473,7 +3519,7 @@ export default function RehearsalScreen({ route, navigation }) {
             onSectionMarkerDrag={handleSectionMarkerDrag}
             onMarkerTap={handleWaveformMarkerTap}
             onMarkerDrag={(marker, nextSec, isFinal) => handleMarkerDrag(marker, nextSec, isFinal)}
-            height={waveH}
+            height={R.waveformHeight}
             worshipFreeActive={worshipLoopActive}
           />
 
