@@ -24,8 +24,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "co.ultimatelabs.musician",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "infoPlist": {
+        "UIDeviceFamily": [2],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
@@ -61,9 +62,6 @@
       "enabled": true,
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD"
-    },
-    "experiments": {
-      "newArchEnabled": false
     },
     "extra": {
       "eas": {

@@ -38,7 +38,11 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>3</string>
+    <key>UIDeviceFamily</key>
+    <array>
+      <integer>2</integer>
+    </array>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>LSMinimumSystemVersion</key>
