@@ -1001,6 +1001,7 @@ export default function ServicePlanScreen({ route, navigation }) {
           role,
           personId: person.id,
           name: person.name,
+          email: person.email || "",
         }));
       }
       setPlan(updated);
@@ -1261,6 +1262,11 @@ export default function ServicePlanScreen({ route, navigation }) {
   ) {
     const publishedVocalAssignments =
       buildPublishedVocalAssignments(nextVocalAssignments);
+    // Include team people so server's findPerson can match them by email/name
+    const teamPeople = (nextPlan.team || [])
+      .map((t) => people.find((p) => p.id === t.personId))
+      .filter(Boolean)
+      .map((p) => ({ id: p.id, name: p.name, email: p.email || "", phone: p.phone || "" }));
     const res = await fetch(`${SYNC_URL}/sync/publish`, {
       method: "POST",
       headers: syncHeaders(),
@@ -1268,6 +1274,7 @@ export default function ServicePlanScreen({ route, navigation }) {
         serviceId: resolvedServiceId,
         plan: nextPlan,
         vocalAssignments: publishedVocalAssignments,
+        people: teamPeople,
       }),
     });
     const publishResult = await res.json().catch(() => ({}));
@@ -1579,10 +1586,14 @@ export default function ServicePlanScreen({ route, navigation }) {
           })
           .filter((s) => s.id);
         if (songsToSync.length > 0) {
+          const peopleToPush = (plan.team || [])
+            .map((t) => people.find((p) => p.id === t.personId))
+            .filter(Boolean)
+            .map((p) => ({ id: p.id, name: p.name, email: p.email || "", phone: p.phone || "" }));
           fetch(`${SYNC_URL}/sync/library-push`, {
             method: "POST",
             headers: syncHeaders(),
-            body: JSON.stringify({ songs: songsToSync }),
+            body: JSON.stringify({ songs: songsToSync, people: peopleToPush }),
           }).catch(() => {}); // fire-and-forget, non-blocking
         }
         const emailSent = Number(publishResult?.alerts?.emailSent || 0);

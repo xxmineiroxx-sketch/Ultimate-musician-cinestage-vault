@@ -142,12 +142,12 @@ export async function reorderSongs(serviceId, songs) {
 }
 
 /** Assign a team member to a role. Replaces if same role+person already exists. */
-export async function assignTeamMember(serviceId, { role, personId, name }) {
+export async function assignTeamMember(serviceId, { role, personId, name, email }) {
   const plan = await getPlanForService(serviceId);
   const filtered = plan.team.filter(
     (t) => !(t.role === role && t.personId === personId),
   );
-  const item = { id: uid("ta"), role, personId, name };
+  const item = { id: uid("ta"), role, personId, name, ...(email ? { email } : {}) };
   return savePlanForService(serviceId, { ...plan, team: [...filtered, item] });
 }
 
