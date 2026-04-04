@@ -641,17 +641,41 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Publish helper ──────────────────────────────────────────────────────
   const publishUpdate = async (updatedPlans, updatedServices, updatedPeople) => {
     const hdrs = syncHeaders();
-    const lib = await fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: hdrs });
+    const nextServices = Array.isArray(updatedServices) ? updatedServices : services;
+    const nextPeople = Array.isArray(updatedPeople) ? updatedPeople : people;
+    const nextPlans =
+      updatedPlans && typeof updatedPlans === 'object'
+        ? updatedPlans
+        : plans;
+    const nextVocalAssignments =
+      vocalAssignments && typeof vocalAssignments === 'object'
+        ? vocalAssignments
+        : {};
     await fetchJson(`${SYNC_URL}/sync/library-push`, {
       method: 'POST',
       headers: hdrs,
       body: JSON.stringify({
-        services: updatedServices || lib.services,
-        people:   updatedPeople   || lib.people,
-        plans:    updatedPlans    || lib.plans,
-        songs:    lib.songs       || [],
+        services: nextServices,
+        people: nextPeople,
+        plans: nextPlans,
+        songs: songs || [],
+        vocalAssignments: nextVocalAssignments,
+        replaceServicesSnapshot: true,
+        replacePlansSnapshot: true,
+        replacePeopleSnapshot: true,
+        replaceVocalAssignmentsSnapshot: true,
       }),
     });
+    AsyncStorage.setItem(
+      ADMIN_LIBRARY_CACHE_KEY,
+      JSON.stringify({
+        services: nextServices,
+        people: nextPeople,
+        plans: nextPlans,
+        songs: songs || [],
+        vocalAssignments: nextVocalAssignments,
+      }),
+    ).catch(() => {});
   };
 
   const closeServiceSwipe = useCallback((serviceId) => {
