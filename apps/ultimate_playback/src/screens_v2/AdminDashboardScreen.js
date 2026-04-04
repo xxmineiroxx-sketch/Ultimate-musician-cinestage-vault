@@ -1123,7 +1123,18 @@ export default function AdminDashboardScreen({ navigation, route }) {
         setPlans(updatedPlans);
 
         try {
-          await publishUpdate(updatedPlans, services, updatedPeople);
+          // Lightweight push — only people + plans, no songs.
+          // publishUpdate includes ALL songs which can be many MB and times out.
+          await fetchJson(`${SYNC_URL}/sync/library-push`, {
+            method: 'POST',
+            headers: syncHeaders(),
+            body: JSON.stringify({
+              people: updatedPeople,
+              plans: updatedPlans,
+              replacePeopleSnapshot: true,
+              replacePlansSnapshot: true,
+            }),
+          });
         } catch (e) {
           // Revert on failure
           setPeople(people);
