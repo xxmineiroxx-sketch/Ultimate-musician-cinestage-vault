@@ -987,7 +987,7 @@ export default function HomeScreen({ navigation }) {
       )}
 
       {/* Service Command Center for worship leaders / admins; Preparation Hub for regular members */}
-      {(mdRole === 'md' || mdRole === 'admin' || mdRole === 'worship_leader' || mdRole === 'owner')
+      {(mdRole === 'md' || mdRole === 'admin' || mdRole === 'worship_leader' || mdRole === 'owner' || mdRole === 'org_owner' || mdRole === 'manager')
         ? (
           <ServiceCommandCenter
             nextServiceGroup={upcomingServices[0] || null}
