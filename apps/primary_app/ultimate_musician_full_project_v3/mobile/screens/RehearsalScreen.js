@@ -217,6 +217,18 @@ function normalizeMarkersForStorage(list) {
     .sort((a, b) => a.start - b.start);
 }
 
+function normalizeSectionsForStorage(list) {
+  if (list === null) return null;
+  return (Array.isArray(list) ? list : [])
+    .map((sec, idx) => ({
+      id: String(sec?.sectionRef || sec?.id || `sec_${idx}`),
+      label: String(sec?.label || `Section ${idx + 1}`),
+      timeSec: Math.max(0, Number(sec?.timeSec ?? sec?.positionSeconds ?? 0)),
+      color: sec?.color || "#6366F1",
+    }))
+    .sort((a, b) => a.timeSec - b.timeSec);
+}
+
 const LOAD_STEPS = ["Initializing audio", "Loading stems", "Ready"];
 const AUTOMATION_EVENT_TYPES = ["MIDI", "LIGHTS", "LYRICS"];
 const SAFETY_MODES = ["strict", "guided", "tech"];
@@ -1251,6 +1263,7 @@ export default function RehearsalScreen({ route, navigation }) {
   const [safetyMode, setSafetyMode] = useState("guided");
   const [pipelineExpanded, setPipelineExpanded] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [sectionEditorVisible, setSectionEditorVisible] = useState(false);
   const [rehearsalPresetType, setRehearsalPresetType]       = useState('Worship Keys');
   const [rehearsalPresetLoading, setRehearsalPresetLoading] = useState(false);
   const [rehearsalPresetResult, setRehearsalPresetResult]   = useState(null);
@@ -1275,6 +1288,7 @@ export default function RehearsalScreen({ route, navigation }) {
   const [isRecording, setIsRecording] = useState(false);
   const [armedTrackId, setArmedTrackId] = useState(null); // which track is armed for record
   const recordingRef = useRef(null);
+  const sectionsSaveTimerRef = useRef(null);
 
   // ── Vocal assignments (loaded from params or AsyncStorage) ───────────────
   const [vocalAssignments, setVocalAssignments] = useState(
@@ -1466,6 +1480,10 @@ export default function RehearsalScreen({ route, navigation }) {
       clearTimeout(markersSaveTimerRef.current);
       markersSaveTimerRef.current = null;
     }
+    if (sectionsSaveTimerRef.current) {
+      clearTimeout(sectionsSaveTimerRef.current);
+      sectionsSaveTimerRef.current = null;
+    }
 
     setLoading(true);
     setLoadStep(0);
@@ -1478,6 +1496,7 @@ export default function RehearsalScreen({ route, navigation }) {
     setActiveCueLabel("");
     setChartSections([]);
     setUserSections(null);
+    setSectionEditorVisible(false);
     setSetlistPanelOpen(false);
     setMarkersPanelOpen(false);
     setLightPanelOpen(false);
@@ -1614,27 +1633,42 @@ export default function RehearsalScreen({ route, navigation }) {
   useEffect(() => {
     if (!markersReady || !song?.id) return;
     const normalized = normalizeMarkersForStorage(markers);
-    const serialized = JSON.stringify(normalized);
+    const normalizedSections = normalizeSectionsForStorage(userSections);
+    const serialized = JSON.stringify({
+      markers: normalized,
+      loopMarkerId: loopMarkerId || null,
+      loopEnabled: !!loopEnabled,
+      sections: normalizedSections,
+    });
     if (serialized === lastSavedMarkersRef.current) return;
     lastSavedMarkersRef.current = serialized;
 
     if (markersSaveTimerRef.current) {
       clearTimeout(markersSaveTimerRef.current);
     }
-    markersSaveTimerRef.current = setTimeout(() => {
+    if (sectionsSaveTimerRef.current) {
+      clearTimeout(sectionsSaveTimerRef.current);
+    }
+    const saveFn = () => {
       addOrUpdateSong({
         ...song,
         rehearsalMarkers: normalized,
         rehearsalLoopMarkerId: loopMarkerId || null,
         rehearsalLoopEnabled: !!loopEnabled,
+        rehearsalSections: normalizedSections,
       }).catch(() => {});
-    }, 600);
+    };
+    markersSaveTimerRef.current = setTimeout(saveFn, 600);
+    sectionsSaveTimerRef.current = markersSaveTimerRef.current;
     return () => {
       if (markersSaveTimerRef.current) {
         clearTimeout(markersSaveTimerRef.current);
       }
+      if (sectionsSaveTimerRef.current) {
+        clearTimeout(sectionsSaveTimerRef.current);
+      }
     };
-  }, [markers, loopMarkerId, loopEnabled, markersReady, song]);
+  }, [markers, loopMarkerId, loopEnabled, markersReady, song, userSections]);
 
   // ── Keep marker selections valid ───────────────────────────────────────
   useEffect(() => {
@@ -1688,6 +1722,13 @@ export default function RehearsalScreen({ route, navigation }) {
   // ── Load persisted rehearsal markers for this song ─────────────────────
   useEffect(() => {
     if (!song?.id) {
+      setUserSections(null);
+      lastSavedMarkersRef.current = JSON.stringify({
+        markers: [],
+        loopMarkerId: null,
+        loopEnabled: false,
+        sections: null,
+      });
       setMarkersReady(true);
       return;
     }
@@ -1697,7 +1738,13 @@ export default function RehearsalScreen({ route, navigation }) {
         song?.analysis?.markers ||
         [],
     );
+    const storedSections = normalizeSectionsForStorage(
+      song?.rehearsalSections ??
+      song?.customSections ??
+      null,
+    );
     setMarkers(stored);
+    setUserSections(storedSections);
     setSelectedMarkerId(null);
     setSelectedMarkerIds([]);
     setMultiSelectMode(false);
@@ -1713,7 +1760,21 @@ export default function RehearsalScreen({ route, navigation }) {
       setLoopEnabled(false);
     }
 
-    lastSavedMarkersRef.current = JSON.stringify(stored);
+    lastSavedMarkersRef.current = JSON.stringify({
+      markers: stored,
+      loopMarkerId:
+        song?.rehearsalLoopMarkerId &&
+        stored.some((m) => m.id === song.rehearsalLoopMarkerId)
+          ? song.rehearsalLoopMarkerId
+          : null,
+      loopEnabled:
+        !!(
+          song?.rehearsalLoopMarkerId &&
+          stored.some((m) => m.id === song.rehearsalLoopMarkerId) &&
+          song?.rehearsalLoopEnabled
+        ),
+      sections: storedSections,
+    });
     setMarkersReady(true);
   }, [song?.id]);
 
@@ -2490,42 +2551,98 @@ export default function RehearsalScreen({ route, navigation }) {
     });
   }
 
+  function snapshotEditableSections(list = sectionJumpList) {
+    return normalizeSectionsForStorage(
+      list.map((s) => ({
+        id: s.sectionRef || s.id,
+        label: s.label,
+        timeSec: s.timeSec,
+        color: s.color,
+      })),
+    );
+  }
+
+  function renameSection(sec, nextLabel) {
+    const trimmed = String(nextLabel || "").trim();
+    if (!trimmed) return;
+    const nextSections = snapshotEditableSections(
+      sectionJumpList.map((s) => {
+        const sameId = String(s?.id || "") === String(sec?.id || "");
+        const sameMarker =
+          sec?.markerId &&
+          String(s?.markerId || "") === String(sec?.markerId || "");
+        return sameId || sameMarker ? { ...s, label: trimmed } : s;
+      }),
+    );
+    setUserSections(nextSections);
+    if (sec?.markerId) {
+      setMarkers((prev) =>
+        prev.map((m) =>
+          String(m?.id || "") === String(sec.markerId)
+            ? { ...m, label: trimmed }
+            : m,
+        ),
+      );
+    }
+  }
+
+  function deleteSection(sec) {
+    const nextSections = snapshotEditableSections(
+      sectionJumpList.filter((s) => {
+        const sameId = String(s?.id || "") === String(sec?.id || "");
+        const sameMarker =
+          sec?.markerId &&
+          String(s?.markerId || "") === String(sec?.markerId || "");
+        return !(sameId || sameMarker);
+      }),
+    );
+    setUserSections(nextSections);
+    if (sec?.markerId) {
+      setMarkers((prev) =>
+        prev.filter((m) => String(m?.id || "") !== String(sec.markerId)),
+      );
+    }
+  }
+
+  function promptRenameSection(sec) {
+    if (Platform.OS === "ios" && typeof Alert.prompt === "function") {
+      Alert.prompt(
+        "Rename Section",
+        "",
+        (newLabel) => renameSection(sec, newLabel),
+        "plain-text",
+        sec?.label || "",
+      );
+      return;
+    }
+    Alert.alert("Rename Section", "Section renaming is currently available on iPad/iPhone.");
+  }
+
   // ── Long-press on a section pin → rename or delete ─────────────────────
   function handleSectionMenu(sec) {
     Alert.alert(`📍 ${sec.label}`, formatTime(sec.timeSec ?? 0), [
       {
-        text: 'Rename',
-        onPress: () => {
-          Alert.prompt('Rename Cue', '', (newLabel) => {
-            if (!newLabel?.trim()) return;
-            const trimmed = newLabel.trim();
-            if (sec.markerId) {
-              setMarkers(prev => prev.map(m =>
-                m.id === sec.markerId ? { ...m, label: trimmed } : m
-              ));
-            } else {
-              // Base / chart section — snapshot all cues with the rename applied
-              setUserSections(
-                sectionJumpList.map(s =>
-                  s.id === sec.id ? { ...s, label: trimmed } : s
-                )
-              );
-            }
-          }, 'plain-text', sec.label);
-        },
+        text: "Rename",
+        onPress: () => promptRenameSection(sec),
       },
       {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          if (sec.markerId) {
-            setMarkers(prev => prev.filter(m => m.id !== sec.markerId));
-          } else {
-            setUserSections(sectionJumpList.filter(s => s.id !== sec.id));
-          }
-        },
+        text: "Delete",
+        style: "destructive",
+        onPress: () =>
+          Alert.alert(
+            "Delete Section",
+            `Remove "${sec.label}" from this song in rehearsal?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: () => deleteSection(sec),
+              },
+            ],
+          ),
       },
-      { text: 'Cancel', style: 'cancel' },
+      { text: "Cancel", style: "cancel" },
     ]);
   }
 
@@ -2888,8 +3005,8 @@ export default function RehearsalScreen({ route, navigation }) {
       return fallback || COLORS[key] || "#6366F1";
     };
     let raw = [];
-    if (userSections !== null && userSections.length > 0) {
-      // User-edited cues — highest priority
+    if (userSections !== null) {
+      // User-edited cues — highest priority, including intentional empty lists
       raw = userSections.map((s, i) => ({
         label: s.label,
         timeSec: s.timeSec ?? s.positionSeconds ?? 0,
@@ -3517,6 +3634,13 @@ export default function RehearsalScreen({ route, navigation }) {
             <Text style={[styles.tbMenuBtnText, { color: '#A5B4FC' }]}>🎛 STUDIO</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={[styles.tbMenuBtn, { borderColor: "#F59E0B", backgroundColor: "#1A1208" }]}
+            onPress={() => setSectionEditorVisible(true)}
+          >
+            <Text style={[styles.tbMenuBtnText, { color: "#FCD34D" }]}>✂ SECTIONS</Text>
+          </TouchableOpacity>
+
           {/* Settings */}
           <TouchableOpacity style={styles.tbMenuBtn} onPress={() => setSettingsModalVisible(true)}>
             <Text style={styles.tbMenuBtnText}>⚙ SETTINGS</Text>
@@ -3757,6 +3881,108 @@ export default function RehearsalScreen({ route, navigation }) {
         )}
 
       </View>
+      {/* ── Section Editor Modal ─────────────────────────────────────────── */}
+      <Modal
+        visible={sectionEditorVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSectionEditorVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.settingsOverlay}
+          activeOpacity={1}
+          onPress={() => setSectionEditorVisible(false)}
+        />
+        <View style={styles.settingsSheet}>
+          <View style={styles.settingsSheetHandle} />
+          <Text style={styles.settingsSheetTitle}>✂ Edit Song Sections</Text>
+          <Text style={styles.sectionEditorHint}>
+            Remove the sections you do not want to use in rehearsal, or rename them for this song.
+          </Text>
+
+          <ScrollView
+            style={styles.sectionEditorList}
+            contentContainerStyle={styles.sectionEditorListContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {sectionJumpList.length === 0 ? (
+              <View style={styles.sectionEditorEmpty}>
+                <Text style={styles.sectionEditorEmptyText}>
+                  No sections available for this song right now.
+                </Text>
+              </View>
+            ) : (
+              sectionJumpList.map((sec) => (
+                <View
+                  key={`${sec.id}_${Math.round(Number(sec.timeSec || 0) * 1000)}`}
+                  style={styles.sectionEditorRow}
+                >
+                  <View style={styles.sectionEditorInfo}>
+                    <View
+                      style={[
+                        styles.sectionEditorSwatch,
+                        { backgroundColor: sec.color || "#6366F1" },
+                      ]}
+                    />
+                    <View style={styles.sectionEditorMeta}>
+                      <Text style={styles.sectionEditorTitle}>{sec.label}</Text>
+                      <Text style={styles.sectionEditorTime}>
+                        Starts at {formatTime(sec.timeSec ?? 0)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.sectionEditorActions}>
+                    <TouchableOpacity
+                      style={styles.sectionEditorActionBtn}
+                      onPress={() => promptRenameSection(sec)}
+                    >
+                      <Text style={styles.sectionEditorActionText}>Rename</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.sectionEditorActionBtn, styles.sectionEditorDeleteBtn]}
+                      onPress={() =>
+                        Alert.alert(
+                          "Delete Section",
+                          `Remove "${sec.label}" from this song in rehearsal?`,
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Delete",
+                              style: "destructive",
+                              onPress: () => deleteSection(sec),
+                            },
+                          ],
+                        )
+                      }
+                    >
+                      <Text style={[styles.sectionEditorActionText, styles.sectionEditorDeleteText]}>
+                        Delete
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+
+          <View style={styles.settingsActionsRow}>
+            <TouchableOpacity
+              style={styles.settingsActionBtn}
+              onPress={() => setUserSections(null)}
+            >
+              <Text style={styles.settingsActionText}>↺ Restore Auto Sections</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={styles.settingsCloseBtn}
+            onPress={() => setSectionEditorVisible(false)}
+          >
+            <Text style={styles.settingsCloseBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       {/* ── Settings Modal ────────────────────────────────────────────────── */}
       <Modal
         visible={settingsModalVisible}
@@ -3870,6 +4096,13 @@ export default function RehearsalScreen({ route, navigation }) {
               onPress={() => { setSettingsModalVisible(false); navigation.navigate('Studio', { song }); }}
             >
               <Text style={[styles.settingsActionText, { color: '#A5B4FC' }]}>🎛 STUDIO</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.settingsActionBtn, { borderColor: "#F59E0B", backgroundColor: "#1A1208" }]}
+              onPress={() => { setSettingsModalVisible(false); setSectionEditorVisible(true); }}
+            >
+              <Text style={[styles.settingsActionText, { color: "#FCD34D" }]}>✂ SECTIONS</Text>
             </TouchableOpacity>
           </View>
 
@@ -5493,6 +5726,88 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     fontWeight: '700',
+  },
+  sectionEditorHint: {
+    color: "#94A3B8",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: -6,
+    marginBottom: 14,
+  },
+  sectionEditorList: {
+    maxHeight: 360,
+    marginBottom: 12,
+  },
+  sectionEditorListContent: {
+    gap: 10,
+  },
+  sectionEditorEmpty: {
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 12,
+    padding: 16,
+    backgroundColor: "#060D1E",
+  },
+  sectionEditorEmptyText: {
+    color: "#64748B",
+    fontSize: 12,
+  },
+  sectionEditorRow: {
+    backgroundColor: "#060D1E",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+  },
+  sectionEditorInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  sectionEditorSwatch: {
+    width: 12,
+    height: 36,
+    borderRadius: 999,
+  },
+  sectionEditorMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sectionEditorTitle: {
+    color: "#E5E7EB",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  sectionEditorTime: {
+    color: "#94A3B8",
+    fontSize: 11,
+    marginTop: 3,
+  },
+  sectionEditorActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  sectionEditorActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#334155",
+    backgroundColor: "#0B1120",
+  },
+  sectionEditorDeleteBtn: {
+    borderColor: "#7F1D1D",
+    backgroundColor: "#220A0A",
+  },
+  sectionEditorActionText: {
+    color: "#CBD5E1",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  sectionEditorDeleteText: {
+    color: "#FCA5A5",
   },
 
   // ── Pipeline Settings panel (used inside modal)
