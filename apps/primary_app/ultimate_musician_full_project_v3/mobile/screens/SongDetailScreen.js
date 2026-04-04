@@ -36,7 +36,7 @@ import {
   getOutputOptions,
   makeDefaultSettings,
 } from "../data/models";
-import { addOrUpdateSong, getSettings } from "../data/storage";
+import { addOrUpdateSong, getSettings, getSongs } from "../data/storage";
 import { transposeChordChart } from "../data/chordTranspose";
 import { parseSectionsForWaveform } from "../utils/parseSectionsForWaveform";
 
@@ -901,19 +901,70 @@ export default function SongDetailScreen({ route, navigation }) {
     setAiRecommendLoading(true);
     setAiRecommendations(null);
     try {
-      const res = await fetch(`${SYNC_URL}/sync/ai/recommend`, {
+      const librarySongs = await getSongs();
+      const setlistSource =
+        route?.params?.setlistContext ||
+        route?.params?.service?.songs ||
+        route?.params?.service?.setlist ||
+        route?.params?.plan?.songs ||
+        [];
+      const setlistContext = Array.isArray(setlistSource)
+        ? setlistSource
+            .map((item) => {
+              const song = item?.song || item || {};
+              return {
+                title: song?.title || item?.title || '',
+                key: song?.key || song?.originalKey || item?.key || '',
+                bpm: Number.isFinite(Number(song?.bpm || item?.bpm))
+                  ? Number(song?.bpm || item?.bpm)
+                  : null,
+              };
+            })
+            .filter((song) => song.title)
+        : [];
+      const songPool = Array.isArray(librarySongs)
+        ? librarySongs
+            .map((song) => ({
+              title: song?.title || '',
+              artist: song?.artist || '',
+              key: song?.key || song?.originalKey || '',
+              bpm: Number.isFinite(Number(song?.bpm)) ? Number(song.bpm) : null,
+              tags: Array.isArray(song?.tags) ? song.tags : [],
+            }))
+            .filter((song) => song.title)
+            .slice(0, 60)
+        : [];
+
+      const res = await fetchWithRetry(`${SYNC_URL}/sync/ai/recommend`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ currentSong: { title, key, bpm: bpm ? parseInt(bpm, 10) : null } }),
+        body: JSON.stringify({
+          currentSong: {
+            title,
+            artist,
+            key,
+            bpm: bpm ? parseInt(bpm, 10) : null,
+          },
+          setlistContext,
+          songPool,
+        }),
       });
+      if (!res.ok) {
+        throw new Error(`AI recommendation ${res.status}`);
+      }
       const data = await res.json();
       if (data.recommendations?.length > 0) {
         setAiRecommendations(data.recommendations);
       } else {
-        Alert.alert('No results', 'AI could not find recommendations. Try again.');
+        Alert.alert(
+          'No results',
+          data?.candidateCount === 0
+            ? 'No other songs were available in the library to compare against.'
+            : 'AI could not find recommendations. Try again.',
+        );
       }
-    } catch {
-      Alert.alert('Error', 'Could not reach AI service. Check your connection.');
+    } catch (err) {
+      Alert.alert('Error', String(err?.message || 'Could not reach AI service. Check your connection.'));
     } finally {
       setAiRecommendLoading(false);
     }
