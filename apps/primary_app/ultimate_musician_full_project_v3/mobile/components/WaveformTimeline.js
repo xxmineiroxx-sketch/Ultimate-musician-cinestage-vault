@@ -157,6 +157,7 @@ export default function WaveformTimeline({
   sectionMarkers = [],
   activeSectionLabel = null,
   sectionLoopActive = false,
+  sectionEditMode = false,
   onSectionTap = null, // (sec, tapCount: 1|2|3) — caller handles loop/worship
   onWorshipLoop = null, // shortcut for 3-tap worship loop
   onSectionMarkerDrag = null, // (sec, nextTimeSec, isFinal) — drag cue marker left/right
@@ -224,6 +225,10 @@ export default function WaveformTimeline({
   const [tapVisual, setTapVisual] = React.useState({}); // { [label]: 1|2|3 } for UI
 
   function handleMarkerPress(sec) {
+    if (sectionEditMode && typeof onSectionMenu === "function") {
+      onSectionMenu(sec);
+      return;
+    }
     const key = String(sec?.markerId || sec?.id || sec?.label);
     const prev = tapCountRef.current[key] || 0;
     const count = prev + 1;
@@ -880,6 +885,7 @@ export default function WaveformTimeline({
           const isWorship = tapCount === 3;
           const color = sec.color;
           const canDragSection = typeof onSectionMarkerDrag === "function";
+          const showEditAccent = sectionEditMode && typeof onSectionMenu === "function";
           // Oversized touch targets for iPad mini / Stage use
           const pinHeight = isIpad ? 44 : 32; 
           const pinMinWidth = isIpad ? 84 : 64;
@@ -1008,8 +1014,16 @@ export default function WaveformTimeline({
                     marginLeft: 2,
                     borderRadius: pinRadius,
                     gap: pinGap,
-                    borderColor: isActive ? "#FFF" : color + "60",
-                    backgroundColor: isActive ? color : "rgba(10, 15, 30, 0.85)",
+                    borderColor: showEditAccent
+                      ? "#FCD34D"
+                      : isActive
+                        ? "#FFF"
+                        : color + "60",
+                    backgroundColor: showEditAccent
+                      ? "rgba(245, 158, 11, 0.15)"
+                      : isActive
+                        ? color
+                        : "rgba(10, 15, 30, 0.85)",
                     borderWidth: isActive ? 2 : 1,
                     shadowColor: color,
                     shadowOpacity: isActive ? 0.6 : 0,
@@ -1031,7 +1045,18 @@ export default function WaveformTimeline({
                   </Text>
                 ) : null}
                 <Text
-                  style={[styles.markerPinText, { fontSize: isIpad ? 13 : 10, fontWeight: "800", color: isActive ? "#FFF" : color }]}
+                  style={[
+                    styles.markerPinText,
+                    {
+                      fontSize: isIpad ? 13 : 10,
+                      fontWeight: "800",
+                      color: showEditAccent
+                        ? "#FCD34D"
+                        : isActive
+                          ? "#FFF"
+                          : color,
+                    },
+                  ]}
                   numberOfLines={1}
                 >
                   {displayLabel}

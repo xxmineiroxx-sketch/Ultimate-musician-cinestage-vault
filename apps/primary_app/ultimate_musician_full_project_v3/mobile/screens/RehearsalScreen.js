@@ -1264,6 +1264,7 @@ export default function RehearsalScreen({ route, navigation }) {
   const [pipelineExpanded, setPipelineExpanded] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [sectionEditorVisible, setSectionEditorVisible] = useState(false);
+  const [sectionEditMode, setSectionEditMode] = useState(false);
   const [rehearsalPresetType, setRehearsalPresetType]       = useState('Worship Keys');
   const [rehearsalPresetLoading, setRehearsalPresetLoading] = useState(false);
   const [rehearsalPresetResult, setRehearsalPresetResult]   = useState(null);
@@ -2575,6 +2576,9 @@ export default function RehearsalScreen({ route, navigation }) {
       }),
     );
     setUserSections(nextSections);
+    if (activeSectionLabel === sec?.label) {
+      setActiveSectionLabel(trimmed);
+    }
     if (sec?.markerId) {
       setMarkers((prev) =>
         prev.map((m) =>
@@ -2597,6 +2601,17 @@ export default function RehearsalScreen({ route, navigation }) {
       }),
     );
     setUserSections(nextSections);
+    if (activeSectionLabel === sec?.label) {
+      setActiveSectionLabel(null);
+      setSectionLoopActive(false);
+      setLoopEnabled(false);
+    }
+    if (loopMarkerId && String(loopMarkerId) === String(sec?.markerId || "")) {
+      setLoopMarkerId(null);
+    }
+    if (selectedMarkerId && String(selectedMarkerId) === String(sec?.markerId || "")) {
+      setSelectedMarkerId(null);
+    }
     if (sec?.markerId) {
       setMarkers((prev) =>
         prev.filter((m) => String(m?.id || "") !== String(sec.markerId)),
@@ -2753,6 +2768,10 @@ export default function RehearsalScreen({ route, navigation }) {
 
   // ── Section marker pin: tap=seek, double-tap=loop, triple-tap=worship loop ──
   function handleSectionTap(sec) {
+    if (sectionEditMode) {
+      handleSectionMenu(sec);
+      return;
+    }
     const now = Date.now();
     const last = lastSectionTapRef.current;
     const tc = sectionTapCountRef.current;
@@ -2906,6 +2925,11 @@ export default function RehearsalScreen({ route, navigation }) {
     setActiveCueLabel(specialCue ? `${sec.label} — ${specialCue}` : sec.label);
     setTimeout(() => setActiveCueLabel(''), 3000);
   }
+
+  useEffect(() => {
+    setSectionEditMode(false);
+    setSectionEditorVisible(false);
+  }, [song?.id]);
 
   /** Special voice cues per section (from voice_cues.json spec) */
   function _sectionVoiceCue(label) {
@@ -3693,10 +3717,24 @@ export default function RehearsalScreen({ route, navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.tbMenuBtn, { borderColor: "#F59E0B", backgroundColor: "#1A1208" }]}
-            onPress={() => setSectionEditorVisible(true)}
+            style={[
+              styles.tbMenuBtn,
+              sectionEditMode
+                ? styles.tbMenuBtnActive
+                : { borderColor: "#F59E0B", backgroundColor: "#1A1208" },
+            ]}
+            onPress={() => {
+              setSectionEditorVisible(false);
+              setSectionEditMode((prev) => !prev);
+            }}
+            onLongPress={() => {
+              setSectionEditMode(false);
+              setSectionEditorVisible(true);
+            }}
           >
-            <Text style={[styles.tbMenuBtnText, { color: "#FCD34D" }]}>✂ SECTIONS</Text>
+            <Text style={[styles.tbMenuBtnText, { color: "#FCD34D" }]}>
+              {sectionEditMode ? "✂ DONE" : "✂ SECTIONS"}
+            </Text>
           </TouchableOpacity>
 
           {/* Settings */}
@@ -3707,6 +3745,13 @@ export default function RehearsalScreen({ route, navigation }) {
 
         {/* ── Waveform Pipeline ────────────────────────────────────────────── */}
         <View style={styles.rehWaveCard}>
+          {sectionEditMode ? (
+            <View style={styles.sectionEditBanner}>
+              <Text style={styles.sectionEditBannerText}>
+                Section edit mode is on. Tap a section on the waveform to rename, split, or delete it.
+              </Text>
+            </View>
+          ) : null}
           <WaveformTimeline
             sections={sectionJumpList}
             markers={markers}
@@ -3720,7 +3765,9 @@ export default function RehearsalScreen({ route, navigation }) {
             sectionMarkers={sectionJumpList}
             activeSectionLabel={activeSectionLabel}
             sectionLoopActive={sectionLoopActive}
+            sectionEditMode={sectionEditMode}
             onSectionTap={(sec) => handleSectionTap(sec)}
+            onSectionMenu={handleSectionMenu}
             onSectionMarkerDrag={handleSectionMarkerDrag}
             onMarkerTap={handleWaveformMarkerTap}
             onMarkerDrag={(marker, nextSec, isFinal) => handleMarkerDrag(marker, nextSec, isFinal)}
@@ -3955,7 +4002,9 @@ export default function RehearsalScreen({ route, navigation }) {
           <View style={styles.settingsSheetHandle} />
           <Text style={styles.settingsSheetTitle}>✂ Edit Song Sections</Text>
           <Text style={styles.sectionEditorHint}>
-            Remove or split the sections you do not want to use in rehearsal. To move a section in time, drag its pin on the waveform.
+            Remove or split the sections you do not want to use in rehearsal. To move a
+            section in time, drag its pin on the waveform. Long-press the ✂ button to
+            reopen this full list.
           </Text>
 
           <ScrollView
@@ -5797,6 +5846,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: -6,
     marginBottom: 14,
+  },
+  sectionEditBanner: {
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#F59E0B",
+    backgroundColor: "#1A1208",
+  },
+  sectionEditBannerText: {
+    color: "#FCD34D",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
   },
   sectionEditorList: {
     maxHeight: 360,
