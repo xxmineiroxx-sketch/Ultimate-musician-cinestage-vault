@@ -17,7 +17,7 @@ const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_NAMES = ['January','February','March','April','May','June',
                      'July','August','September','October','November','December'];
 
-function InlineCalendar({ selectedDate, onSelect }) {
+function InlineCalendar({ selectedDate, onSelect, markedDates }) {
   const initial = selectedDate ? new Date(selectedDate + 'T12:00:00') : new Date();
   const [viewYear,  setViewYear]  = useState(initial.getFullYear());
   const [viewMonth, setViewMonth] = useState(initial.getMonth());
@@ -73,6 +73,7 @@ function InlineCalendar({ selectedDate, onSelect }) {
             const key = cellKey(day);
             const isSelected = key === selectedDate;
             const isToday    = key === todayStr;
+            const hasService = markedDates && markedDates.has(key);
             return (
               <TouchableOpacity
                 key={ci}
@@ -83,6 +84,9 @@ function InlineCalendar({ selectedDate, onSelect }) {
                 <Text style={[cal.cellTxt, isSelected && cal.cellTxtSelected, isToday && !isSelected && cal.cellTxtToday]}>
                   {day}
                 </Text>
+                {hasService && (
+                  <View style={[cal.serviceDot, isSelected && cal.serviceDotSelected]} />
+                )}
               </TouchableOpacity>
             );
           })}
@@ -106,6 +110,8 @@ const cal = StyleSheet.create({
   cellTxt:         { color: '#9CA3AF', fontSize: 13 },
   cellTxtSelected: { color: '#FFFFFF', fontWeight: '800' },
   cellTxtToday:    { color: '#818CF8', fontWeight: '700' },
+  serviceDot:      { width: 5, height: 5, borderRadius: 3, backgroundColor: '#8B5CF6', marginTop: 2 },
+  serviceDotSelected: { backgroundColor: '#C4B5FD' },
 });
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -440,6 +446,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [newSvcTime, setNewSvcTime]         = useState('');
   const [savingSvc, setSavingSvc]           = useState(false);
   const [showArchivedServices, setShowArchivedServices] = useState(false);
+  const [calSelectedDate, setCalSelectedDate] = useState(null); // date selected on main calendar
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState(null);
   const serviceSwipeRefs = useRef({});
@@ -1546,7 +1553,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // ── Render: Calendar ────────────────────────────────────────────────────
   const renderCalendar = () => {
-    // Show only upcoming/today services, sorted chronologically
+    // All services sorted chronologically for the list below
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const sorted = [...services]
       .filter(svc => {
@@ -1560,112 +1567,173 @@ export default function AdminDashboardScreen({ navigation, route }) {
         if (!b.date) return -1;
         return new Date(a.date) - new Date(b.date);
       });
-    const byMonth = {};
-    for (const svc of sorted) {
-      const mk = monthLabel(svc.date);
-      if (!byMonth[mk]) byMonth[mk] = [];
-      byMonth[mk].push(svc);
+
+    // Build a Set of all dates that have services (for dot markers)
+    const markedDateSet = new Set(services.map(s => s.date).filter(Boolean));
+
+    // Which service lives on the currently selected calendar date?
+    const selectedSvc = calSelectedDate
+      ? services.find(s => s.date === calSelectedDate) || null
+      : null;
+
+    function handleCalDayTap(dateStr) {
+      setCalSelectedDate(dateStr);
+      const svc = services.find(s => s.date === dateStr);
+      if (svc) {
+        // Day has a service → open/close it
+        setExpandedSvc(prev => prev?.id === svc.id ? null : svc);
+        setShowNewService(false);
+      } else {
+        // Empty day → pre-fill create form
+        setNewSvcDate(dateStr);
+        setNewSvcName('');
+        setNewSvcTime('');
+        setShowNewService(true);
+        setExpandedSvc(null);
+      }
     }
+
+    const renderSvcCard = (svc) => {
+      const isOpen = expandedSvc?.id === svc.id;
+      const plan   = plans[svc.id] || {};
+      const card = (
+        <View style={[s.calCard, isOpen && s.calCardOpen]}>
+          <TouchableOpacity
+            style={s.calCardTap}
+            onPress={() => {
+              setCalSelectedDate(svc.date || null);
+              setExpandedSvc(isOpen ? null : svc);
+              setShowNewService(false);
+            }}
+            onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
+            delayLongPress={450}
+          >
+            <View style={s.calDayBadge}>
+              <Text style={s.calDayNum}>{dayNum(svc.date)}</Text>
+              <Text style={s.calDayMon}>{dayShortMonth(svc.date)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.svcName}>{svc.name || svc.title}</Text>
+              {svc.time ? <Text style={s.svcTime}>🕐 {svc.time}</Text> : null}
+              <Text style={s.svcMeta}>
+                🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
+              </Text>
+              {svc.created_by_name ? (
+                <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
+              ) : null}
+              {canDeleteServices ? (
+                <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
+              ) : null}
+            </View>
+            <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>
+              {isOpen ? '▲' : '▶'}
+            </Text>
+          </TouchableOpacity>
+          {isOpen && (
+            <View style={s.svcPlanContainer}>
+              <Text style={s.svcPlanTitle}>📋 {svc.name || svc.title}</Text>
+              {renderPlanSection(svc)}
+            </View>
+          )}
+        </View>
+      );
+      if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
+      return (
+        <Swipeable
+          key={svc.id}
+          ref={(ref) => {
+            if (ref) serviceSwipeRefs.current[svc.id] = ref;
+            else delete serviceSwipeRefs.current[svc.id];
+          }}
+          overshootRight={false}
+          friction={2}
+          rightThreshold={40}
+          onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
+          onSwipeableClose={() => {
+            if (openServiceSwipeIdRef.current === svc.id) {
+              openServiceSwipeIdRef.current = null;
+            }
+          }}
+          renderRightActions={() => (
+            <TouchableOpacity
+              style={[
+                s.serviceDeleteAction,
+                deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
+              ]}
+              activeOpacity={0.9}
+              disabled={deletingServiceId === svc.id}
+              onPress={() => confirmDeleteService(svc)}
+            >
+              {deletingServiceId === svc.id ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <>
+                  <Text style={s.serviceDeleteActionIcon}>🗑</Text>
+                  <Text style={s.serviceDeleteActionText}>Delete</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        >
+          {card}
+        </Swipeable>
+      );
+    };
 
     return (
       <ScrollView
         contentContainerStyle={s.tabContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
-        <TouchableOpacity style={s.addBtn} onPress={() => setShowNewService(v => !v)}>
-          <Text style={s.addBtnText}>{showNewService ? '✕ Cancel' : '+ New Service'}</Text>
-        </TouchableOpacity>
-        {renderNewServiceForm()}
+        {/* Full calendar always visible — tap a day to create or open a service */}
+        <InlineCalendar
+          selectedDate={calSelectedDate}
+          markedDates={markedDateSet}
+          onSelect={handleCalDayTap}
+        />
+        <Text style={s.calHintText}>
+          {calSelectedDate
+            ? selectedSvc
+              ? `📅 ${calSelectedDate} — tap ▶ below to manage songs & team`
+              : `📅 ${calSelectedDate} — no service yet`
+            : 'Tap a day to create a service or open an existing one'}
+        </Text>
 
-        {sorted.length === 0 && !loading && (
-          <View style={s.empty}>
-            <Text style={s.emptyIcon}>📅</Text>
-            <Text style={s.emptyText}>No upcoming services{'\n'}Tap "+ New Service" to create one</Text>
+        {/* Create service form — shown when empty day tapped */}
+        {showNewService && !selectedSvc && (
+          <View style={s.formCard}>
+            <View style={s.formCardHeader}>
+              <Text style={s.formCardTitle}>New Service — {newSvcDate}</Text>
+              <TouchableOpacity onPress={() => { setShowNewService(false); setCalSelectedDate(null); }}>
+                <Text style={s.formCardClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.formLabel}>Service Name</Text>
+            <TextInput style={s.formInput} value={newSvcName} onChangeText={setNewSvcName}
+              placeholder="Sunday Morning Service" placeholderTextColor="#6B7280" />
+            <Text style={s.formLabel}>Time (optional)</Text>
+            <TextInput style={s.formInput} value={newSvcTime} onChangeText={setNewSvcTime}
+              placeholder="09:00 AM" placeholderTextColor="#6B7280" />
+            <TouchableOpacity style={[s.saveBtn, savingSvc && s.saveBtnDisabled]}
+              onPress={handleCreateService} disabled={savingSvc}>
+              {savingSvc ? <ActivityIndicator size="small" color="#FFF" />
+                : <Text style={s.saveBtnText}>Create Service</Text>}
+            </TouchableOpacity>
           </View>
         )}
 
-        {Object.entries(byMonth).map(([month, svcs]) => (
-          <View key={month}>
-            <Text style={s.calMonthHeader}>{month}</Text>
-            {svcs.map(svc => {
-              const isOpen = expandedSvc?.id === svc.id;
-              const plan   = plans[svc.id] || {};
-              const card = (
-                <View style={[s.calCard, isOpen && s.calCardOpen]}>
-                  <TouchableOpacity
-                    style={s.calCardTap}
-                    onPress={() => setExpandedSvc(isOpen ? null : svc)}
-                    onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
-                    delayLongPress={450}
-                  >
-                    <View style={s.calDayBadge}>
-                      <Text style={s.calDayNum}>{dayNum(svc.date)}</Text>
-                      <Text style={s.calDayMon}>{dayShortMonth(svc.date)}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.svcName}>{svc.name || svc.title}</Text>
-                      {svc.time ? <Text style={s.svcTime}>🕐 {svc.time}</Text> : null}
-                      <Text style={s.svcMeta}>
-                        🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
-                      </Text>
-                      {svc.created_by_name ? (
-                        <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
-                      ) : null}
-                      {canDeleteServices ? (
-                        <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
-                      ) : null}
-                    </View>
-                    <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>
-                      {isOpen ? '▲' : '▶'}
-                    </Text>
-                  </TouchableOpacity>
-                  {isOpen && renderPlanSection(svc)}
-                </View>
-              );
-              if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
-              return (
-                <Swipeable
-                  key={svc.id}
-                  ref={(ref) => {
-                    if (ref) serviceSwipeRefs.current[svc.id] = ref;
-                    else delete serviceSwipeRefs.current[svc.id];
-                  }}
-                  overshootRight={false}
-                  friction={2}
-                  rightThreshold={40}
-                  onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
-                  onSwipeableClose={() => {
-                    if (openServiceSwipeIdRef.current === svc.id) {
-                      openServiceSwipeIdRef.current = null;
-                    }
-                  }}
-                  renderRightActions={() => (
-                    <TouchableOpacity
-                      style={[
-                        s.serviceDeleteAction,
-                        deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
-                      ]}
-                      activeOpacity={0.9}
-                      disabled={deletingServiceId === svc.id}
-                      onPress={() => confirmDeleteService(svc)}
-                    >
-                      {deletingServiceId === svc.id ? (
-                        <ActivityIndicator color="#FFF" size="small" />
-                      ) : (
-                        <>
-                          <Text style={s.serviceDeleteActionIcon}>🗑</Text>
-                          <Text style={s.serviceDeleteActionText}>Delete</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                >
-                  {card}
-                </Swipeable>
-              );
-            })}
+        {/* Upcoming services list */}
+        {sorted.length === 0 && !loading && !showNewService && (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>📅</Text>
+            <Text style={s.emptyText}>No upcoming services{'\n'}Tap any day on the calendar to create one</Text>
           </View>
-        ))}
+        )}
+
+        {sorted.length > 0 && (
+          <Text style={s.calMonthHeader}>Upcoming Services</Text>
+        )}
+        {sorted.map(svc => renderSvcCard(svc))}
       </ScrollView>
     );
   };
@@ -2918,12 +2986,18 @@ const s = StyleSheet.create({
 
   // Calendar
   calMonthHeader: { fontSize: 13, fontWeight: '800', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, marginTop: 8 },
+  calHintText: { fontSize: 12, color: '#6B7280', textAlign: 'center', marginBottom: 12, fontStyle: 'italic' },
   calCard: { backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#374151', marginBottom: 10, overflow: 'hidden' },
   calCardOpen: { borderColor: '#8B5CF6' },
   calCardTap: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
   calDayBadge: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#1E1B4B', borderWidth: 1, borderColor: '#4F46E5', alignItems: 'center', justifyContent: 'center' },
   calDayNum: { fontSize: 18, fontWeight: '900', color: '#818CF8', lineHeight: 20 },
   calDayMon: { fontSize: 9, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase' },
+  svcPlanContainer: { borderTopWidth: 1, borderTopColor: '#1F2937', paddingHorizontal: 4 },
+  svcPlanTitle: { fontSize: 14, fontWeight: '800', color: '#E0E7FF', paddingHorizontal: 14, paddingTop: 12, marginBottom: 4 },
+  formCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  formCardTitle: { fontSize: 14, fontWeight: '800', color: '#E0E7FF' },
+  formCardClose: { fontSize: 18, color: '#6B7280', fontWeight: '700', padding: 4 },
   svcTime: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
 
   // Services / shared
