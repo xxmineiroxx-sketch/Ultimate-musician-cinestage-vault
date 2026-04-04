@@ -492,6 +492,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [approvingId, setApprovingId] = useState(null);
   const [rejectingId, setRejectingId] = useState(null);
 
+  // Setlist approvals (worship leader → admin review)
+  const [pendingSetlists, setPendingSetlists] = useState([]);
+  const [approvingSetlistId, setApprovingSetlistId] = useState(null);
+  const [rejectingSetlistId, setRejectingSetlistId] = useState(null);
+  const [submittingSetlistId, setSubmittingSetlistId] = useState(null);
+  const [rejectNoteTarget, setRejectNoteTarget] = useState(null); // { setlist, note }
+  const [rejectNoteText, setRejectNoteText] = useState('');
+
   // Pending services & songs (from Leaders)
   const [pendingServices, setPendingServices] = useState([]);
   const [pendingSongs, setPendingSongs]       = useState([]);
@@ -605,13 +613,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, lib, props, pSvcs, pSongs] = await Promise.all([
+      const [prof, msgs, lib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }).catch(() => ({})),
         fetchJson(`${SYNC_URL}/sync/proposals`,       { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/services/pending`,        { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/setlist/pending`,         { headers: hdrs }).catch(() => []),
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -663,6 +672,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       setProposals(Array.isArray(props) ? props : []);
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
+      setPendingSetlists(Array.isArray(pSetlists) ? pSetlists : []);
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
@@ -1230,6 +1240,78 @@ export default function AdminDashboardScreen({ navigation, route }) {
     ]);
   };
 
+  // ── Submit setlist for approval (Worship Leader / Manager) ─────────────
+  const handleSubmitSetlist = async (svc) => {
+    const plan = plans[svc.id] || {};
+    const songs = plan.songs || [];
+    if (songs.length === 0) {
+      Alert.alert('No Songs', 'Add at least one song to the setlist before submitting for approval.');
+      return;
+    }
+    setSubmittingSetlistId(svc.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/setlist/submit`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          serviceId: svc.id,
+          serviceName: svc.name || svc.title || '',
+          serviceDate: svc.date || '',
+          serviceTime: svc.time || '',
+          plan,
+          submittedBy: { email: profile?.email || '', name: profile?.name || 'Leader' },
+        }),
+      });
+      Alert.alert('✅ Submitted', 'Your setlist has been sent to the admin for review. It will be published once approved.');
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setSubmittingSetlistId(null); }
+  };
+
+  // ── Admin approves pending setlist → auto-publishes ─────────────────────
+  const handleApproveSetlist = async (setlist) => {
+    setApprovingSetlistId(setlist.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/setlist/approve?id=${encodeURIComponent(setlist.id)}`, {
+        method: 'POST', headers: syncHeaders(),
+      });
+      // Also broadcast to team via regular publish
+      const plan = setlist.plan || {};
+      if ((plan.team || []).length > 0) {
+        await fetchJson(`${SYNC_URL}/sync/publish`, {
+          method: 'POST', headers: syncHeaders(),
+          body: JSON.stringify({ serviceId: setlist.serviceId, plan }),
+        }).catch(() => {});
+      }
+      setPendingSetlists(prev => prev.filter(s => s.id !== setlist.id));
+      Alert.alert('✅ Approved & Published', `"${setlist.serviceName}" setlist is now live and team has been notified.`);
+      loadAll();
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setApprovingSetlistId(null); }
+  };
+
+  // ── Admin rejects pending setlist with optional note ────────────────────
+  const handleRejectSetlist = (setlist) => {
+    setRejectNoteTarget(setlist);
+    setRejectNoteText('');
+  };
+
+  const confirmRejectSetlist = async () => {
+    const setlist = rejectNoteTarget;
+    if (!setlist) return;
+    setRejectingSetlistId(setlist.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/setlist/reject?id=${encodeURIComponent(setlist.id)}`, {
+        method: 'POST', headers: syncHeaders(),
+        body: JSON.stringify({ note: rejectNoteText.trim() }),
+      });
+      setPendingSetlists(prev => prev.filter(s => s.id !== setlist.id));
+      setRejectNoteTarget(null);
+      setRejectNoteText('');
+      Alert.alert('Rejected', `"${setlist.serviceName}" setlist sent back for revision.`);
+    } catch (e) { Alert.alert('Error', e.message); }
+    finally { setRejectingSetlistId(null); }
+  };
+
   // ── Grant app role (Admin only) ─────────────────────────────────────────
   const handleGrantRole = async () => {
     if (!showGrantRole || !grantingRole) return;
@@ -1551,155 +1633,72 @@ export default function AdminDashboardScreen({ navigation, route }) {
     );
   };
 
-  // ── Render: Calendar ────────────────────────────────────────────────────
+  // ── Render: Calendar — ONLY for creating service dates ──────────────────
   const renderCalendar = () => {
-    // All services sorted chronologically for the list below
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const sorted = [...services]
-      .filter(svc => {
-        if (!svc.date) return true;
-        const d = new Date(svc.date.includes('T') ? svc.date : svc.date + 'T00:00:00');
-        return d >= today;
-      })
-      .sort((a, b) => {
-        if (!a.date && !b.date) return 0;
-        if (!a.date) return 1;
-        if (!b.date) return -1;
-        return new Date(a.date) - new Date(b.date);
-      });
-
-    // Build a Set of all dates that have services (for dot markers)
     const markedDateSet = new Set(services.map(s => s.date).filter(Boolean));
-
-    // Which service lives on the currently selected calendar date?
     const selectedSvc = calSelectedDate
       ? services.find(s => s.date === calSelectedDate) || null
       : null;
 
     function handleCalDayTap(dateStr) {
       setCalSelectedDate(dateStr);
-      const svc = services.find(s => s.date === dateStr);
-      if (svc) {
-        // Day has a service → open/close it
-        setExpandedSvc(prev => prev?.id === svc.id ? null : svc);
+      const existing = services.find(s => s.date === dateStr);
+      if (existing) {
+        // Day already has a service — just show info, no editing here
         setShowNewService(false);
       } else {
-        // Empty day → pre-fill create form
+        // Empty day → open create form
         setNewSvcDate(dateStr);
         setNewSvcName('');
         setNewSvcTime('');
         setShowNewService(true);
-        setExpandedSvc(null);
       }
     }
-
-    const renderSvcCard = (svc) => {
-      const isOpen = expandedSvc?.id === svc.id;
-      const plan   = plans[svc.id] || {};
-      const card = (
-        <View style={[s.calCard, isOpen && s.calCardOpen]}>
-          <TouchableOpacity
-            style={s.calCardTap}
-            onPress={() => {
-              setCalSelectedDate(svc.date || null);
-              setExpandedSvc(isOpen ? null : svc);
-              setShowNewService(false);
-            }}
-            onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
-            delayLongPress={450}
-          >
-            <View style={s.calDayBadge}>
-              <Text style={s.calDayNum}>{dayNum(svc.date)}</Text>
-              <Text style={s.calDayMon}>{dayShortMonth(svc.date)}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.svcName}>{svc.name || svc.title}</Text>
-              {svc.time ? <Text style={s.svcTime}>🕐 {svc.time}</Text> : null}
-              <Text style={s.svcMeta}>
-                🎵 {(plan.songs || []).length} songs  ·  👥 {(plan.team || []).length} members
-              </Text>
-              {svc.created_by_name ? (
-                <Text style={s.svcCreatedBy}>👤 {svc.created_by_name}</Text>
-              ) : null}
-              {canDeleteServices ? (
-                <Text style={s.svcDeleteHint}>↤ Swipe left to delete</Text>
-              ) : null}
-            </View>
-            <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>
-              {isOpen ? '▲' : '▶'}
-            </Text>
-          </TouchableOpacity>
-          {isOpen && (
-            <View style={s.svcPlanContainer}>
-              <Text style={s.svcPlanTitle}>📋 {svc.name || svc.title}</Text>
-              {renderPlanSection(svc)}
-            </View>
-          )}
-        </View>
-      );
-      if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
-      return (
-        <Swipeable
-          key={svc.id}
-          ref={(ref) => {
-            if (ref) serviceSwipeRefs.current[svc.id] = ref;
-            else delete serviceSwipeRefs.current[svc.id];
-          }}
-          overshootRight={false}
-          friction={2}
-          rightThreshold={40}
-          onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
-          onSwipeableClose={() => {
-            if (openServiceSwipeIdRef.current === svc.id) {
-              openServiceSwipeIdRef.current = null;
-            }
-          }}
-          renderRightActions={() => (
-            <TouchableOpacity
-              style={[
-                s.serviceDeleteAction,
-                deletingServiceId === svc.id && s.serviceDeleteActionDisabled,
-              ]}
-              activeOpacity={0.9}
-              disabled={deletingServiceId === svc.id}
-              onPress={() => confirmDeleteService(svc)}
-            >
-              {deletingServiceId === svc.id ? (
-                <ActivityIndicator color="#FFF" size="small" />
-              ) : (
-                <>
-                  <Text style={s.serviceDeleteActionIcon}>🗑</Text>
-                  <Text style={s.serviceDeleteActionText}>Delete</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-        >
-          {card}
-        </Swipeable>
-      );
-    };
 
     return (
       <ScrollView
         contentContainerStyle={s.tabContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
-        {/* Full calendar always visible — tap a day to create or open a service */}
         <InlineCalendar
           selectedDate={calSelectedDate}
           markedDates={markedDateSet}
           onSelect={handleCalDayTap}
         />
+
         <Text style={s.calHintText}>
           {calSelectedDate
             ? selectedSvc
-              ? `📅 ${calSelectedDate} — tap ▶ below to manage songs & team`
-              : `📅 ${calSelectedDate} — no service yet`
-            : 'Tap a day to create a service or open an existing one'}
+              ? `📅 Service on ${calSelectedDate} — go to Services tab to manage`
+              : `📅 ${calSelectedDate} — no service yet, fill in below`
+            : 'Tap any day to schedule a service'}
         </Text>
 
-        {/* Create service form — shown when empty day tapped */}
+        {/* Existing service info (no editing — direct to Services tab) */}
+        {calSelectedDate && selectedSvc && (
+          <View style={s.calInfoCard}>
+            <View style={s.calDayBadge}>
+              <Text style={s.calDayNum}>{dayNum(selectedSvc.date)}</Text>
+              <Text style={s.calDayMon}>{dayShortMonth(selectedSvc.date)}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.svcName}>{selectedSvc.name || selectedSvc.title}</Text>
+              {selectedSvc.time ? <Text style={s.svcTime}>🕐 {selectedSvc.time}</Text> : null}
+              <Text style={s.svcMeta}>
+                🎵 {((plans[selectedSvc.id] || {}).songs || []).length} songs  ·
+                👥 {((plans[selectedSvc.id] || {}).team || []).length} members
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={s.calGoToServicesBtn}
+              onPress={() => setTab('Services')}
+            >
+              <Text style={s.calGoToServicesTxt}>Manage ▶</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Create service form — shown for empty days */}
         {showNewService && !selectedSvc && (
           <View style={s.formCard}>
             <View style={s.formCardHeader}>
@@ -1722,23 +1721,17 @@ export default function AdminDashboardScreen({ navigation, route }) {
           </View>
         )}
 
-        {/* Upcoming services list */}
-        {sorted.length === 0 && !loading && !showNewService && (
+        {services.length === 0 && !loading && !showNewService && (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>📅</Text>
-            <Text style={s.emptyText}>No upcoming services{'\n'}Tap any day on the calendar to create one</Text>
+            <Text style={s.emptyText}>No services yet{'\n'}Tap any day to schedule one</Text>
           </View>
         )}
-
-        {sorted.length > 0 && (
-          <Text style={s.calMonthHeader}>Upcoming Services</Text>
-        )}
-        {sorted.map(svc => renderSvcCard(svc))}
       </ScrollView>
     );
   };
 
-  // ── Render: Services (flat list) ────────────────────────────────────────
+  // ── Render: Services — full plan editing + role-aware publish ───────────
   const renderServices = () => {
     const today = todayDateStr();
     const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
@@ -1747,95 +1740,103 @@ export default function AdminDashboardScreen({ navigation, route }) {
       .filter((svc) => isPastService(svc, today))
       .sort((a, b) => serviceSortKey(b).localeCompare(serviceSortKey(a)));
 
-    const STATUS_CONFIG = {
-      accepted:  { color: '#10B981', bg: '#052E16', label: 'Accepted',  dot: '●' },
-      declined:  { color: '#EF4444', bg: '#1F0A0A', label: 'Declined',  dot: '●' },
-      pending:   { color: '#F59E0B', bg: '#1C1207', label: 'Pending',   dot: '●' },
-    };
-
-    const getMemberStatus = (svcId, tm) =>
-      assignmentResponses[`${svcId}_${tm.personId}`]?.status ||
-      assignmentResponses[`${svcId}_${(tm.email||'').toLowerCase()}`]?.status ||
-      tm.status || 'pending';
-
     const renderSvcCard = (svc) => {
-      const plan  = plans[svc.id] || {};
-      const team  = plan.team || [];
-      const songs = plan.songs || [];
-      const cfg   = STATUS_CONFIG;
+      const isOpen = expandedSvc?.id === svc.id;
+      const plan   = plans[svc.id] || {};
+      const songs  = plan.songs || [];
+      const team   = plan.team  || [];
+      // Admin/Org Owner → Publish directly. Manager/MD → Submit for Approval.
+      const canPublishDirect = isAdmin;
 
-      return (
-        <View key={svc.id} style={s.svc2Card}>
-          {/* ── Header ── */}
-          <View style={s.svc2Header}>
-            <View style={{ flex: 1 }}>
+      const card = (
+        <View key={svc.id} style={[s.svc2Card, isOpen && { borderColor: '#8B5CF6' }]}>
+          {/* ── Header row ── */}
+          <TouchableOpacity
+            style={s.svc2CardTap}
+            onPress={() => setExpandedSvc(isOpen ? null : svc)}
+            onLongPress={canDeleteServices ? () => confirmDeleteService(svc) : undefined}
+            delayLongPress={450}
+          >
+            <View style={s.calDayBadge}>
+              <Text style={s.calDayNum}>{dayNum(svc.date)}</Text>
+              <Text style={s.calDayMon}>{dayShortMonth(svc.date)}</Text>
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={s.svc2Name}>{svc.name || svc.title || 'Service'}</Text>
               <Text style={s.svc2Date}>
                 {formatServiceDate(svc.date)}{svc.time ? `  ·  ${svc.time}` : ''}
-                {songs.length > 0 ? `  ·  ${songs.length} songs` : ''}
               </Text>
+              <Text style={s.svcMeta}>🎵 {songs.length} songs  ·  👥 {team.length} members</Text>
+              {svc.publishedAt ? (
+                <Text style={s.svcPublishedBadge}>✅ Published {new Date(svc.publishedAt).toLocaleDateString()}</Text>
+              ) : (
+                <Text style={s.svcDraftBadge}>📝 Draft</Text>
+              )}
             </View>
-            <TouchableOpacity
-              style={[s.svc2PublishBtn, publishingId === svc.id && { opacity: 0.5 }]}
-              onPress={() => handlePublish(svc)}
-              disabled={publishingId === svc.id}
-            >
-              {publishingId === svc.id
-                ? <ActivityIndicator size="small" color="#A78BFA" />
-                : <Text style={s.svc2PublishTxt}>📤 Publish</Text>}
-            </TouchableOpacity>
-          </View>
+            <Text style={[s.svcExpandHint, isOpen && { color: '#E5E7EB' }]}>{isOpen ? '▲' : '▶'}</Text>
+          </TouchableOpacity>
 
-          {/* ── Team roster ── */}
-          {team.length > 0 ? (
-            <View style={s.svc2Roster}>
-              {team.map((tm, idx) => {
-                const st   = getMemberStatus(svc.id, tm);
-                const conf = cfg[st] || cfg.pending;
-                return (
-                  <View key={tm.id || idx} style={[s.svc2Row, idx < team.length - 1 && s.svc2RowBorder]}>
-                    {/* Avatar */}
-                    <View style={[s.svc2Avatar, { backgroundColor: AVATAR_COLORS[(tm.name||'?').charCodeAt(0) % AVATAR_COLORS.length] }]}>
-                      <Text style={s.svc2AvatarTxt}>{(tm.name || '?')[0].toUpperCase()}</Text>
-                    </View>
-                    {/* Name + role */}
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.svc2MemberName}>{tm.name || 'Unknown'}</Text>
-                      <View style={s.svc2RoleChip}>
-                        <Text style={s.svc2RoleChipTxt}>{tm.role || '—'}</Text>
-                      </View>
-                    </View>
-                    {/* Status badge */}
-                    <View style={[s.svc2StatusBadge, { backgroundColor: conf.bg, borderColor: conf.color }]}>
-                      <Text style={[s.svc2StatusDot, { color: conf.color }]}>{conf.dot}</Text>
-                      <Text style={[s.svc2StatusTxt, { color: conf.color }]}>{conf.label}</Text>
-                    </View>
-                    {/* Remove from service */}
-                    {canManageMembers && (
-                      <TouchableOpacity
-                        style={s.svc2RemoveBtn}
-                        onPress={() => Alert.alert(
-                          'Remove from Service',
-                          `Remove ${tm.name || 'this member'} from this service?`,
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Remove', style: 'destructive', onPress: () => handleRemoveFromService(svc.id, tm.personId, tm.role) },
-                          ]
-                        )}
-                      >
-                        <Text style={s.svc2RemoveBtnTxt}>✕</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={s.svc2EmptyTeam}>
-              <Text style={s.svc2EmptyTeamTxt}>No team assigned — use Calendar to build the plan.</Text>
+          {/* ── Expanded: full plan editor ── */}
+          {isOpen && (
+            <View style={s.svcPlanContainer}>
+              <Text style={s.svcPlanTitle}>📋 {svc.name || svc.title}</Text>
+              {renderPlanSection(svc)}
+
+              {/* Publish / Submit for Approval button */}
+              <View style={s.svcActionRow}>
+                {canPublishDirect ? (
+                  <TouchableOpacity
+                    style={[s.svcPublishBtn, publishingId === svc.id && s.svcPublishBtnDisabled]}
+                    onPress={() => handlePublish(svc)}
+                    disabled={publishingId === svc.id}
+                  >
+                    {publishingId === svc.id
+                      ? <ActivityIndicator size="small" color="#FFF" />
+                      : <Text style={s.svcPublishBtnTxt}>📤 Publish to Team</Text>}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[s.svcSubmitBtn, submittingSetlistId === svc.id && s.svcPublishBtnDisabled]}
+                    onPress={() => handleSubmitSetlist(svc)}
+                    disabled={submittingSetlistId === svc.id}
+                  >
+                    {submittingSetlistId === svc.id
+                      ? <ActivityIndicator size="small" color="#FFF" />
+                      : <Text style={s.svcSubmitBtnTxt}>📨 Submit for Approval</Text>}
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           )}
         </View>
+      );
+
+      if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
+      return (
+        <Swipeable
+          key={svc.id}
+          ref={(ref) => {
+            if (ref) serviceSwipeRefs.current[svc.id] = ref;
+            else delete serviceSwipeRefs.current[svc.id];
+          }}
+          overshootRight={false} friction={2} rightThreshold={40}
+          onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
+          onSwipeableClose={() => { if (openServiceSwipeIdRef.current === svc.id) openServiceSwipeIdRef.current = null; }}
+          renderRightActions={() => (
+            <TouchableOpacity
+              style={[s.serviceDeleteAction, deletingServiceId === svc.id && s.serviceDeleteActionDisabled]}
+              activeOpacity={0.9}
+              disabled={deletingServiceId === svc.id}
+              onPress={() => confirmDeleteService(svc)}
+            >
+              {deletingServiceId === svc.id
+                ? <ActivityIndicator color="#FFF" size="small" />
+                : <><Text style={s.serviceDeleteActionIcon}>🗑</Text><Text style={s.serviceDeleteActionText}>Delete</Text></>}
+            </TouchableOpacity>
+          )}
+        >
+          {card}
+        </Swipeable>
       );
     };
 
@@ -1844,29 +1845,6 @@ export default function AdminDashboardScreen({ navigation, route }) {
         contentContainerStyle={s.tabContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
-        {/* Pending approvals */}
-        {canApprove && pendingServices.length > 0 && (
-          <View style={s.pendingApprovalSection}>
-            <Text style={s.pendingApprovalHeader}>⏳ Pending Approval ({pendingServices.length})</Text>
-            {pendingServices.map(svc => (
-              <View key={svc.id} style={s.pendingApprovalCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.pendingApprovalTitle}>{svc.name}</Text>
-                  <Text style={s.pendingApprovalMeta}>{formatServiceDate(svc.date)}{svc.time ? ` · ${svc.time}` : ''} · by {svc.created_by_name || 'Leader'}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity style={s.approveBtn} onPress={() => handleApprovePendingService(svc)} disabled={approvingSvcId === svc.id}>
-                    {approvingSvcId === svc.id ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={s.approveBtnTxt}>✓ Approve</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.rejectBtn} onPress={() => handleRejectPendingService(svc)}>
-                    <Text style={s.rejectBtnTxt}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
         {allSvcs.length === 0 && !loading ? (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>🗓</Text>
@@ -1875,13 +1853,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
         ) : (
           <View>
             {upcomingSvcs.length === 0 && (
-              <View style={s.empty}>
-                <Text style={s.emptyIcon}>🗓</Text>
-                <Text style={s.emptyText}>No upcoming services.</Text>
-              </View>
+              <View style={s.empty}><Text style={s.emptyIcon}>🗓</Text><Text style={s.emptyText}>No upcoming services.</Text></View>
             )}
             {upcomingSvcs.map(renderSvcCard)}
-
             {archivedSvcs.length > 0 && (
               <View style={s.archiveSection}>
                 <TouchableOpacity
@@ -2252,7 +2226,71 @@ export default function AdminDashboardScreen({ navigation, route }) {
         contentContainerStyle={s.tabContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
-        {pending.length === 0 && reviewed.length === 0 && (
+
+        {/* ── Setlist Approvals (from Worship Leaders) ── */}
+        {canApprove && pendingSetlists.length > 0 && (
+          <View style={s.setlistApprovalSection}>
+            <Text style={s.setlistApprovalHeader}>📨 Setlist Approvals ({pendingSetlists.length})</Text>
+            {pendingSetlists.map(sl => {
+              const songs = sl.plan?.songs || [];
+              const team  = sl.plan?.team  || [];
+              return (
+                <View key={sl.id} style={s.setlistApprovalCard}>
+                  <View style={s.setlistApprovalMeta}>
+                    <Text style={s.setlistApprovalTitle}>{sl.serviceName || 'Service'}</Text>
+                    <Text style={s.setlistApprovalSubMeta}>
+                      {sl.serviceDate}{sl.serviceTime ? ` · ${sl.serviceTime}` : ''}
+                      {' · '}by {sl.submittedBy?.name || 'Leader'}
+                    </Text>
+                  </View>
+
+                  {/* Song list for review */}
+                  {songs.length > 0 ? (
+                    <View style={s.setlistSongList}>
+                      <Text style={s.setlistSongListHeader}>🎵 {songs.length} Song{songs.length > 1 ? 's' : ''}</Text>
+                      {songs.map((song, i) => (
+                        <View key={song.id || i} style={s.setlistSongRow}>
+                          <Text style={s.setlistSongNum}>{i + 1}</Text>
+                          <Text style={s.setlistSongTitle} numberOfLines={1}>{song.title}</Text>
+                          {song.key ? <View style={s.keyChip}><Text style={s.keyChipText}>{song.key}</Text></View> : null}
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={s.setlistEmpty}>No songs in setlist</Text>
+                  )}
+
+                  {/* Team for review */}
+                  {team.length > 0 && (
+                    <Text style={s.setlistTeamLine}>👥 {team.map(t => t.name).join(', ')}</Text>
+                  )}
+
+                  {/* Approve / Reject */}
+                  <View style={s.setlistApprovalActions}>
+                    <TouchableOpacity
+                      style={[s.setlistApproveBtn, approvingSetlistId === sl.id && { opacity: 0.5 }]}
+                      onPress={() => handleApproveSetlist(sl)}
+                      disabled={approvingSetlistId === sl.id || rejectingSetlistId === sl.id}
+                    >
+                      {approvingSetlistId === sl.id
+                        ? <ActivityIndicator color="#FFF" size="small" />
+                        : <Text style={s.setlistApproveBtnTxt}>✅ Approve & Publish</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.setlistRejectBtn, rejectingSetlistId === sl.id && { opacity: 0.5 }]}
+                      onPress={() => handleRejectSetlist(sl)}
+                      disabled={approvingSetlistId === sl.id || rejectingSetlistId === sl.id}
+                    >
+                      <Text style={s.setlistRejectBtnTxt}>✕ Request Changes</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {pending.length === 0 && reviewed.length === 0 && pendingSetlists.length === 0 && (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>📬</Text>
             <Text style={s.emptyText}>No proposals yet</Text>
@@ -2610,7 +2648,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={s.tabBar} contentContainerStyle={s.tabBarContent}>
         {TABS.map(t => {
-          const pendingCount = t === 'Proposals' ? proposals.filter(p => p.status === 'pending').length : 0;
+          const pendingCount = t === 'Proposals'
+            ? proposals.filter(p => p.status === 'pending').length + pendingSetlists.length
+            : 0;
           return (
             <TouchableOpacity key={t}
               style={[s.tabBtn, tab === t && s.tabBtnActive]}
@@ -2942,6 +2982,39 @@ export default function AdminDashboardScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
+
+      {/* ── Setlist Reject Note Modal ────────────────────────────────── */}
+      <Modal visible={!!rejectNoteTarget} animationType="slide" transparent onRequestClose={() => setRejectNoteTarget(null)}>
+        <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
+            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Request Changes</Text>
+            <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 12 }}>
+              {rejectNoteTarget?.serviceName} — by {rejectNoteTarget?.submittedBy?.name}
+            </Text>
+            <TextInput
+              style={{ backgroundColor: '#1F2937', color: '#F9FAFB', borderRadius: 10, borderWidth: 1, borderColor: '#374151', padding: 12, fontSize: 14, minHeight: 80, textAlignVertical: 'top', marginBottom: 16 }}
+              multiline
+              placeholder="Explain what needs to change (optional)..."
+              placeholderTextColor="#6B7280"
+              value={rejectNoteText}
+              onChangeText={setRejectNoteText}
+            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setRejectNoteTarget(null)}>
+                <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 2, backgroundColor: '#DC2626', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}
+                onPress={confirmRejectSetlist}
+                disabled={rejectingSetlistId !== null}
+              >
+                {rejectingSetlistId ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Send Back for Revision</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -3362,11 +3435,41 @@ const s = StyleSheet.create({
 
   // Services v2 (roster view)
   svc2Card:          { backgroundColor: '#0B1120', borderRadius: 14, borderWidth: 1, borderColor: '#1E2A40', marginBottom: 14, overflow: 'hidden' },
+  svc2CardTap:       { flexDirection: 'row', alignItems: 'center', padding: 14 },
   svc2Header:        { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1E2A40' },
   svc2Name:          { fontSize: 15, fontWeight: '800', color: '#F0F4FF' },
   svc2Date:          { fontSize: 11, color: '#6B7280', marginTop: 3 },
+  svcPublishedBadge: { fontSize: 11, color: '#10B981', fontWeight: '600', marginTop: 3 },
+  svcDraftBadge:     { fontSize: 11, color: '#F59E0B', fontWeight: '600', marginTop: 3 },
+  svcActionRow:      { padding: 14, paddingTop: 8, gap: 8 },
+  svcPublishBtn:     { backgroundColor: '#4F46E5', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  svcPublishBtnTxt:  { color: '#FFF', fontWeight: '800', fontSize: 14 },
+  svcPublishBtnDisabled: { opacity: 0.5 },
+  svcSubmitBtn:      { backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  svcSubmitBtnTxt:   { color: '#FFF', fontWeight: '800', fontSize: 14 },
   svc2PublishBtn:    { paddingHorizontal: 12, paddingVertical: 7, backgroundColor: '#4C1D9530', borderRadius: 10, borderWidth: 1, borderColor: '#7C3AED', marginLeft: 10 },
   svc2PublishTxt:    { fontSize: 12, fontWeight: '700', color: '#A78BFA' },
+  calInfoCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#374151', padding: 14, marginBottom: 12, gap: 12 },
+  calGoToServicesBtn:{ backgroundColor: '#4F46E5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  calGoToServicesTxt:{ fontSize: 12, fontWeight: '700', color: '#FFF' },
+  setlistApprovalSection: { marginBottom: 16 },
+  setlistApprovalHeader: { fontSize: 14, fontWeight: '800', color: '#F59E0B', marginBottom: 10 },
+  setlistApprovalCard: { backgroundColor: '#0B1120', borderRadius: 14, borderWidth: 1, borderColor: '#374151', marginBottom: 12, overflow: 'hidden' },
+  setlistApprovalMeta: { padding: 14, paddingBottom: 10 },
+  setlistApprovalTitle: { fontSize: 15, fontWeight: '800', color: '#F0F4FF' },
+  setlistApprovalSubMeta: { fontSize: 12, color: '#6B7280', marginTop: 3 },
+  setlistSongList:   { paddingHorizontal: 14, paddingBottom: 10 },
+  setlistSongListHeader: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', marginBottom: 6 },
+  setlistSongRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#111827' },
+  setlistSongNum:    { width: 20, fontSize: 12, color: '#6B7280', fontWeight: '700', textAlign: 'center' },
+  setlistSongTitle:  { flex: 1, fontSize: 13, fontWeight: '600', color: '#E5E7EB' },
+  setlistEmpty:      { fontSize: 12, color: '#4B5563', fontStyle: 'italic', padding: 14, paddingTop: 0 },
+  setlistTeamLine:   { fontSize: 12, color: '#6B7280', paddingHorizontal: 14, paddingBottom: 10 },
+  setlistApprovalActions: { flexDirection: 'row', gap: 8, padding: 14, paddingTop: 8 },
+  setlistApproveBtn: { flex: 2, backgroundColor: '#065F46', borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
+  setlistApproveBtnTxt: { fontSize: 13, fontWeight: '800', color: '#10B981' },
+  setlistRejectBtn:  { flex: 1, backgroundColor: '#1F0A0A', borderRadius: 10, paddingVertical: 11, alignItems: 'center', borderWidth: 1, borderColor: '#EF444440' },
+  setlistRejectBtnTxt: { fontSize: 13, fontWeight: '700', color: '#F87171' },
   svc2Roster:        { paddingHorizontal: 14, paddingBottom: 8, paddingTop: 4 },
   svc2Row:           { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   svc2RowBorder:     { borderBottomWidth: 1, borderBottomColor: '#111827' },
