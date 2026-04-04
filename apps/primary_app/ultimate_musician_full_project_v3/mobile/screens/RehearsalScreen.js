@@ -413,10 +413,20 @@ const DAW_NUM_LEDS = 9;     // VU meter LED count
 const VF_H = 118;           // fader track height in px
 const VF_KNOB_H = 20;       // fader knob height
 const VF_RAIL_W = 3;        // fader rail width
-// Correct offset for rotated name: text is DAW_STRIP_H wide, DAW_NAME_W tall
-// After -90° rotation, text fills the full height of the column
-const NAME_TEXT_LEFT = DAW_NAME_W / 2 - DAW_STRIP_H / 2;  // = 12 - 121 = -109
-const NAME_TEXT_TOP  = DAW_STRIP_H / 2 - DAW_NAME_W / 2;  // = 121 - 12 = 109
+
+function formatVerticalTrackLabel(label) {
+  const cleaned = String(label || '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) return '';
+
+  return cleaned
+    .split('')
+    .map((char) => (char === ' ' ? '·' : char))
+    .join('\n');
+}
 
 // ── Marker Timeline Ruler ─────────────────────────────────────────────────────
 function MarkerRuler({ markers, duration, position, selectedId, onSelect, onMove }) {
@@ -853,13 +863,10 @@ function DawChannelStrip({ track, isPlaying, onMute, onSolo, onVolumeChange, aiL
             dawSt.nameTxt,
             {
               color: isMuted ? "#374151" : color,
-              left: NAME_TEXT_LEFT,
-              top: NAME_TEXT_TOP,
             },
           ]}
-          numberOfLines={1}
         >
-          {(track.label || track.id || "").toUpperCase()}
+          {formatVerticalTrackLabel(track.label || track.id || "")}
         </Text>
       </View>
 
@@ -956,14 +963,16 @@ const dawSt = StyleSheet.create({
     borderRightColor: "#0F172A",
   },
   nameTxt: {
-    position: "absolute",
-    width: DAW_STRIP_H,   // text width = strip height (fills full column height after rotation)
-    height: DAW_NAME_W,   // text height = name column width
-    fontSize: 12,
+    flex: 1,
+    width: "100%",
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.8,
+    letterSpacing: 0.2,
+    lineHeight: 10,
     textAlign: "center",
-    transform: [{ rotate: "-90deg" }],
+    textAlignVertical: "center",
+    includeFontPadding: false,
+    paddingVertical: 6,
   },
   // Right controls column
   rightCol: { flex: 1, flexDirection: "column" },
