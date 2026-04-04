@@ -2604,6 +2604,60 @@ export default function RehearsalScreen({ route, navigation }) {
     }
   }
 
+  function splitSection(sec) {
+    const start = Number(sec?.timeSec ?? 0);
+    const end = Number(sec?.endTimeSec ?? effectiveDuration ?? 0);
+    const span = end - start;
+    if (!Number.isFinite(span) || span < 8) {
+      Alert.alert(
+        "Split Section",
+        "This section is too short to split cleanly.",
+      );
+      return;
+    }
+    const midpoint = Number((start + span / 2).toFixed(2));
+    const leftLabel = /\sA$/i.test(sec?.label || "")
+      ? sec.label
+      : `${sec?.label || "Section"} A`;
+    const rightLabel = /\sA$/i.test(sec?.label || "")
+      ? String(sec.label).replace(/\sA$/i, " B")
+      : `${sec?.label || "Section"} B`;
+
+    const nextSections = [];
+    sectionJumpList.forEach((item) => {
+      const sameId = String(item?.id || "") === String(sec?.id || "");
+      const sameMarker =
+        sec?.markerId &&
+        String(item?.markerId || "") === String(sec?.markerId || "");
+      if (sameId || sameMarker) {
+        nextSections.push({
+          ...item,
+          label: leftLabel,
+          timeSec: start,
+        });
+        nextSections.push({
+          id: `split_${Date.now()}_${Math.round(midpoint * 1000)}`,
+          label: rightLabel,
+          timeSec: midpoint,
+          color: item?.color || "#6366F1",
+        });
+      } else {
+        nextSections.push(item);
+      }
+    });
+
+    setUserSections(snapshotEditableSections(nextSections));
+    if (sec?.markerId) {
+      setMarkers((prev) =>
+        prev.map((m) =>
+          String(m?.id || "") === String(sec.markerId)
+            ? { ...m, label: leftLabel }
+            : m,
+        ),
+      );
+    }
+  }
+
   function promptRenameSection(sec) {
     if (Platform.OS === "ios" && typeof Alert.prompt === "function") {
       Alert.prompt(
@@ -2641,6 +2695,10 @@ export default function RehearsalScreen({ route, navigation }) {
               },
             ],
           ),
+      },
+      {
+        text: "Split",
+        onPress: () => splitSection(sec),
       },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -3897,7 +3955,7 @@ export default function RehearsalScreen({ route, navigation }) {
           <View style={styles.settingsSheetHandle} />
           <Text style={styles.settingsSheetTitle}>✂ Edit Song Sections</Text>
           <Text style={styles.sectionEditorHint}>
-            Remove the sections you do not want to use in rehearsal, or rename them for this song.
+            Remove or split the sections you do not want to use in rehearsal. To move a section in time, drag its pin on the waveform.
           </Text>
 
           <ScrollView
@@ -3937,6 +3995,12 @@ export default function RehearsalScreen({ route, navigation }) {
                       onPress={() => promptRenameSection(sec)}
                     >
                       <Text style={styles.sectionEditorActionText}>Rename</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.sectionEditorActionBtn}
+                      onPress={() => splitSection(sec)}
+                    >
+                      <Text style={styles.sectionEditorActionText}>Split</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.sectionEditorActionBtn, styles.sectionEditorDeleteBtn]}
