@@ -13,6 +13,11 @@ import {
 
 const PIN_KEY = "org.owner.pin";
 
+function normalizeOrgRole(role) {
+  if (role === "owner" || role === "org_owner") return "org_owner";
+  return role || null;
+}
+
 async function fetchJson(url, opts = {}) {
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -58,10 +63,13 @@ export default function OrganizationScreen({ navigation }) {
       const pin = await AsyncStorage.getItem(PIN_KEY).catch(() => null);
       setStoredPin(pin);
 
-      const [profile, library, grantsList] = await Promise.all([
+      const [profile, library, rolesMap, roleInfo] = await Promise.all([
         fetchJson(`${SYNC_URL}/sync/org/profile`,  { headers: syncHeaders() }),
         fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: syncHeaders() }),
-        fetchJson(`${SYNC_URL}/sync/grants`,        { headers: syncHeaders() }),
+        fetchJson(`${SYNC_URL}/sync/roles`,        { headers: syncHeaders() }),
+        myEmail
+          ? fetchJson(`${SYNC_URL}/sync/role?email=${encodeURIComponent(myEmail)}`, { headers: syncHeaders() })
+          : Promise.resolve({ role: null }),
       ]);
 
       const name = profile.name || "";
@@ -73,12 +81,13 @@ export default function OrganizationScreen({ navigation }) {
       const people = library.people || [];
       setMembers(people);
 
-      // Build grants map
-      const grantsMap = {};
-      (grantsList || []).forEach((g) => { grantsMap[g.email] = g.role; });
+      const normalizedRoles = {};
+      Object.entries(rolesMap || {}).forEach(([email, role]) => {
+        normalizedRoles[email.toLowerCase()] = normalizeOrgRole(role);
+      });
 
       // Viewer's own role
-      const myRole = grantsMap[myEmail] || null;
+      const myRole = normalizeOrgRole(roleInfo?.role || normalizedRoles[myEmail] || null);
       setViewerRole(myRole);
 
       // Viewer's own display name
@@ -89,12 +98,15 @@ export default function OrganizationScreen({ navigation }) {
       setViewerName(meName);
 
       // Find org_owner for display
-      const ownerEmail = Object.entries(grantsMap).find(([, r]) => r === "org_owner")?.[0];
-      if (ownerEmail) {
-        const ownerPerson = people.find((p) => (p.email || "").toLowerCase() === ownerEmail);
-        if (ownerPerson) {
-          setOwnerName([ownerPerson.name, ownerPerson.lastName].filter(Boolean).join(" "));
-        }
+      const ownerPerson =
+        people.find((p) => normalizeOrgRole(normalizedRoles[(p.email || "").toLowerCase()] || p.role) === "org_owner")
+        || null;
+      if (ownerPerson) {
+        setOwnerName([ownerPerson.name, ownerPerson.lastName].filter(Boolean).join(" "));
+      } else if (profile.adminName) {
+        setOwnerName(profile.adminName);
+      } else {
+        setOwnerName("");
       }
 
       // Branch label
@@ -187,6 +199,11 @@ export default function OrganizationScreen({ navigation }) {
   const ROLE_ICON = { worship_leader: "🎵", md: "🎛", admin: "👑", org_owner: "🏛" };
 
   const isOwner = viewerRole === "org_owner";
+  const canManagePermissions = viewerRole === "org_owner" || viewerRole === "admin";
+  const permissionsTitle = isOwner ? "Organization Leadership Permissions" : "Branch Leadership Permissions";
+  const permissionsSubtitle = isOwner
+    ? "Grant organization admins and worship leaders. Branch pastors/admins manage worship leaders inside their branch."
+    : "Branch admins can safely grant Worship Leader access for this branch only.";
 
   if (loading) {
     return (
@@ -285,6 +302,19 @@ export default function OrganizationScreen({ navigation }) {
           <TouchableOpacity style={s.changeBranchBtn} onPress={() => navigation?.navigate("BranchSetup")}>
             <Text style={s.changeBranchBtnText}>🔗 Change Branch Connection</Text>
           </TouchableOpacity>
+
+          {canManagePermissions && (
+            <TouchableOpacity style={s.permissionsBtn} onPress={() => navigation?.navigate("Permissions")}>
+              <View style={s.permissionsBtnLeft}>
+                <Text style={s.permissionsBtnIcon}>🔐</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.permissionsBtnTitle}>{permissionsTitle}</Text>
+                  <Text style={s.permissionsBtnSub}>{permissionsSubtitle}</Text>
+                </View>
+              </View>
+              <Text style={s.permissionsBtnArrow}>›</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Org Name — locked by default */}
           <View style={s.card}>
@@ -406,6 +436,19 @@ export default function OrganizationScreen({ navigation }) {
           <TouchableOpacity style={s.changeBranchBtn} onPress={() => navigation?.navigate("BranchSetup")}>
             <Text style={s.changeBranchBtnText}>🔗 Change Branch Connection</Text>
           </TouchableOpacity>
+
+          {canManagePermissions && (
+            <TouchableOpacity style={s.permissionsBtn} onPress={() => navigation?.navigate("Permissions")}>
+              <View style={s.permissionsBtnLeft}>
+                <Text style={s.permissionsBtnIcon}>🔐</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.permissionsBtnTitle}>{permissionsTitle}</Text>
+                  <Text style={s.permissionsBtnSub}>{permissionsSubtitle}</Text>
+                </View>
+              </View>
+              <Text style={s.permissionsBtnArrow}>›</Text>
+            </TouchableOpacity>
+          )}
         </>
       )}
 
@@ -463,6 +506,17 @@ const s = StyleSheet.create({
   manageBranchesBtnTitle: { color: "#E0E7FF", fontSize: 15, fontWeight: "700" },
   manageBranchesBtnSub:   { color: "#818CF8", fontSize: 12, marginTop: 2 },
   manageBranchesBtnArrow: { color: "#4F46E5", fontSize: 28, fontWeight: "300" },
+  permissionsBtn: {
+    backgroundColor: "#131A2F", borderRadius: 12,
+    borderWidth: 1, borderColor: "#334155",
+    padding: 16, marginBottom: 12,
+    flexDirection: "row", alignItems: "center",
+  },
+  permissionsBtnLeft:  { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  permissionsBtnIcon:  { fontSize: 28 },
+  permissionsBtnTitle: { color: "#E2E8F0", fontSize: 15, fontWeight: "700" },
+  permissionsBtnSub:   { color: "#94A3B8", fontSize: 12, marginTop: 2, lineHeight: 16 },
+  permissionsBtnArrow: { color: "#64748B", fontSize: 28, fontWeight: "300" },
   changeBranchBtn: {
     backgroundColor: "#1E293B", borderRadius: 8,
     paddingVertical: 12, alignItems: "center",

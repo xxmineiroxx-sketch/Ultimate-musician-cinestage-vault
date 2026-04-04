@@ -1,7 +1,8 @@
 /**
  * Permissions Screen - Ultimate Musician
- * Tap a member → role picker modal → save to sync server.
- * org_owner role is read-only and cannot be changed from the app.
+ * Secure leadership assignment area for the current organization/branch.
+ * Org Owners can grant Admin + Worship Leader.
+ * Branch Admins can grant Worship Leader inside their branch only.
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -15,28 +16,32 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  Pressable,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SYNC_URL, syncHeaders } from "./config";
 
-const ROLES = [
+const ROLE_OPTIONS = [
   { key: "worship_leader", label: "Worship Leader", icon: "🎵", color: "#10B981",
-    desc: "Plan services, add songs, assign members in Playback" },
-  { key: "md",             label: "Music Director", icon: "🎛", color: "#8B5CF6",
-    desc: "Receive all messages, manage services, team & songs" },
+    desc: "Can lead worship, review service plans, and manage the setlist flow for this branch." },
   { key: "admin",          label: "Admin",           icon: "👑", color: "#F59E0B",
-    desc: "Full access — same as MD plus can approve content edits" },
+    desc: "Can manage branch leadership and secure organization settings." },
 ];
 
 const ROLE_COLOR = {
-  worship_leader: "#10B981", md: "#8B5CF6", admin: "#F59E0B", org_owner: "#EF4444",
+  worship_leader: "#10B981", admin: "#F59E0B", org_owner: "#EF4444",
 };
-const ROLE_ICON  = { worship_leader: "🎵", md: "🎛", admin: "👑", org_owner: "🏛" };
+const ROLE_ICON  = { worship_leader: "🎵", admin: "👑", org_owner: "🏛" };
 const ROLE_LABEL = {
-  worship_leader: "Worship Leader", md: "Music Director",
+  worship_leader: "Worship Leader",
   admin: "Admin", org_owner: "Org Owner",
 };
+
+function normalizeOrgRole(role) {
+  if (role === "owner" || role === "org_owner") return "org_owner";
+  return role || null;
+}
 
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();
@@ -51,13 +56,15 @@ async function fetchJson(url, opts = {}) {
   }
 }
 
-export default function PermissionsScreen() {
+export default function PermissionsScreen({ navigation }) {
   const [people, setPeople]   = useState([]);
-  const [grants, setGrants]   = useState({});       // email → { role }
+  const [roles, setRoles]     = useState({});       // email → role
   const [loading, setLoading] = useState(false);
   const [saving, setSaving]   = useState(null);
   const [error, setError]     = useState(null);
   const [viewerRole, setViewerRole] = useState(null);
+  const [scopeName, setScopeName] = useState("");
+  const [isBranchScope, setIsBranchScope] = useState(false);
 
   // Role picker modal
   const [pickerTarget, setPickerTarget] = useState(null); // person object
@@ -70,20 +77,25 @@ export default function PermissionsScreen() {
       const settings     = settingsRaw ? JSON.parse(settingsRaw) : {};
       const viewerEmail  = (settings.email || "").toLowerCase();
 
-      const [peopleData, grantsList] = await Promise.all([
+      const [peopleData, rolesMapRaw, roleInfo, profile] = await Promise.all([
         fetchJson(`${SYNC_URL}/sync/people`,  { headers: syncHeaders() }),
-        fetchJson(`${SYNC_URL}/sync/grants`,  { headers: syncHeaders() }),
+        fetchJson(`${SYNC_URL}/sync/roles`,   { headers: syncHeaders() }),
+        viewerEmail
+          ? fetchJson(`${SYNC_URL}/sync/role?email=${encodeURIComponent(viewerEmail)}`, { headers: syncHeaders() })
+          : Promise.resolve({ role: null, orgName: "" }),
+        fetchJson(`${SYNC_URL}/sync/org/profile`, { headers: syncHeaders() }),
       ]);
 
       setPeople(Array.isArray(peopleData) ? peopleData : []);
 
-      const map = {};
-      (grantsList || []).forEach((g) => { map[g.email] = g; });
-      setGrants(map);
-
-      if (viewerEmail && map[viewerEmail]) {
-        setViewerRole(map[viewerEmail].role || null);
-      }
+      const nextRoles = {};
+      Object.entries(rolesMapRaw || {}).forEach(([email, role]) => {
+        nextRoles[email.toLowerCase()] = normalizeOrgRole(role);
+      });
+      setRoles(nextRoles);
+      setViewerRole(normalizeOrgRole(roleInfo?.role || nextRoles[viewerEmail] || null));
+      setScopeName(roleInfo?.orgName || profile?.name || "");
+      setIsBranchScope(Boolean(profile?.parentOrgId));
     } catch {
       setError("Cannot reach sync server.");
     } finally {
@@ -94,10 +106,9 @@ export default function PermissionsScreen() {
   useEffect(() => { load(); }, []);
 
   const canAssignRole = (roleKey) => {
-    if (viewerRole === "org_owner") return true;
-    if (viewerRole === "admin")     return roleKey !== "admin" && roleKey !== "org_owner";
-    if (viewerRole === "md")        return roleKey === "worship_leader";
-    return roleKey === "worship_leader";
+    if (viewerRole === "org_owner") return roleKey === "admin" || roleKey === "worship_leader";
+    if (viewerRole === "admin")     return roleKey === "worship_leader";
+    return false;
   };
 
   const handleSetRole = async (person, newRole) => {
@@ -109,21 +120,17 @@ export default function PermissionsScreen() {
     setPickerTarget(null);
     setSaving(email);
     try {
-      if (newRole === null) {
-        await fetchJson(`${SYNC_URL}/sync/grant`, {
-          method: "DELETE",
-          headers: syncHeaders(),
-          body: JSON.stringify({ email }),
-        });
-        setGrants((prev) => { const g = { ...prev }; delete g[email]; return g; });
-      } else {
-        await fetchJson(`${SYNC_URL}/sync/grant`, {
-          method: "POST",
-          headers: syncHeaders(),
-          body: JSON.stringify({ email, name: person.name, role: newRole }),
-        });
-        setGrants((prev) => ({ ...prev, [email]: { role: newRole, name: person.name } }));
-      }
+      await fetchJson(`${SYNC_URL}/sync/role/set`, {
+        method: "POST",
+        headers: syncHeaders(),
+        body: JSON.stringify({ email, role: newRole }),
+      });
+      setRoles((prev) => {
+        const next = { ...prev };
+        if (newRole === null) delete next[email];
+        else next[email] = normalizeOrgRole(newRole);
+        return next;
+      });
     } catch (e) {
       Alert.alert("Error", e.message);
     } finally {
@@ -131,7 +138,33 @@ export default function PermissionsScreen() {
     }
   };
 
-  const grantedCount = Object.keys(grants).length;
+  const grantedCount = people.filter((person) => {
+    const email = (person.email || "").toLowerCase();
+    const role = normalizeOrgRole(roles[email] || person.role);
+    return role === "org_owner" || role === "admin" || role === "worship_leader";
+  }).length;
+  const canManagePermissions = viewerRole === "org_owner" || viewerRole === "admin";
+  const scopeLabel = isBranchScope ? "Current Branch" : "Current Organization";
+  const headerTitle = isBranchScope ? "Branch Team Permissions" : "Organization Team Permissions";
+  const headerSub = isBranchScope
+    ? "Branch admins can safely grant Worship Leader access for this branch only."
+    : "Organization Owners can grant admins. Admins can grant Worship Leaders.";
+
+  if (!loading && !canManagePermissions) {
+    return (
+      <View style={s.lockedWrap}>
+        <Text style={s.lockedIcon}>🔐</Text>
+        <Text style={s.lockedTitle}>Restricted Area</Text>
+        <Text style={s.lockedText}>
+          Team permissions now live inside Organization & Branch controls. Only the
+          Organization Owner or a Branch Admin can manage this area.
+        </Text>
+        <Pressable style={s.lockedBtn} onPress={() => navigation?.navigate("Organization")}>
+          <Text style={s.lockedBtnText}>Open Organization</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={s.container}>
@@ -143,9 +176,12 @@ export default function PermissionsScreen() {
             <Text style={s.pickerName}>{pickerTarget?.name}</Text>
             <Text style={s.pickerSub}>Select a role</Text>
 
-            {ROLES.map((r) => {
+            {ROLE_OPTIONS.map((r) => {
               const allowed  = canAssignRole(r.key);
-              const isCurrent = grants[(pickerTarget?.email || "").toLowerCase()]?.role === r.key;
+              const currentRole = normalizeOrgRole(
+                roles[(pickerTarget?.email || "").toLowerCase()] || pickerTarget?.role,
+              );
+              const isCurrent = currentRole === r.key;
               return (
                 <TouchableOpacity
                   key={r.key}
@@ -165,8 +201,8 @@ export default function PermissionsScreen() {
             })}
 
             {/* Remove role option */}
-            {grants[(pickerTarget?.email || "").toLowerCase()]?.role &&
-              grants[(pickerTarget?.email || "").toLowerCase()]?.role !== "org_owner" && (
+            {normalizeOrgRole(roles[(pickerTarget?.email || "").toLowerCase()] || pickerTarget?.role) &&
+              normalizeOrgRole(roles[(pickerTarget?.email || "").toLowerCase()] || pickerTarget?.role) !== "org_owner" && (
               <TouchableOpacity style={s.removeBtn} onPress={() => handleSetRole(pickerTarget, null)}>
                 <Text style={s.removeBtnText}>✕  Remove Role</Text>
               </TouchableOpacity>
@@ -177,13 +213,19 @@ export default function PermissionsScreen() {
 
       {/* Header */}
       <View style={s.header}>
-        <Text style={s.headerTitle}>Team Permissions</Text>
-        <Text style={s.headerSub}>Tap a member to assign their Playback role</Text>
+        <Text style={s.headerTitle}>{headerTitle}</Text>
+        <Text style={s.headerSub}>{headerSub}</Text>
         {viewerRole && (
           <View style={[s.myRoleBadge, { borderColor: ROLE_COLOR[viewerRole] }]}>
             <Text style={[s.myRoleTxt, { color: ROLE_COLOR[viewerRole] }]}>
               {ROLE_ICON[viewerRole]}  You: {ROLE_LABEL[viewerRole]}
             </Text>
+          </View>
+        )}
+        {!!scopeName && (
+          <View style={s.scopeCard}>
+            <Text style={s.scopeLabel}>{scopeLabel}</Text>
+            <Text style={s.scopeValue}>{scopeName}</Text>
           </View>
         )}
       </View>
@@ -210,19 +252,31 @@ export default function PermissionsScreen() {
         contentContainerStyle={s.list}
         renderItem={({ item }) => {
           const email     = (item.email || "").toLowerCase();
-          const grant     = grants[email];
-          const role      = grant?.role || null;
+          const role      = normalizeOrgRole(roles[email] || item.role);
           const isSaving  = saving === email;
           const isOwner   = role === "org_owner";
+          const canEdit   = viewerRole === "org_owner"
+            ? !isOwner
+            : viewerRole === "admin"
+              ? role !== "org_owner" && role !== "admin"
+              : false;
 
           return (
             <TouchableOpacity
               style={[s.card, role && s.cardGranted, role === "admin" && s.cardAdmin, isOwner && s.cardOwner]}
               onPress={() => {
-                if (isOwner) { Alert.alert("🏛 Org Owner", "This role cannot be changed here."); return; }
+                if (!canEdit) {
+                  Alert.alert(
+                    "Restricted",
+                    isOwner
+                      ? "The Organization Owner role cannot be changed here."
+                      : "Only the Organization Owner can change admin roles. Branch admins can grant Worship Leader only.",
+                  );
+                  return;
+                }
                 setPickerTarget(item);
               }}
-              disabled={!!saving}
+              disabled={!!saving || !canEdit}
             >
               <View style={[s.avatar, role && { backgroundColor: ROLE_COLOR[role] + "33" }]}>
                 <Text style={s.avatarText}>{(item.name || "?")[0].toUpperCase()}</Text>
@@ -242,7 +296,7 @@ export default function PermissionsScreen() {
                   </View>
                 ) : (
                   <View style={s.noBadge}>
-                    <Text style={s.noBadgeText}>Tap to assign</Text>
+                    <Text style={s.noBadgeText}>{canEdit ? "Tap to assign" : "No access"}</Text>
                   </View>
                 )}
               </View>
@@ -253,7 +307,7 @@ export default function PermissionsScreen() {
           <View style={s.empty}>
             <Text style={s.emptyIcon}>👥</Text>
             <Text style={s.emptyTitle}>No Team Members</Text>
-            <Text style={s.emptyText}>Publish your team from a Service Plan to see members here.</Text>
+            <Text style={s.emptyText}>Publish your team from a Service Plan to manage leadership roles here.</Text>
           </View>
         )}
       />
@@ -291,6 +345,16 @@ const s = StyleSheet.create({
   headerSub:   { fontSize: 13, color: "#6B7280", marginTop: 2 },
   myRoleBadge: { marginTop: 8, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, backgroundColor: "#0F172A" },
   myRoleTxt:   { fontSize: 12, fontWeight: "700" },
+  scopeCard: {
+    marginTop: 10,
+    backgroundColor: "#0F172A",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    padding: 12,
+  },
+  scopeLabel: { fontSize: 11, color: "#64748B", fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.7 },
+  scopeValue: { fontSize: 14, color: "#E2E8F0", fontWeight: "700", marginTop: 4 },
 
   errorBanner: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
@@ -331,4 +395,22 @@ const s = StyleSheet.create({
   emptyIcon:  { fontSize: 48, marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontWeight: "600", color: "#F9FAFB", marginBottom: 6 },
   emptyText:  { fontSize: 13, color: "#9CA3AF", textAlign: "center", lineHeight: 20, paddingHorizontal: 30 },
+
+  lockedWrap: {
+    flex: 1,
+    backgroundColor: "#020617",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  lockedIcon: { fontSize: 48, marginBottom: 14 },
+  lockedTitle: { color: "#F8FAFC", fontSize: 22, fontWeight: "800", marginBottom: 8 },
+  lockedText: { color: "#94A3B8", fontSize: 14, lineHeight: 20, textAlign: "center", marginBottom: 18 },
+  lockedBtn: {
+    backgroundColor: "#4F46E5",
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+  },
+  lockedBtnText: { color: "#FFFFFF", fontWeight: "800", fontSize: 14 },
 });

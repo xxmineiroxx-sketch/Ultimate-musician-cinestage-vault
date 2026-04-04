@@ -30,6 +30,11 @@ const PLANS_KEY = "um/service_plans/v2";
 const BLOCKOUTS_KEY = "um/blockouts/v1";
 const DELETED_SERVICES_KEY = "um/services/deleted/v1";
 
+function normalizeOrgRole(role) {
+  if (role === "owner" || role === "org_owner") return "org_owner";
+  return role || null;
+}
+
 function safeParse(raw, fallback) {
   try {
     return raw ? JSON.parse(raw) : fallback;
@@ -392,7 +397,7 @@ export default function HomeScreen({ navigation }) {
         );
         if (res.ok) {
           const data = await res.json();
-          if (data.role) setUserRole(data.role);
+          if (data.role) setUserRole(normalizeOrgRole(data.role));
         }
       } catch {
         /* keep default */
@@ -559,11 +564,10 @@ export default function HomeScreen({ navigation }) {
           { label: "Setlist", icon: "🎵", route: "Setlist" },
           { label: "Stems", icon: "🎚️", route: "StemsCenter" },
           { label: "Bridge", icon: "🌉", route: "BridgeSetup" },
-          ...(userRole === "owner" || userRole === "admin"
+          ...(userRole === "org_owner" || userRole === "admin"
             ? [{ label: "Organization", icon: "🏢", route: "Organization" }]
             : []),
           { label: "Messages", icon: "✉️", route: "MessageCenter" },
-          { label: "Permissions", icon: "🔑", route: "Permissions" },
           { label: "Proposals", icon: "📝", route: "Proposals", badge: pendingProposals },
           { label: "My Availability", icon: "📅", route: "BlockoutCalendar" },
           { label: "Settings", icon: "⚙️", route: "Settings" },
