@@ -119,6 +119,16 @@ import { getUserProfile } from '../services/storage';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
+const playbackGrantLabel = (role) => (
+  role === 'org_owner' ? 'Org Owner'
+  : role === 'admin' ? 'Admin'
+  : role === 'manager' ? 'Worship Leader'
+  : role === 'md' ? 'Music Director'
+  : role === 'leader' ? 'Service Planner'
+  : role === 'none' ? 'Remove Access'
+  : role || 'Member'
+);
+
 const ADMIN_LIBRARY_CACHE_KEY = '@up_admin_library_cache_v1';
 const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
@@ -1324,7 +1334,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         body: JSON.stringify({ email: showGrantRole.email, name: showGrantRole.name, role: roleValue }),
       });
       setShowGrantRole(null); setGrantingRole('');
-      Alert.alert('Role granted ✓', `${showGrantRole.name} is now ${grantingRole}.`);
+      Alert.alert('Permission updated ✓', `${showGrantRole.name} is now ${playbackGrantLabel(grantingRole)}.`);
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingGrant(false); }
   };
@@ -2920,11 +2930,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
       <Modal visible={!!showGrantRole} animationType="slide" transparent onRequestClose={() => setShowGrantRole(null)}>
         <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
-            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Grant Role</Text>
+            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
-              Set role for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can only grant Leader role' : ''}
-              {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, or Leader' : ''}
+              Set service access for {showGrantRole?.name}
+              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can only grant Service Planner access' : ''}
+              {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, or Service Planner' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {(
@@ -2932,13 +2942,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 : isAdmin  ? ['manager', 'md', 'leader', 'none']
                 :             ['leader', 'none']
               ).map(r => {
-                const label =
-                  r === 'org_owner' ? 'Org Owner'
-                  : r === 'admin'   ? 'Admin'
-                  : r === 'manager' ? 'Worship Leader'
-                  : r === 'md'      ? 'Music Director'
-                  : r === 'leader'  ? 'Leader'
-                  : 'Remove Role';
+                const label = playbackGrantLabel(r);
                 return (
                   <TouchableOpacity key={r}
                     style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
@@ -2957,7 +2961,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{ flex: 2, backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={handleGrantRole} disabled={savingGrant || !grantingRole}>
-                {savingGrant ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Grant Role</Text>}
+                {savingGrant ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '800' }}>Save Permission</Text>}
               </TouchableOpacity>
             </View>
           </View>
