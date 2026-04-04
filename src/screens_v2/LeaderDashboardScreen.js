@@ -1,6 +1,6 @@
 /**
- * Leader Dashboard Screen - Ultimate Playback
- * For users with grantedRole === 'leader'.
+ * Services Workspace Screen - Ultimate Playback
+ * For users with grantedRole === 'leader' (service planner).
  * Tabs: Calendar | Services | Team | Library
  *
  * Permissions:
@@ -164,6 +164,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
   const [setlistSongs, setSetlistSongs]       = useState([]);
   const [songPickerQuery, setSongPickerQuery] = useState('');
   const [savingSetlist, setSavingSetlist]     = useState(false);
+  const [pendingSetlists, setPendingSetlists] = useState([]);
 
   // Library search
   const [libQuery, setLibQuery] = useState('');
@@ -171,17 +172,18 @@ export default function LeaderDashboardScreen({ navigation, route }) {
   React.useEffect(() => { loadAll(); }, []);
 
   const leaderEmail = () => profile?.email || paramEmail || '';
-  const leaderName  = () => profile?.name  || paramName  || 'Leader';
+  const leaderName  = () => profile?.name  || paramName  || 'Service Planner';
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const hdrs = syncHeaders();
-      const [prof, lib, pSvcs, pSongs] = await Promise.all([
+      const [prof, lib, pSvcs, pSongs, pSetlists] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/services/pending`, { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`, { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/setlist/pending`, { headers: hdrs }).catch(() => []),
       ]);
       setProfile(prof);
       setAllServices(lib.services || []);
@@ -193,6 +195,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
       // Only show this leader's own pending items
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => (s.created_by_email || '').toLowerCase() === myEmail) : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => (s.from_email || '').toLowerCase() === myEmail) : []);
+      setPendingSetlists(Array.isArray(pSetlists) ? pSetlists.filter(s => (s?.submittedBy?.email || '').toLowerCase() === myEmail) : []);
 
       // Blockout dots on calendar
       const bDates = (lib.blockouts || []).map(b => b.date).filter(Boolean);
@@ -285,7 +288,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
         body: JSON.stringify(lib),
       });
       setShowAddToService(false); setAddTarget(null); setAddServiceId(''); setAddRole('');
-      Alert.alert('Added', `${addTarget?.name} added to service.`);
+      Alert.alert('Saved to draft', `${addTarget?.name} was added to the service draft.`);
     } catch (e) {
       Alert.alert('Error', e.message);
     } finally { setSavingAdd(false); }
@@ -302,10 +305,63 @@ export default function LeaderDashboardScreen({ navigation, route }) {
       lib.plans[setlistSvcId].songs = setlistSongs;
       await fetchJson(`${SYNC_URL}/sync/library-push`, { method: 'POST', headers: hdrs, body: JSON.stringify(lib) });
       setShowSetlist(false);
-      Alert.alert('Saved', 'Setlist updated.');
+      Alert.alert('Saved to draft', 'Setlist draft updated. Send the service for approval when ready.');
     } catch (e) {
       Alert.alert('Error', e.message);
     } finally { setSavingSetlist(false); }
+  };
+
+  const handleSubmitServicePlan = async (service) => {
+    const svcId = service?.id;
+    if (!svcId) return;
+    const draftPlan = plans[svcId] || { songs: [], team: [], notes: '' };
+    const songsCount = Array.isArray(draftPlan.songs) ? draftPlan.songs.length : 0;
+    const teamCount = Array.isArray(draftPlan.team) ? draftPlan.team.length : 0;
+    if (songsCount === 0) {
+      Alert.alert('Add songs first', 'Build the setlist before sending this service for approval.');
+      return;
+    }
+
+    Alert.alert(
+      'Send service for approval?',
+      `${service.name} will be reviewed by a Worship Leader or Admin. Once approved, it will publish automatically to the team.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSavingSetlist(true);
+            try {
+              const hdrs = syncHeaders();
+              await fetchJson(`${SYNC_URL}/sync/setlist/submit`, {
+                method: 'POST',
+                headers: hdrs,
+                body: JSON.stringify({
+                  serviceId: svcId,
+                  serviceName: service.name || '',
+                  serviceDate: service.date || '',
+                  serviceTime: service.time || '',
+                  plan: draftPlan,
+                  submittedBy: {
+                    email: leaderEmail(),
+                    name: leaderName(),
+                  },
+                }),
+              });
+              await loadAll();
+              Alert.alert(
+                'Submitted',
+                `Sent for approval with ${songsCount} song${songsCount === 1 ? '' : 's'} and ${teamCount} team member${teamCount === 1 ? '' : 's'}.`
+              );
+            } catch (e) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setSavingSetlist(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const openSetlist = (svcId) => {
@@ -351,6 +407,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
   };
 
   const renderServices = () => {
+    const pendingSetlistMap = new Map(pendingSetlists.map((entry) => [entry.serviceId, entry]));
     const allMyServices = [
       ...pendingServices,
       ...allServices.filter(sv => (sv.created_by_email || '').toLowerCase() === (profile?.email || paramEmail || '').toLowerCase()),
@@ -366,6 +423,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
         {allMyServices.map(sv => {
           const isPending = sv.status === 'pending_approval';
           const planSongs = plans[sv.id]?.songs || [];
+          const pendingReview = pendingSetlistMap.get(sv.id);
           return (
             <View key={sv.id} style={[s.card, isPending && s.cardPending]}>
               <View style={s.cardRow}>
@@ -378,10 +436,29 @@ export default function LeaderDashboardScreen({ navigation, route }) {
                   : <View style={s.approvedBadge}><Text style={s.approvedBadgeTxt}>✓ Approved</Text></View>
                 }
               </View>
+              {!!pendingReview && !isPending && (
+                <View style={s.pendingSection}>
+                  <Text style={s.pendingSectionLabel}>⏳ Awaiting Worship Leader / Admin approval</Text>
+                  <Text style={s.pendingSongMeta}>
+                    Submitted {pendingReview.submittedAt ? new Date(pendingReview.submittedAt).toLocaleString() : 'just now'}
+                  </Text>
+                </View>
+              )}
               {!isPending && (
-                <TouchableOpacity style={s.setlistBtn} onPress={() => openSetlist(sv.id)}>
-                  <Text style={s.setlistBtnTxt}>🎵 Edit Setlist ({planSongs.length} songs)</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity style={s.setlistBtn} onPress={() => openSetlist(sv.id)}>
+                    <Text style={s.setlistBtnTxt}>🎵 Edit Draft ({planSongs.length} songs)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.setlistBtn, s.submitBtn, savingSetlist && s.submitBtnDisabled]}
+                    onPress={() => handleSubmitServicePlan(sv)}
+                    disabled={savingSetlist}
+                  >
+                    {savingSetlist
+                      ? <ActivityIndicator size="small" color="#FFF" />
+                      : <Text style={s.submitBtnTxt}>{pendingReview ? '↻ Re-submit for Approval' : '📤 Send for Approval'}</Text>}
+                  </TouchableOpacity>
+                </>
               )}
             </View>
           );
@@ -480,8 +557,8 @@ export default function LeaderDashboardScreen({ navigation, route }) {
           <Text style={s.backTxt}>‹</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Leader Dashboard</Text>
-          <Text style={s.headerSub}>{profile?.name || paramName || 'Leader'}</Text>
+          <Text style={s.headerTitle}>Services</Text>
+          <Text style={s.headerSub}>{profile?.name || paramName || 'Service Planner'}</Text>
         </View>
         <TouchableOpacity onPress={loadAll} style={s.refreshBtn}>
           <Text style={s.refreshBtnTxt}>↻</Text>
@@ -517,7 +594,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
         <View style={s.modalOverlay}>
           <View style={s.modalBox}>
             <Text style={s.modalTitle}>Create Service</Text>
-            <Text style={s.modalNote}>Will be submitted for Admin/Manager approval.</Text>
+            <Text style={s.modalNote}>Will be submitted for Worship Leader / Admin approval.</Text>
 
             <Text style={s.fieldLabel}>Service Name *</Text>
             <TextInput style={s.input} placeholder="e.g. Sunday Service" placeholderTextColor="#4B5563"
@@ -551,7 +628,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
             <View style={s.modalBtns}>
               <TouchableOpacity style={s.cancelBtn} onPress={() => setShowNewService(false)}><Text style={s.cancelBtnTxt}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={s.confirmBtn} onPress={handleCreateService} disabled={savingSvc}>
-                {savingSvc ? <ActivityIndicator color="#FFF" /> : <Text style={s.confirmBtnTxt}>Submit for Approval</Text>}
+                {savingSvc ? <ActivityIndicator color="#FFF" /> : <Text style={s.confirmBtnTxt}>Send for Approval</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -563,7 +640,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
         <View style={s.modalOverlay}>
           <View style={s.modalBox}>
             <Text style={s.modalTitle}>Propose Song</Text>
-            <Text style={s.modalNote}>Will be submitted for Admin/Manager approval before appearing in the library.</Text>
+            <Text style={s.modalNote}>Will be submitted for Worship Leader / Admin approval before appearing in the library.</Text>
 
             <Text style={s.fieldLabel}>Title *</Text>
             <TextInput style={s.input} placeholder="Song title" placeholderTextColor="#4B5563" value={songTitle} onChangeText={setSongTitle} />
@@ -711,6 +788,9 @@ const s = StyleSheet.create({
 
   setlistBtn:     { marginTop: 10, backgroundColor: '#1E2A40', borderRadius: 8, paddingVertical: 8, alignItems: 'center' },
   setlistBtnTxt:  { color: '#A78BFA', fontSize: 13, fontWeight: '700' },
+  submitBtn:      { backgroundColor: '#059669', borderWidth: 1, borderColor: '#10B981' },
+  submitBtnDisabled: { opacity: 0.7 },
+  submitBtnTxt:   { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
 
   sectionLabel:   { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, marginTop: 4 },
   emptyHint:      { color: '#4B5563', fontSize: 13, textAlign: 'center', marginTop: 20 },

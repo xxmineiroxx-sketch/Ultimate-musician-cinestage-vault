@@ -392,6 +392,15 @@ function isPastService(svc, today = todayDateStr()) {
   return !!svc?.date && svc.date < today;
 }
 
+function playbackGrantLabel(role) {
+  if (role === 'org_owner') return 'Org Owner';
+  if (role === 'admin') return 'Admin';
+  if (role === 'manager') return 'Worship Leader';
+  if (role === 'leader') return 'Service Planner';
+  if (role === 'none' || role == null) return 'No extra access';
+  return String(role || '');
+}
+
 export default function AdminDashboardScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { mdRole } = route.params || {};
@@ -477,6 +486,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // Pending services & songs (from Leaders)
   const [pendingServices, setPendingServices] = useState([]);
   const [pendingSongs, setPendingSongs]       = useState([]);
+  const [pendingSetlists, setPendingSetlists] = useState([]);
   const [approvingSvcId, setApprovingSvcId]   = useState(null);
   const [approvingSongId, setApprovingSongId] = useState(null);
 
@@ -484,6 +494,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [showGrantRole, setShowGrantRole]   = useState(null); // person object
   const [grantingRole, setGrantingRole]     = useState('');
   const [savingGrant, setSavingGrant]       = useState(false);
+  const [approvingSetlistId, setApprovingSetlistId] = useState(null);
+  const [rejectingSetlistId, setRejectingSetlistId] = useState(null);
 
   // Edit member modal
   const [showEditMember, setShowEditMember] = useState(null);
@@ -558,13 +570,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
     setError(null);
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, lib, props, pSvcs, pSongs] = await Promise.all([
+      const [prof, msgs, lib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/proposals`,       { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/services/pending`,        { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/setlist/pending`,         { headers: hdrs }).catch(() => []),
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -576,6 +589,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       setProposals(Array.isArray(props) ? props : []);
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
+      setPendingSetlists(Array.isArray(pSetlists) ? pSetlists.filter(s => s.status === 'pending') : []);
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
@@ -1075,6 +1089,53 @@ export default function AdminDashboardScreen({ navigation, route }) {
     ]);
   };
 
+  const handleApprovePendingSetlist = async (entry) => {
+    setApprovingSetlistId(entry.id);
+    try {
+      await fetchJson(`${SYNC_URL}/sync/setlist/approve?id=${encodeURIComponent(entry.id)}`, {
+        method: 'POST',
+        headers: syncHeaders(),
+      });
+      Alert.alert('Approved & published ✓', `"${entry.serviceName || 'Service'}" is now published to the team.`);
+      setPendingSetlists(prev => prev.filter(item => item.id !== entry.id));
+      loadAll();
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setApprovingSetlistId(null);
+    }
+  };
+
+  const handleRejectPendingSetlist = (entry) => {
+    Alert.alert(
+      'Request changes?',
+      `Return "${entry.serviceName || 'this service plan'}" to the service planner for edits?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Request Changes',
+          style: 'destructive',
+          onPress: async () => {
+            setRejectingSetlistId(entry.id);
+            try {
+              await fetchJson(`${SYNC_URL}/sync/setlist/reject?id=${encodeURIComponent(entry.id)}`, {
+                method: 'POST',
+                headers: syncHeaders(),
+                body: JSON.stringify({ note: 'Please update the service plan and submit again.' }),
+              });
+              setPendingSetlists(prev => prev.filter(item => item.id !== entry.id));
+              loadAll();
+            } catch (e) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setRejectingSetlistId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // ── Grant app role (Admin only) ─────────────────────────────────────────
   const handleGrantRole = async () => {
     if (!showGrantRole || !grantingRole) return;
@@ -1087,7 +1148,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         body: JSON.stringify({ email: showGrantRole.email, name: showGrantRole.name, role: roleValue }),
       });
       setShowGrantRole(null); setGrantingRole('');
-      Alert.alert('Role granted ✓', `${showGrantRole.name} is now ${grantingRole}.`);
+      Alert.alert('Permission updated ✓', `${showGrantRole.name} is now ${playbackGrantLabel(grantingRole)}.`);
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingGrant(false); }
   };
@@ -1528,6 +1589,51 @@ export default function AdminDashboardScreen({ navigation, route }) {
       contentContainerStyle={s.tabContent}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
     >
+      {canApprove && pendingSetlists.length > 0 && (
+        <View style={s.pendingApprovalSection}>
+          <Text style={s.pendingApprovalHeader}>📝 Service Plans Awaiting Approval ({pendingSetlists.length})</Text>
+          {pendingSetlists.map(entry => {
+            const planSongs = Array.isArray(entry?.plan?.songs) ? entry.plan.songs : [];
+            const planTeam = Array.isArray(entry?.plan?.team) ? entry.plan.team : [];
+            const songSummary = planSongs.map(song => song?.title || song).filter(Boolean).join(' · ') || 'No songs selected yet';
+            const teamSummary = planTeam.map(member => `${member?.name || 'Member'} (${member?.role || 'Role'})`).join(' · ') || 'No team assigned yet';
+            const busy = approvingSetlistId === entry.id || rejectingSetlistId === entry.id;
+            return (
+              <View key={entry.id} style={[s.pendingApprovalCard, s.pendingPlanCard]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.pendingApprovalTitle}>{entry.serviceName || 'Untitled Service'}</Text>
+                  <Text style={s.pendingApprovalMeta}>
+                    {formatServiceDate(entry.serviceDate)}{entry.serviceTime ? ` · ${entry.serviceTime}` : ''} · by {entry?.submittedBy?.name || 'Service Planner'}
+                  </Text>
+                  <Text style={s.pendingApprovalPlanText} numberOfLines={2}>Songs: {songSummary}</Text>
+                  <Text style={s.pendingApprovalPlanText} numberOfLines={2}>Team: {teamSummary}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={s.approveBtn}
+                    onPress={() => handleApprovePendingSetlist(entry)}
+                    disabled={busy}
+                  >
+                    {approvingSetlistId === entry.id
+                      ? <ActivityIndicator color="#FFF" size="small" />
+                      : <Text style={s.approveBtnTxt}>✓ Approve & Publish</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.rejectBtn}
+                    onPress={() => handleRejectPendingSetlist(entry)}
+                    disabled={busy}
+                  >
+                    {rejectingSetlistId === entry.id
+                      ? <ActivityIndicator color="#EF4444" size="small" />
+                      : <Text style={s.rejectBtnTxt}>↺ Changes</Text>}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* ── Pending Approvals from Leaders ── */}
       {canApprove && pendingServices.length > 0 && (
         <View style={s.pendingApprovalSection}>
@@ -2600,10 +2706,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
       <Modal visible={!!showGrantRole} animationType="slide" transparent onRequestClose={() => setShowGrantRole(null)}>
         <View style={{ flex: 1, backgroundColor: '#00000090', justifyContent: 'flex-end' }}>
           <View style={{ backgroundColor: '#0B1120', borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderColor: '#1E2A40', padding: 20 }}>
-            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Grant Role</Text>
+            <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
-              Set role for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🛡 Manager: can only grant Leader role' : ''}
+              Set service access for {showGrantRole?.name}
+              {isManager && !isAdmin ? '\n🛡 Worship Leader: can only grant Service Planner access' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {(isOrgOwner ? ['org_owner', 'admin', 'manager', 'leader', 'none']
@@ -2614,8 +2720,13 @@ export default function AdminDashboardScreen({ navigation, route }) {
                     backgroundColor: grantingRole === r ? '#7C3AED' : '#1F2937',
                     borderColor: grantingRole === r ? '#7C3AED' : '#374151' }}
                   onPress={() => setGrantingRole(r)}>
-                  <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700', textTransform: 'capitalize' }}>
-                    {r === 'manager' ? 'Worship Leader' : r}
+                  <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700' }}>
+                    {r === 'manager' ? 'Worship Leader'
+                      : r === 'leader' ? 'Service Planner'
+                      : r === 'org_owner' ? 'Org Owner'
+                      : r === 'none' ? 'Remove Access'
+                      : r === 'admin' ? 'Admin'
+                      : r}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -3021,6 +3132,8 @@ const s = StyleSheet.create({
   pendingApprovalCard:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0B1120', borderRadius: 10, borderWidth: 1, borderColor: '#1E2A40', padding: 10, marginBottom: 8 },
   pendingApprovalTitle:   { color: '#E0E7FF', fontSize: 14, fontWeight: '700' },
   pendingApprovalMeta:    { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  pendingPlanCard:        { alignItems: 'flex-start' },
+  pendingApprovalPlanText:{ color: '#9CA3AF', fontSize: 12, marginTop: 6, lineHeight: 17, maxWidth: 420 },
   approveBtn:             { backgroundColor: '#059669', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   approveBtnTxt:          { color: '#FFF', fontSize: 12, fontWeight: '800' },
   rejectBtn:              { backgroundColor: '#7F1D1D22', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#EF4444' },

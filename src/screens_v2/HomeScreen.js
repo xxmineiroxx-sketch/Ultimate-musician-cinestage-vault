@@ -811,7 +811,7 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       )}
 
-      {/* Leader Dashboard card */}
+      {/* Service Planner card */}
       {mdRole === 'leader' && (
         <TouchableOpacity
           style={[styles.adminCard, { borderColor: '#7C3AED44' }]}
@@ -819,11 +819,11 @@ export default function HomeScreen({ navigation }) {
         >
           <View style={styles.adminCardLeft}>
             <View style={[styles.adminBadge, { backgroundColor: '#7C3AED22', borderColor: '#7C3AED' }]}>
-              <Text style={[styles.adminBadgeText, { color: '#A78BFA' }]}>🎼 Leader</Text>
+              <Text style={[styles.adminBadgeText, { color: '#A78BFA' }]}>🎼 Service Planner</Text>
             </View>
-            <Text style={styles.adminCardTitle}>Leader Dashboard</Text>
+            <Text style={styles.adminCardTitle}>Services</Text>
             <Text style={styles.adminCardDesc}>
-              Services, team, library & setlists
+              Create services, build setlists, assign team, send for approval
             </Text>
           </View>
           <Text style={styles.adminCardArrow}>›</Text>
