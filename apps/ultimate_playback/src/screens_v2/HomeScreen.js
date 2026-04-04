@@ -23,6 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModernDashboardCard from '../components_v2/ModernDashboardCard';
 import PreparationHub from '../components_v2/PreparationHub';
+import ServiceCommandCenter from '../components_v2/ServiceCommandCenter';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -571,6 +572,24 @@ export default function HomeScreen({ navigation }) {
     // Schedule local push reminders for upcoming services (non-blocking)
     scheduleServiceReminders(upcomingGrouped).catch(() => {});
 
+    // Send heartbeat for the next upcoming service so worship leader can see team readiness
+    if (userProfile?.email && upcomingGrouped.length > 0) {
+      const nextSvc = upcomingGrouped[0][0];
+      const serviceId = nextSvc?.service_id || nextSvc?.id;
+      if (serviceId) {
+        fetch(`${SYNC_URL}/sync/heartbeat`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify({
+            serviceId,
+            email: userProfile.email,
+            name:  userProfile.name  || '',
+            role:  nextSvc.role      || userProfile.grantedRole || '',
+          }),
+        }).catch(() => {}); // fire-and-forget
+      }
+    }
+
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
@@ -967,11 +986,22 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      <PreparationHub 
-        score={85} 
-        mastered={upcomingServices.length > 0 ? 4 : 0} 
-        total={upcomingServices.length > 0 ? 6 : 0} 
-      />
+      {/* Service Command Center for worship leaders / admins; Preparation Hub for regular members */}
+      {(mdRole === 'md' || mdRole === 'admin' || mdRole === 'worship_leader' || mdRole === 'owner')
+        ? (
+          <ServiceCommandCenter
+            nextServiceGroup={upcomingServices[0] || null}
+            userProfile={profile}
+            onNavigate={(screen) => navigation.navigate(screen)}
+          />
+        ) : (
+          <PreparationHub
+            score={85}
+            mastered={upcomingServices.length > 0 ? 4 : 0}
+            total={upcomingServices.length > 0 ? 6 : 0}
+          />
+        )
+      }
 
       {/* ── Monthly Assignment Tracker (hidden — last day of month only) ── */}
       <Modal
