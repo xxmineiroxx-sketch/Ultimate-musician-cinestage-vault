@@ -143,11 +143,9 @@ export default function PlanningCenterScreen({ navigation }) {
             </View>
             <View style={styles.gridRow}>
               <View style={styles.gridCol}>
-                <Tile icon="🔗" title="Import from PCO" subtitle="Pull upcoming setlists from Planning Center Online into your library." onPress={() => navigation.navigate("PCOImport")} accent="#F59E0B" />
+                <Tile icon="⚙️" title="Integrations & Settings" subtitle="Audio / Lighting / ProPresenter / Sync targets plus Planning Center Online import." onPress={() => navigation.navigate("Settings")} accent="#64748B" />
               </View>
-              <View style={styles.gridCol}>
-                <Tile icon="⚙️" title="Integrations & Settings" subtitle="Audio / Lighting / ProPresenter / Sync targets for this service." onPress={() => navigation.navigate("Settings")} accent="#64748B" />
-              </View>
+              <View style={styles.gridCol} />
             </View>
           </View>
         ) : (
@@ -156,8 +154,7 @@ export default function PlanningCenterScreen({ navigation }) {
             <Tile icon="🧾" title="Service Plan" subtitle="Songs + cue stacks for the active service." onPress={() => navigation.navigate("ServicePlan", serviceId ? { serviceId } : {})} accent="#818CF8" />
             <Tile icon="📚" title="Library" subtitle="Browse songs, add to the active service plan, run CineStage™ stems." onPress={() => navigation.navigate("Library")} accent="#34D399" />
             <Tile icon="👥" title="People & Roles" subtitle="Assign musicians and techs for this service." onPress={() => navigation.navigate("PeopleRoles")} accent="#14B8A6" />
-            <Tile icon="🔗" title="Import from PCO" subtitle="Pull upcoming setlists from Planning Center Online into your library." onPress={() => navigation.navigate("PCOImport")} accent="#F59E0B" />
-            <Tile icon="⚙️" title="Integrations & Settings" subtitle="Audio / Lighting / ProPresenter / Sync targets for this service." onPress={() => navigation.navigate("Settings")} accent="#64748B" />
+            <Tile icon="⚙️" title="Integrations & Settings" subtitle="Audio / Lighting / ProPresenter / Sync targets plus Planning Center Online import." onPress={() => navigation.navigate("Settings")} accent="#64748B" />
           </View>
         )}
       </ScrollView>

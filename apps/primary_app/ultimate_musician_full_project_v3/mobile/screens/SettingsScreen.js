@@ -24,6 +24,7 @@ import {
   saveSettings,
   resetAll,
 } from "../data/storage";
+import { getPCOCredentials } from "../services/planningCenterService";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function outputColor(val) {
@@ -131,14 +132,16 @@ function RoutingPicker({ label, value, options, onChange, isOverride }) {
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
-export default function SettingsScreen() {
+export default function SettingsScreen({ navigation }) {
   const [s, setS] = useState(null);
   const { isDark, setDarkMode } = useTheme();
+  const [pcoCreds, setPcoCreds] = useState(null);
 
   useEffect(() => {
     (async () => {
       await ensureSeeded();
       const loaded = await getSettings();
+      const savedPcoCreds = await getPCOCredentials().catch(() => null);
       const defaults = makeDefaultSettings();
       setS({
         ...loaded,
@@ -152,6 +155,7 @@ export default function SettingsScreen() {
           },
         },
       });
+      setPcoCreds(savedPcoCreds);
     })();
   }, []);
 
@@ -355,6 +359,49 @@ export default function SettingsScreen() {
               update({ ...s, sync: { ...s.sync, debug: !s.sync?.debug } })
             }
           />
+        </Section>
+
+        {/* ── Planning Center Online ───────────────────────── */}
+        <Section title="Planning Center Online">
+          <Text style={styles.routingNote}>
+            Connect Planning Center Online and import upcoming setlists into
+            your song library from the Integrations area.
+          </Text>
+          <Pressable
+            style={styles.integrationCard}
+            onPress={() => navigation?.navigate("PCOImport")}
+          >
+            <View style={styles.integrationCardHeader}>
+              <Text style={styles.integrationCardTitle}>Import from PCO</Text>
+              <View
+                style={[
+                  styles.integrationStatusBadge,
+                  pcoCreds
+                    ? styles.integrationStatusConnected
+                    : styles.integrationStatusDisconnected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.integrationStatusText,
+                    pcoCreds
+                      ? styles.integrationStatusTextConnected
+                      : styles.integrationStatusTextDisconnected,
+                  ]}
+                >
+                  {pcoCreds ? "Connected" : "Not Connected"}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.integrationCardSub}>
+              {pcoCreds
+                ? "Manage credentials, browse upcoming plans, and import songs from Planning Center Online."
+                : "Connect your PCO App ID and Secret, then pull upcoming setlists into Ultimate Musician."}
+            </Text>
+            <Text style={styles.integrationCardCta}>
+              {pcoCreds ? "Open PCO Import →" : "Connect PCO →"}
+            </Text>
+          </Pressable>
         </Section>
 
         {/* ── General ───────────────────────────────────────── */}
@@ -594,4 +641,61 @@ const styles = StyleSheet.create({
     borderColor: "#EF4444",
   },
   resetBtnText: { color: "#FCA5A5", fontWeight: "900", textAlign: "center" },
+
+  integrationCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#334155",
+    backgroundColor: "#0B1220",
+    gap: 10,
+  },
+  integrationCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  integrationCardTitle: {
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "800",
+    flex: 1,
+  },
+  integrationCardSub: {
+    color: "#94A3B8",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  integrationCardCta: {
+    color: "#F59E0B",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  integrationStatusBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  integrationStatusConnected: {
+    borderColor: "#059669",
+    backgroundColor: "#052E16",
+  },
+  integrationStatusDisconnected: {
+    borderColor: "#B45309",
+    backgroundColor: "#1C1207",
+  },
+  integrationStatusText: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  integrationStatusTextConnected: {
+    color: "#34D399",
+  },
+  integrationStatusTextDisconnected: {
+    color: "#F59E0B",
+  },
 });
