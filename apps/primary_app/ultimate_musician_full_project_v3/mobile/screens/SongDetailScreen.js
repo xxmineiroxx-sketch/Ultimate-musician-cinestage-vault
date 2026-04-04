@@ -29,6 +29,7 @@ import {
 } from "../services/stemJobService";
 import { analyzeWorshipSong } from "../services/worshipFlowService";
 import {
+  CHORD_CHART_INSTRUMENTS,
   makeId,
   ROUTING_TRACKS,
   OUTPUT_COLORS,
@@ -48,13 +49,33 @@ const CINESTAGE_STEPS = [
 
 const TIME_SIGS = ["4/4", "3/4", "6/8", "2/4", "5/4", "12/8"];
 
-const ROLES = ["Vocals", "Guitar", "Bass", "Drums", "Keys", "Other"];
+const ROLES = [
+  "Vocals",
+  "Keys",
+  "Electric Guitar",
+  "Acoustic Guitar",
+  "Bass",
+  "Drums",
+  "Synth/Pad",
+  "Other",
+];
+const AI_CHART_INSTRUMENTS = [
+  "Keys",
+  "Electric Guitar",
+  "Acoustic Guitar",
+  "Bass",
+  "Drums",
+  "Vocals",
+  "Synth/Pad",
+];
 const ROLE_COLORS = {
   Vocals: "#F472B6",
-  Guitar: "#FB923C",
+  Keys: "#A78BFA",
+  "Electric Guitar": "#FB923C",
+  "Acoustic Guitar": "#F59E0B",
   Bass: "#60A5FA",
   Drums: "#34D399",
-  Keys: "#A78BFA",
+  "Synth/Pad": "#22C55E",
   Other: "#FBBF24",
 };
 const WORSHIP_FLOW_VIEWER_ROLES = new Set([
@@ -271,8 +292,240 @@ function normalizeRoleKey(role) {
     .replace(/[\s-]+/g, "_");
 }
 
+function normalizeSectionRole(role) {
+  const key = normalizeRoleKey(role).replace(/_/g, " ");
+  const aliasMap = {
+    vocal: "Vocals",
+    vocals: "Vocals",
+    "lead vocal": "Vocals",
+    keys: "Keys",
+    keyboard: "Keys",
+    piano: "Keys",
+    "electric guitar": "Electric Guitar",
+    guitar: "Electric Guitar",
+    "acoustic guitar": "Acoustic Guitar",
+    acoustic: "Acoustic Guitar",
+    bass: "Bass",
+    drums: "Drums",
+    drum: "Drums",
+    "synth pad": "Synth/Pad",
+    synth: "Synth/Pad",
+    pad: "Synth/Pad",
+    other: "Other",
+  };
+  return aliasMap[key] || role;
+}
+
 function canViewWorshipFlow(role) {
   return WORSHIP_FLOW_VIEWER_ROLES.has(normalizeRoleKey(role));
+}
+
+function defaultSectionParts(name, content) {
+  const lyrics = stripChordsFromSection(content);
+  return {
+    Vocals: lyrics,
+    Keys: content,
+    "Electric Guitar": content,
+    "Acoustic Guitar": content,
+    Bass: content,
+    Drums: `[${name}] Keep the groove locked and support the vocal flow.`,
+    "Synth/Pad": `[${name}] Add texture only where the section needs lift or space.`,
+    Other: content,
+  };
+}
+
+function normalizeSectionDraft(section, index = 0) {
+  const content = section?.content || "";
+  const name = String(section?.name || `Section ${index + 1}`).trim();
+  const fallback = defaultSectionParts(name, content);
+  const mergedParts = { ...fallback };
+  Object.entries(section?.parts || {}).forEach(([role, value]) => {
+    const canonical = normalizeSectionRole(role);
+    if (ROLES.includes(canonical)) {
+      mergedParts[canonical] = String(value || "");
+    }
+  });
+  if (!mergedParts.Vocals) {
+    mergedParts.Vocals = stripChordsFromSection(content);
+  }
+  return {
+    id: section?.id || makeId("sec"),
+    name,
+    content,
+    expanded: section?.expanded ?? true,
+    cue: section?.cue || "",
+    energy: section?.energy || "",
+    parts: mergedParts,
+  };
+}
+
+function ensureSmartSections(sectionList = []) {
+  return (sectionList || []).map((section, index) =>
+    normalizeSectionDraft(section, index),
+  );
+}
+
+function buildSectionColor(label = "", index = 0) {
+  const key = String(label || "").toLowerCase();
+  if (key.includes("intro")) return "#6B7280";
+  if (key.includes("pre") && key.includes("chorus")) return "#8B5CF6";
+  if (key.includes("chorus") || key.includes("refrain")) return "#EC4899";
+  if (key.includes("bridge")) return "#F59E0B";
+  if (key.includes("outro") || key.includes("ending")) return "#10B981";
+  if (key.includes("verse")) return "#6366F1";
+  if (key.includes("tag") || key.includes("vamp") || key.includes("hook")) return "#F97316";
+  const palette = ["#6366F1", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#0EA5E9"];
+  return palette[index % palette.length];
+}
+
+function estimateArrangementDurationMs(sectionList = [], bpmValue) {
+  const tempo = Math.max(Number(bpmValue) || 72, 40);
+  const beatSeconds = 60 / tempo;
+  const totalBeats = (sectionList || []).reduce((sum, section) => {
+    const lineCount = String(section?.content || "")
+      .split("\n")
+      .filter((line) => line.trim())
+      .length;
+    return sum + Math.max(16, lineCount * 8);
+  }, 0);
+  return Math.max(Math.round(totalBeats * beatSeconds * 1000), 90000);
+}
+
+function buildFallbackWaveformSections(sectionList = [], durationMs = 0) {
+  if (!sectionList.length) return [];
+  const durationSec = Math.max(durationMs / 1000, sectionList.length * 15, 60);
+  const weights = sectionList.map((section) =>
+    Math.max(
+      2,
+      String(section?.content || "")
+        .split("\n")
+        .filter((line) => line.trim()).length,
+    ),
+  );
+  const total = Math.max(weights.reduce((sum, value) => sum + value, 0), 1);
+  let elapsed = 0;
+
+  return sectionList.map((section, index) => {
+    const startRatio = elapsed / total;
+    const startSec = durationSec * startRatio;
+    elapsed += weights[index];
+    const endSec = durationSec * (elapsed / total);
+    return {
+      id: section.id || `sec_${index}`,
+      label: section.name,
+      name: section.name,
+      color: buildSectionColor(section.name, index),
+      type: normalizeRoleKey(section.name),
+      timeSec: startSec,
+      positionSeconds: startSec,
+      start_ms: Math.round(startSec * 1000),
+      end_ms: Math.round(endSec * 1000),
+    };
+  });
+}
+
+function buildFallbackWaveformCues(sectionList = [], waveformSections = []) {
+  return waveformSections.map((marker, index) => ({
+    id: `smart_cue_${index}`,
+    label: marker.label || sectionList[index]?.name || `Section ${index + 1}`,
+    type: "section",
+    time: Number(marker.timeSec || marker.positionSeconds || 0),
+    timeSec: Number(marker.timeSec || marker.positionSeconds || 0),
+    positionSeconds: Number(marker.positionSeconds || marker.timeSec || 0),
+    start_ms: marker.start_ms || 0,
+    end_ms: marker.end_ms || marker.start_ms || 0,
+    color: marker.color || buildSectionColor(marker.label, index),
+    cue: sectionList[index]?.cue || "",
+    energy: sectionList[index]?.energy || "",
+  }));
+}
+
+function mergeArrangedSections(baseSections = [], arrangedSections = []) {
+  const baseById = new Map(baseSections.map((section) => [String(section.id || ""), section]));
+  const baseByName = new Map(
+    baseSections.map((section) => [String(section.name || "").trim().toLowerCase(), section]),
+  );
+  const source = Array.isArray(arrangedSections) && arrangedSections.length ? arrangedSections : baseSections;
+
+  return source.map((section, index) => {
+    const existing =
+      baseById.get(String(section?.id || "")) ||
+      baseByName.get(String(section?.name || "").trim().toLowerCase()) ||
+      baseSections[index] ||
+      {};
+    const merged = normalizeSectionDraft(
+      {
+        ...existing,
+        ...section,
+        content: section?.content ?? existing?.content ?? "",
+        parts: {
+          ...(existing?.parts || {}),
+          ...(section?.parts || {}),
+        },
+      },
+      index,
+    );
+    if (section?.cue) merged.cue = String(section.cue);
+    if (section?.energy) merged.energy = String(section.energy);
+    return merged;
+  });
+}
+
+function buildInstrumentNotesFromSections(sectionList = []) {
+  const notes = {};
+  CHORD_CHART_INSTRUMENTS.concat(["Drums"]).forEach((role) => {
+    const text = sectionList
+      .map((section) => {
+        const content = String(section?.parts?.[role] || "").trim();
+        return content ? `[${section.name}]\n${content}` : "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    if (text) notes[role] = text;
+  });
+
+  const synthText = sectionList
+    .map((section) => {
+      const content = String(section?.parts?.["Synth/Pad"] || "").trim();
+      return content ? `[${section.name}]\n${content}` : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  if (synthText) notes["Synth/Pad"] = synthText;
+
+  return notes;
+}
+
+function getPreviewChartForInstrument(roleCharts = {}, instrument = "") {
+  const canonical = normalizeSectionRole(instrument);
+  return (
+    roleCharts?.[canonical] ||
+    roleCharts?.[instrument] ||
+    ""
+  );
+}
+
+async function postCineStageJson(path, payload, bases = []) {
+  let lastError = null;
+  let lastStatus = null;
+  for (const base of bases) {
+    try {
+      const res = await fetchWithRetry(`${base}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return await res.json();
+      lastStatus = res.status;
+      lastError = new Error(`CineStage API ${res.status}`);
+      if (res.status !== 404 || base === bases[bases.length - 1]) {
+        throw lastError;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error(`CineStage API ${lastStatus || "request failed"}`);
 }
 
 function buildLyricsExcerpt(chartText, sectionList) {
@@ -440,7 +693,7 @@ export default function SongDetailScreen({ route, navigation }) {
   // AI Instrument Chart
   const [aiChartLoading, setAiChartLoading] = useState(false);
   const [aiChartResult, setAiChartResult] = useState(null); // { instrument, chart_text }
-  const [aiChartInstrument, setAiChartInstrument] = useState("Guitar");
+  const [aiChartInstrument, setAiChartInstrument] = useState("Keys");
 
   // Keys Preset AI
   const [keysPresetExpanded, setKeysPresetExpanded] = useState(false);
@@ -459,12 +712,12 @@ export default function SongDetailScreen({ route, navigation }) {
     const rootKey = (key || '').replace(/m$|maj.*|min.*/i, '').split('/')[0].trim();
     if (!rootKey) { setCagedData(null); setStrummingData(null); setBassFingering(null); return; }
 
-    if (aiChartInstrument === 'Guitar' || aiChartInstrument === 'Acoustic') {
+    if (aiChartInstrument === 'Electric Guitar' || aiChartInstrument === 'Acoustic Guitar') {
       fetch(`${CINESTAGE_URL}/ai/instrument-charts/caged-reference/${encodeURIComponent(rootKey)}`)
         .then(r => r.ok ? r.json() : null)
         .then(d => setCagedData(d))
         .catch(() => {});
-      if (aiChartInstrument === 'Acoustic') {
+      if (aiChartInstrument === 'Acoustic Guitar') {
         const ts = encodeURIComponent(timeSig || '4/4');
         fetch(`${CINESTAGE_URL}/ai/instrument-charts/strumming-patterns/${ts}`)
           .then(r => r.ok ? r.json() : null)
@@ -667,52 +920,43 @@ export default function SongDetailScreen({ route, navigation }) {
   }
 
   async function handleSmartAnalyze() {
-    if (!rawChart.trim() && !title.trim()) {
+    const chartText =
+      rawChart ||
+      currentSong?.lyricsChordChart ||
+      currentSong?.chordChart ||
+      "";
+
+    if (!chartText.trim() && !title.trim()) {
       Alert.alert("Nothing to analyze", "Add a title or paste your chord chart first.");
       return;
     }
 
-    // Step 1: Parse BPM / Key / TimeSig from chart header
-    const meta = extractMetaFromChart(rawChart);
-    if (meta.key) { setKey(meta.key); markDirty(); }
-    if (meta.bpm) { setBpm(String(meta.bpm)); markDirty(); }
-    if (meta.timeSig) { setTimeSig(meta.timeSig); markDirty(); }
+    const meta = extractMetaFromChart(chartText);
+    const effectiveKey = meta.key || key || currentSong?.key || "";
+    const effectiveBpm = meta.bpm || (bpm ? Number(bpm) : currentSong?.bpm || null);
+    const effectiveTimeSig = meta.timeSig || timeSig || currentSong?.timeSig || "4/4";
+    const effectiveTitle = title.trim() || currentSong?.title || "Untitled";
+    const effectiveArtist = artist.trim() || currentSong?.artist || "";
 
-    // Step 2: Auto-recognize sections from chart text
-    if (rawChart.trim()) {
-      const parsed = autoRecognizeSections(rawChart);
-      if (parsed.length) {
-        const distributed = parsed.map((sec) => ({
-          ...sec,
-          parts: {
-            Vocals: stripChordsFromSection(sec.content),
-            Guitar: sec.content,
-            Keys: sec.content,
-            Bass: sec.content,
-            Drums: `[ ${sec.name} ] — add groove / feel notes here`,
-            Other: sec.content,
-          },
-        }));
-        setSections(distributed);
-        markDirty();
-      }
-    }
+    if (meta.key) setKey(meta.key);
+    if (meta.bpm) setBpm(String(meta.bpm));
+    if (meta.timeSig) setTimeSig(meta.timeSig);
 
-    // Step 3: Generate AI Chart
-    if (!title.trim()) return;
+    const parsedSections = chartText.trim()
+      ? autoRecognizeSections(chartText)
+      : [];
+    const baseSections = ensureSmartSections(
+      parsedSections.length
+        ? parsedSections
+        : sections.length
+          ? sections
+          : [{ id: makeId("sec"), name: "Song", content: chartText, expanded: true, parts: {} }],
+    );
+    setSections(baseSections);
+
     setAiChartLoading(true);
     setAiChartResult(null);
     try {
-      const payload = {
-        song_title: title.trim(),
-        artist: artist.trim() || "",
-        key: meta.key || key || "",
-        bpm: meta.bpm ? meta.bpm : bpm ? Number(bpm) : null,
-        time_signature: meta.timeSig || timeSig || "4/4",
-        chord_chart: rawChart || "",
-        instrument: aiChartInstrument === 'Acoustic' ? 'acoustic_guitar' : aiChartInstrument,
-        style: "worship",
-      };
       const bases = Array.from(
         new Set(
           [apiBase, CINESTAGE_URL]
@@ -720,24 +964,161 @@ export default function SongDetailScreen({ route, navigation }) {
             .filter(Boolean),
         ),
       );
+      const arrangement = await postCineStageJson(
+        "/ai/song-arrangement/analyze",
+        {
+          song_title: effectiveTitle,
+          artist: effectiveArtist,
+          key: effectiveKey,
+          bpm: effectiveBpm,
+          time_signature: effectiveTimeSig,
+          chord_chart: chartText,
+          lyrics: buildLyricsExcerpt(chartText, baseSections),
+          sections: baseSections.map((section) => ({
+            id: section.id,
+            name: section.name,
+            content: section.content,
+          })),
+        },
+        bases,
+      );
 
-      let res = null;
-      let lastStatus = null;
-      for (const base of bases) {
-        res = await fetchWithRetry(`${base}/ai/instrument-charts/generate-text`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (res.ok) break;
-        lastStatus = res.status;
-        if (res.status !== 404 || base === CINESTAGE_URL) break;
+      const mergedSections = mergeArrangedSections(baseSections, arrangement.sections || []);
+      const instrumentNotes =
+        arrangement.instrumentNotes ||
+        arrangement.instrument_notes ||
+        buildInstrumentNotesFromSections(mergedSections);
+      const lyrics =
+        String(arrangement.lyrics || "").trim() ||
+        buildLyricsExcerpt(chartText, mergedSections);
+
+      let waveformData = null;
+      const sourceUrl =
+        youtubeLink.trim() ||
+        currentSong?.youtubeLink ||
+        currentSong?.audioUrl ||
+        currentSong?.sourceUrl ||
+        "";
+      if (sourceUrl) {
+        try {
+          waveformData = await postCineStageJson(
+            "/api/waveform/analyze",
+            {
+              file_url: sourceUrl,
+              song_id: songId,
+              title: effectiveTitle,
+              waveform_points: 1280,
+              n_sections: Math.max(mergedSections.length, 6),
+            },
+            bases,
+          );
+        } catch {
+          waveformData = null;
+        }
       }
 
-      if (!res?.ok) throw new Error(`AI Chart API ${lastStatus || res?.status || "request failed"}`);
-      const data = await res.json();
-      const chartText = data.chart_text || data.content || data.chart || JSON.stringify(data);
-      setAiChartResult({ instrument: aiChartInstrument, text: chartText });
+      const durationMs =
+        waveformData?.analysis?.duration_ms ||
+        waveformData?.duration_ms ||
+        arrangement.estimatedDurationMs ||
+        arrangement.estimated_duration_ms ||
+        estimateArrangementDurationMs(mergedSections, effectiveBpm);
+      const rawWaveformSections =
+        waveformData?.analysis?.sections ||
+        arrangement.waveformSections ||
+        arrangement.waveform_sections ||
+        buildFallbackWaveformSections(mergedSections, durationMs);
+      const waveformSections = (rawWaveformSections || []).map((section, index) => {
+        const timeSec = Number(
+          section?.timeSec ??
+          section?.positionSeconds ??
+          ((section?.start_ms ?? 0) / 1000),
+        );
+        const label =
+          section?.label ||
+          section?.name ||
+          mergedSections[index]?.name ||
+          `Section ${index + 1}`;
+        const startMs =
+          Number.isFinite(section?.start_ms) && section?.start_ms >= 0
+            ? Number(section.start_ms)
+            : Math.round(timeSec * 1000);
+        const endMs =
+          Number.isFinite(section?.end_ms) && section?.end_ms >= startMs
+            ? Number(section.end_ms)
+            : startMs;
+        return {
+          id: section?.id || mergedSections[index]?.id || `wf_${index}`,
+          label,
+          name: label,
+          type: section?.type || normalizeRoleKey(label),
+          color: section?.color || buildSectionColor(label, index),
+          timeSec,
+          positionSeconds: Number(section?.positionSeconds ?? timeSec),
+          start_ms: startMs,
+          end_ms: endMs,
+        };
+      });
+      const cues =
+        waveformData?.analysis?.cues ||
+        arrangement.cues ||
+        buildFallbackWaveformCues(mergedSections, waveformSections);
+      const waveformPeaks =
+        waveformData?.analysis?.waveformPeaks ||
+        waveformData?.analysis?.peaks ||
+        waveformData?.waveformPeaks ||
+        waveformData?.peaks ||
+        currentSong?.analysis?.waveformPeaks ||
+        currentSong?.analysis?.peaks;
+      const performanceGraph =
+        waveformData?.analysis?.performance_graph ||
+        waveformSections.map((section, index) => ({
+          section: section.label,
+          energy: mergedSections[index]?.energy || "medium",
+          cue: mergedSections[index]?.cue || "",
+        }));
+      const roleCharts = arrangement.roleCharts || arrangement.role_charts || {};
+      const previewChart = getPreviewChartForInstrument(roleCharts, aiChartInstrument);
+
+      const saved = await addOrUpdateSong({
+        ...buildSongObject(),
+        title: effectiveTitle,
+        artist: effectiveArtist,
+        key: effectiveKey,
+        originalKey: effectiveKey,
+        bpm: effectiveBpm,
+        timeSig: effectiveTimeSig,
+        sections: mergedSections,
+        instrumentNotes,
+        lyrics,
+        cues,
+        analysis: {
+          ...(currentSong?.analysis || {}),
+          sections: waveformSections,
+          cues,
+          duration_ms: durationMs,
+          waveformPeaks,
+          peaks: waveformPeaks,
+          performance_graph: performanceGraph,
+          analyzedAt: new Date().toISOString(),
+        },
+        smartArrangement: arrangement,
+      });
+
+      setCurrentSong(saved);
+      setSections(saved.sections || mergedSections);
+      setDirty(false);
+      if (previewChart) {
+        setAiChartResult({ instrument: aiChartInstrument, text: previewChart });
+      }
+      if (isNew) navigation.setParams({ song: saved });
+      const warningText = Array.isArray(arrangement.warnings) && arrangement.warnings.length
+        ? `\n\nNotes:\n• ${arrangement.warnings.join("\n• ")}`
+        : "";
+      Alert.alert(
+        "Smart Analyze complete",
+        `Saved role charts, vocal lyrics, and waveform cues for "${effectiveTitle}".${warningText}`,
+      );
     } catch (e) {
       Alert.alert("AI Chart Error", e.message);
     } finally {
@@ -2027,7 +2408,7 @@ export default function SongDetailScreen({ route, navigation }) {
 
         {/* AI instrument picker + result */}
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-          {['Guitar', 'Acoustic', 'Bass', 'Keys', 'Drums', 'Vocals'].map((inst) => (
+          {AI_CHART_INSTRUMENTS.map((inst) => (
             <TouchableOpacity
               key={inst}
               onPress={() => setAiChartInstrument(inst)}
@@ -2057,7 +2438,7 @@ export default function SongDetailScreen({ route, navigation }) {
         )}
 
         {/* ── CAGED Reference (Guitar + Acoustic only) ──────────────────── */}
-        {(aiChartInstrument === 'Guitar' || aiChartInstrument === 'Acoustic') && cagedData && (
+        {(aiChartInstrument === 'Electric Guitar' || aiChartInstrument === 'Acoustic Guitar') && cagedData && (
           <View style={{ marginTop: 8, backgroundColor: '#0B1324', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#FB923C33' }}>
             <Text style={{ color: '#FB923C', fontSize: 11, fontWeight: '700', marginBottom: 6 }}>
               🎸 CAGED — Key of {cagedData.key}
@@ -2075,7 +2456,7 @@ export default function SongDetailScreen({ route, navigation }) {
         )}
 
         {/* ── Strumming Patterns (Acoustic only) ─────────────────────────── */}
-        {aiChartInstrument === 'Acoustic' && strummingData && (
+        {aiChartInstrument === 'Acoustic Guitar' && strummingData && (
           <View style={{ marginTop: 6, backgroundColor: '#0B1324', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#34D39933' }}>
             <Text style={{ color: '#34D399', fontSize: 11, fontWeight: '700', marginBottom: 6 }}>
               🎵 Strumming Patterns — {strummingData.time_signature}

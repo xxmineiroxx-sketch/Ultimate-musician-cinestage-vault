@@ -78,6 +78,16 @@ export const generateInstrumentChartText = (payload) =>
   });
 
 /**
+ * Organize a full song into role charts, lyrics, section cues, and waveform-ready sections.
+ * payload: { song_title, artist?, key?, bpm?, time_signature?, chord_chart?, lyrics?, sections? }
+ */
+export const analyzeSongArrangement = (payload) =>
+  http("/ai/song-arrangement/analyze", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+/**
  * Capo calculator — find best capo position for a given key/instrument.
  * payload: { key, instrument?, target_key? }
  */
