@@ -1610,25 +1610,6 @@ export default function AdminDashboardScreen({ navigation, route }) {
             );
           })}
 
-        {/* ── Publish to Team ─────────────────────────────────────── */}
-        <TouchableOpacity
-          style={[s.publishBtn, publishingId === svc.id && s.publishBtnDisabled]}
-          onPress={() => handlePublish(svc)}
-          disabled={publishingId === svc.id}
-          activeOpacity={0.8}
-        >
-          {publishingId === svc.id
-            ? <ActivityIndicator size="small" color="#FFF" />
-            : <>
-                <Text style={s.publishBtnText}>📤 Publish to Team</Text>
-                {svc.publishedAt && (
-                  <Text style={s.publishedAt}>
-                    Last: {new Date(svc.publishedAt).toLocaleDateString()}
-                  </Text>
-                )}
-              </>
-          }
-        </TouchableOpacity>
       </View>
     );
   };
