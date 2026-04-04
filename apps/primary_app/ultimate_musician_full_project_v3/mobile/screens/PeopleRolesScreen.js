@@ -315,12 +315,20 @@ export default function PeopleRolesScreen({ navigation }) {
           c.id === local.id
         );
         if (!cloud) return local;
+
         const cloudHasRoles = Array.isArray(cloud.roles) && cloud.roles.length > 0;
         const cloudIsRegistered = cloud.playbackRegistered || cloud.inviteStatus === "registered";
+        const cloudUpdatedAt = new Date(cloud.updatedAt || 0).getTime();
+        const localUpdatedAt = new Date(local.updatedAt || 0).getTime();
+        const cloudIsNewer = cloudUpdatedAt > localUpdatedAt;
+
+        let updated = { ...local };
+        let didChange = false;
+
+        // Sync registration + roles when Playback has confirmed them
         if (cloudIsRegistered && cloudHasRoles) {
-          changed = true;
-          const updated = {
-            ...local,
+          updated = {
+            ...updated,
             roles: cloud.roles,
             roleAssignments: cloud.roleAssignments || cloud.roles.join(", "),
             inviteStatus: "registered",
@@ -328,6 +336,26 @@ export default function PeopleRolesScreen({ navigation }) {
             playbackRegisteredAt: cloud.playbackRegisteredAt || local.playbackRegisteredAt,
             inviteRegisteredAt: cloud.inviteRegisteredAt || local.inviteRegisteredAt,
           };
+          didChange = true;
+        }
+
+        // Sync name / photo / lastName when the cloud version is newer
+        // (covers profile updates made in the Playback app)
+        if (cloudIsNewer) {
+          if (cloud.name && cloud.name !== local.name) {
+            updated.name = cloud.name; didChange = true;
+          }
+          if (cloud.lastName !== undefined && cloud.lastName !== local.lastName) {
+            updated.lastName = cloud.lastName; didChange = true;
+          }
+          if (cloud.photo_url && cloud.photo_url !== local.photo_url) {
+            updated.photo_url = cloud.photo_url; didChange = true;
+          }
+          if (didChange) updated.updatedAt = cloud.updatedAt;
+        }
+
+        if (didChange) {
+          changed = true;
           addOrUpdatePerson(updated).catch(() => {});
           return updated;
         }
