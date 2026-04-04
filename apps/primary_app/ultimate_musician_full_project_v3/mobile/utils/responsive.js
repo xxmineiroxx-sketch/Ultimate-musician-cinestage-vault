@@ -53,10 +53,10 @@ export function useResponsive() {
   const waveformHeight = isPhone
     ? 170
     : isSmallTablet
-      ? 220
+      ? 240
       : isTablet
-        ? 260
-        : 300;
+        ? 280
+        : 320;
 
   // Transport bar: single row on any tablet
   const transportWrap = isPhone ? "wrap" : "nowrap";

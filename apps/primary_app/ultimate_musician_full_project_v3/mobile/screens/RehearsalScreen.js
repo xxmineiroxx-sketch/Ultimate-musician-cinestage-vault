@@ -1096,7 +1096,7 @@ export default function RehearsalScreen({ route, navigation }) {
     }
     try {
       setCsAnalyzing(true);
-      const { analyzeAudio } = await import('../services/cinestage/client');
+      const { analyzeAudio, analyzeWaveform } = await import('../services/cinestage/client');
       const result = await analyzeAudio({
         file_url:   audioUrl,
         title:      song?.title || 'Untitled',
@@ -1105,7 +1105,22 @@ export default function RehearsalScreen({ route, navigation }) {
       });
       setCsAnalysis(result);
       if (result.bpm) setAdaptedBpm(result.bpm);
-      // Persist analysis to song library so it survives screen navigation
+
+      // Fetch real waveform peaks from visual engine if not included in analysis
+      let waveformPeaks = result.waveformPeaks || result.peaks || null;
+      if (!waveformPeaks && (song?.id || audioUrl)) {
+        try {
+          const waveResult = await analyzeWaveform({
+            file_url:      audioUrl,
+            song_id:       song?.id || song?.songId || undefined,
+            title:         song?.title || 'Untitled',
+            waveform_points: R.isAnyTablet ? 1280 : 480,
+          });
+          waveformPeaks = waveResult?.analysis?.waveformPeaks || waveResult?.peaks || waveResult?.waveformPeaks || null;
+        } catch { /* non-fatal — waveform is visual only */ }
+      }
+
+      // Persist full analysis (including peaks) so waveform survives screen navigation
       if (song?.id || song?.songId) {
         try {
           await addOrUpdateSong({
@@ -1120,9 +1135,15 @@ export default function RehearsalScreen({ route, navigation }) {
               beats_ms:          result.beats_ms,
               performance_graph: result.performance_graph,
               duration_ms:       result.duration_ms,
+              waveformPeaks:     waveformPeaks,
+              peaks:             waveformPeaks,
               analyzedAt:        new Date().toISOString(),
             },
           });
+          // Merge peaks into live csAnalysis state so waveform renders immediately
+          if (waveformPeaks) {
+            setCsAnalysis(prev => ({ ...result, ...prev, waveformPeaks, peaks: waveformPeaks }));
+          }
         } catch { /* non-fatal */ }
       }
     } catch (e) {
@@ -1130,7 +1151,7 @@ export default function RehearsalScreen({ route, navigation }) {
     } finally {
       setCsAnalyzing(false);
     }
-  }, [song]);
+  }, [song, R.isAnyTablet]);
 
   const autoAnalysisSongRef = useRef(null);
   useEffect(() => {
@@ -1284,6 +1305,8 @@ export default function RehearsalScreen({ route, navigation }) {
     song?.latestStemsJob?.result?.sections ||
     [];
   const waveformPeaksRaw =
+    csAnalysis?.waveformPeaks ||
+    csAnalysis?.peaks ||
     song?.analysis?.waveformPeaks ||
     song?.waveformPeaks ||
     song?.analysis?.peaks ||
@@ -3531,6 +3554,48 @@ export default function RehearsalScreen({ route, navigation }) {
           />
         </View>
 
+        {/* ── Worship Flow AI compact insights ─────────────────────────────── */}
+        {(() => {
+          const wfi = song?.worshipFlowInsights;
+          if (!wfi) return null;
+          const likelihood = Number(wfi.worshipFreelyLikelihood || 0);
+          const ENERGY_COLOR = { low: '#6B7280', medium: '#F59E0B', high: '#EC4899', peak: '#EF4444' };
+          return (
+            <View style={styles.wfCompact}>
+              <View style={styles.wfCompactHeader}>
+                <Text style={styles.wfCompactTitle}>✦ Worship Flow</Text>
+                {wfi.tempoFeel ? (
+                  <View style={styles.wfTempoChip}>
+                    <Text style={styles.wfTempoChipText}>{String(wfi.tempoFeel).toUpperCase()}</Text>
+                  </View>
+                ) : null}
+                {likelihood > 0 && (
+                  <View style={styles.wfFreelyPill}>
+                    <Text style={styles.wfFreelyPillText}>
+                      🙏 {Math.round(likelihood * 100)}% freely
+                    </Text>
+                  </View>
+                )}
+              </View>
+              {Array.isArray(wfi.energyFlow) && wfi.energyFlow.length > 0 && (
+                <View style={styles.wfEnergyRow}>
+                  {wfi.energyFlow.slice(0, 6).map((e, i) => (
+                    <View key={i} style={[styles.wfEnergyDot, { backgroundColor: ENERGY_COLOR[e.energy] || '#6366F1' }]}>
+                      <Text style={styles.wfEnergyDotLabel} numberOfLines={1}>{e.section}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {Array.isArray(wfi.mixingTips) && wfi.mixingTips[0] ? (
+                <Text style={styles.wfMixTip} numberOfLines={2}>🎚 {wfi.mixingTips[0]}</Text>
+              ) : null}
+              {wfi.worshipFreelyMoment ? (
+                <Text style={styles.wfFreelyMoment} numberOfLines={1}>🙏 {wfi.worshipFreelyMoment}</Text>
+              ) : null}
+            </View>
+          );
+        })()}
+
         {/* ── Stem Mixer ────────────────────────────────────────────────────── */}
         {filteredTracks.length > 0 && (() => {
           const activeNorm = String(activeSectionLabel || '').toLowerCase().replace(/[\s]*\d+\s*$/, '').trim();
@@ -5658,5 +5723,81 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     paddingBottom: 4,
+  },
+
+  // ── Worship Flow compact card ────────────────────────────────────────────
+  wfCompact: {
+    backgroundColor: '#0D1B2F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#8B5CF620',
+    padding: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  wfCompactHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  wfCompactTitle: {
+    color: '#A78BFA',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  wfTempoChip: {
+    backgroundColor: '#1E1040',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#8B5CF640',
+  },
+  wfTempoChipText: {
+    color: '#A78BFA',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  wfFreelyPill: {
+    backgroundColor: '#0F2A1C',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#10B98140',
+  },
+  wfFreelyPillText: {
+    color: '#10B981',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  wfEnergyRow: {
+    flexDirection: 'row',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
+  wfEnergyDot: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    opacity: 0.85,
+  },
+  wfEnergyDotLabel: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  wfMixTip: {
+    color: '#64748B',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  wfFreelyMoment: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

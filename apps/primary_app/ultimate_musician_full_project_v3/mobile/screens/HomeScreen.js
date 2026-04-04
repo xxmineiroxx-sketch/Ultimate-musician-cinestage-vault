@@ -16,6 +16,8 @@ import { useFocusEffect } from "@react-navigation/native";
 
 import { SYNC_URL, syncHeaders } from "./config";
 import { useAuth } from "../context/AuthContext";
+import { getPlanForService } from "../data/servicePlanStore";
+import { getUpcomingServices, setActiveServiceId } from "../data/servicesStore";
 import { useResponsive } from "../utils/responsive";
 
 const SYNC_SERVER = SYNC_URL;
@@ -273,14 +275,40 @@ const MODES = [
   },
 ];
 
+function formatUpcomingServiceDate(dateStr, timeStr) {
+  if (!dateStr) return "Date TBD";
+  try {
+    const d = new Date(`${dateStr}T${timeStr || "00:00"}:00`);
+    const datePart = d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    if (!timeStr) return datePart;
+    const timePart = d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${datePart} • ${timePart}`;
+  } catch {
+    return [dateStr, timeStr].filter(Boolean).join(" • ");
+  }
+}
+
+function formatSongCount(count) {
+  return `${count} Song${count === 1 ? "" : "s"}`;
+}
+
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const R = useResponsive();
   const { isGuest, logout, userName } = useAuth();
   const displayName = userName || (isGuest ? "Guest" : "Team Member");
   const [refreshing, setRefreshing] = useState(false);
-  const [userRole, setUserRole] = useState("admin"); // default to admin until fetched
+  const [userRole, setUserRole] = useState(null); // null until fetched — no default privilege
   const [pendingProposals, setPendingProposals] = useState(0);
+  const [upcomingService, setUpcomingService] = useState(null);
+  const [upcomingSongCount, setUpcomingSongCount] = useState(0);
 
   async function fetchPendingProposals() {
     try {
@@ -297,17 +325,62 @@ export default function HomeScreen({ navigation }) {
     }
   }
 
+  const loadUpcomingService = useCallback(async () => {
+    try {
+      const upcoming = await getUpcomingServices({
+        lookaheadDays: 30,
+        includePastDays: 0,
+      });
+      const nextService = upcoming[0] || null;
+      setUpcomingService(nextService);
+
+      if (!nextService?.id) {
+        setUpcomingSongCount(0);
+        return;
+      }
+
+      const plan = await getPlanForService(nextService.id);
+      setUpcomingSongCount(Array.isArray(plan?.songs) ? plan.songs.length : 0);
+    } catch {
+      setUpcomingService(null);
+      setUpcomingSongCount(0);
+    }
+  }, []);
+
+  const handleOpenUpcomingService = useCallback(async () => {
+    if (!upcomingService?.id) {
+      navigation.navigate("Calendar");
+      return;
+    }
+
+    await setActiveServiceId(upcomingService.id);
+
+    if (upcomingSongCount > 0) {
+      navigation.navigate("Setlist", {
+        serviceId: upcomingService.id,
+        serviceName: upcomingService.title,
+      });
+      return;
+    }
+
+    navigation.navigate("ServicePlan", {
+      serviceId: upcomingService.id,
+    });
+  }, [navigation, upcomingService, upcomingSongCount]);
+
   // Re-sync whenever app returns to foreground (e.g. switched from Playback)
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') backgroundSync();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        backgroundSync().finally(loadUpcomingService);
+      }
     });
     return () => sub.remove();
-  }, []);
+  }, [loadUpcomingService]);
 
   // Auto-sync on every app open — silent, no alerts
   useEffect(() => {
-    backgroundSync();
+    backgroundSync().finally(loadUpcomingService);
     // Fetch this user's org-hierarchy role (admin / worship_leader / member)
     (async () => {
       try {
@@ -326,22 +399,43 @@ export default function HomeScreen({ navigation }) {
       }
     })();
     fetchPendingProposals();
-  }, []);
+  }, [loadUpcomingService]);
 
   // Refresh count whenever screen comes back into focus (e.g. after approving proposals)
   useFocusEffect(
     useCallback(() => {
       fetchPendingProposals();
-    }, []),
+      loadUpcomingService();
+    }, [loadUpcomingService]),
   );
 
   async function onRefresh() {
     setRefreshing(true);
-    await Promise.all([backgroundSync(), fetchPendingProposals()]);
+    await Promise.all([
+      backgroundSync(),
+      fetchPendingProposals(),
+      loadUpcomingService(),
+    ]);
     setRefreshing(false);
   }
 
   const padH = R.containerPadH;
+  const hasUpcomingService = !!upcomingService?.id;
+  const heroSubLabel = hasUpcomingService ? "UPCOMING SERVICE" : "SERVICE CALENDAR";
+  const heroTitle = hasUpcomingService
+    ? upcomingService.title || "Upcoming Service"
+    : "No Upcoming Services";
+  const heroDesc = hasUpcomingService
+    ? `${formatSongCount(upcomingSongCount)} • ${formatUpcomingServiceDate(
+        upcomingService.date,
+        upcomingService.time,
+      )}`
+    : "Create a service in Calendar and it will appear here.";
+  const heroButtonLabel = hasUpcomingService
+    ? upcomingSongCount > 0
+      ? "Start Rehearsal ▶"
+      : "Open Service ▶"
+    : "Open Calendar ▶";
 
   return (
     <ScrollView
@@ -391,18 +485,18 @@ export default function HomeScreen({ navigation }) {
 
       {/* Hero Action for iPad (Mocking next upcoming event) */}
       {R.isAnyTablet && (
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.heroCard}
           activeOpacity={0.8}
-          onPress={() => navigation.navigate("Setlist")}
+          onPress={handleOpenUpcomingService}
         >
           <View style={styles.heroContent}>
-            <Text style={styles.heroSub}>UPCOMING EVENT</Text>
-            <Text style={styles.heroTitle}>Sunday Morning Worship</Text>
-            <Text style={styles.heroDesc}>5 Songs • Role: Keys / Synth</Text>
+            <Text style={styles.heroSub}>{heroSubLabel}</Text>
+            <Text style={styles.heroTitle}>{heroTitle}</Text>
+            <Text style={styles.heroDesc}>{heroDesc}</Text>
           </View>
           <View style={styles.heroBtn}>
-            <Text style={styles.heroBtnText}>Start Rehearsal ▶</Text>
+            <Text style={styles.heroBtnText}>{heroButtonLabel}</Text>
           </View>
         </TouchableOpacity>
       )}
@@ -465,7 +559,7 @@ export default function HomeScreen({ navigation }) {
           { label: "Setlist", icon: "🎵", route: "Setlist" },
           { label: "Stems", icon: "🎚️", route: "StemsCenter" },
           { label: "Bridge", icon: "🌉", route: "BridgeSetup" },
-          ...(userRole !== "worship_leader"
+          ...(userRole === "owner" || userRole === "admin"
             ? [{ label: "Organization", icon: "🏢", route: "Organization" }]
             : []),
           { label: "Messages", icon: "✉️", route: "MessageCenter" },

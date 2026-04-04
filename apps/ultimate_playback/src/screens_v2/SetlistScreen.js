@@ -583,6 +583,13 @@ export default function SetlistScreen({ navigation, route }) {
   const [keysPresetLoading, setKeysPresetLoading] = useState({});
   const [keysPresetType, setKeysPresetType]       = useState('Worship Keys');
 
+  // ── Worship Flow AI ──────────────────────────────────────────────────────
+  const [worshipFlowInsights, setWorshipFlowInsights] = useState({});
+  const [worshipFlowLoading, setWorshipFlowLoading]   = useState({});
+  const [worshipFreelyActive, setWorshipFreelyActive] = useState(false);
+  const worshipFreelyTapCount = React.useRef(0);
+  const worshipFreelyTapTimer = React.useRef(null);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -872,6 +879,74 @@ export default function SetlistScreen({ navigation, route }) {
     }
   }, [keysPresetType]);
 
+  // ── Worship Flow AI — fetch insights for a song ─────────────────────────
+  const handleWorshipFlowAnalyze = async (song) => {
+    const id = song.id;
+    setWorshipFlowLoading(prev => ({ ...prev, [id]: true }));
+    try {
+      const res = await fetch(`${CINESTAGE_URL}/worship-flow/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: song.title,
+          artist: song.artist || '',
+          key: song.key || song.transposedKey || '',
+          bpm: song.bpm || song.tempo || null,
+          lyrics: (song.lyrics || '').slice(0, 600),
+          chordChart: (song.chordChart || '').slice(0, 400),
+          teamRoles: (selectedAssignment?.role ? [selectedAssignment.role] : []),
+          serviceContext: selectedAssignment?.service_name || 'Sunday Service',
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.insights) {
+        setWorshipFlowInsights(prev => ({ ...prev, [id]: json.insights }));
+      } else {
+        Alert.alert('AI Error', json?.detail || 'Could not get insights. Try again.');
+      }
+    } catch (e) {
+      Alert.alert('Network Error', 'Could not reach CineStage AI.');
+    } finally {
+      setWorshipFlowLoading(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  // ── 3-tap Worship Freely mode — triple-tap song header ───────────────────
+  const handleWorshipFreelyTap = (song) => {
+    worshipFreelyTapCount.current += 1;
+    if (worshipFreelyTapTimer.current) clearTimeout(worshipFreelyTapTimer.current);
+    if (worshipFreelyTapCount.current >= 3) {
+      worshipFreelyTapCount.current = 0;
+      const entering = !worshipFreelyActive;
+      setWorshipFreelyActive(entering);
+      // Broadcast to all connected devices via CineStage
+      const orgId = profile?.orgId || '';
+      if (orgId) {
+        fetch(`${CINESTAGE_URL}/worship-flow/freely-event`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orgId,
+            songTitle: song.title,
+            triggeredBy: profile?.name || 'Leader',
+            mode: entering ? 'enter' : 'exit',
+          }),
+        }).catch(() => {});
+      }
+      Alert.alert(
+        entering ? '🕊 Worship Freely' : '↩ Returning to Set',
+        entering
+          ? `All devices notified — lead freely.\nSong: ${song.title}`
+          : 'Worship Freely mode ended.',
+        [{ text: 'OK' }]
+      );
+    } else {
+      worshipFreelyTapTimer.current = setTimeout(() => {
+        worshipFreelyTapCount.current = 0;
+      }, 600);
+    }
+  };
+
   const renderSong = (song) => {
     const userRole = selectedAssignment?.role;
     const normalizedRole = normalizeRoleKey(userRole);
@@ -919,6 +994,13 @@ export default function SetlistScreen({ navigation, route }) {
 
         <View style={styles.songBody}>
           {/* Title + key/tempo row */}
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {
+              const isLeader = normalizedRole === 'worship_leader' || normalizedRole === 'music_director';
+              if (isLeader) handleWorshipFreelyTap(song);
+            }}
+          >
           <View style={styles.songHeader}>
             <View style={styles.songInfo}>
               <Text style={styles.songTitle}>{song.title}</Text>
@@ -940,6 +1022,7 @@ export default function SetlistScreen({ navigation, route }) {
               ) : null}
             </View>
           </View>
+          </TouchableOpacity>
 
           {/* Song notes */}
           {song.notes ? (
@@ -1231,6 +1314,106 @@ export default function SetlistScreen({ navigation, route }) {
             );
           })()}
 
+          {/* ── Worship Flow AI (Worship Leader + Sound Tech) ── */}
+          {(normalizedRole === 'worship_leader' || normalizedRole === 'music_director' || isSoundTech) && (() => {
+            const insights = worshipFlowInsights[song.id];
+            const isLoading = worshipFlowLoading[song.id];
+            const ENERGY_COLOR = { low: '#6B7280', medium: '#F59E0B', high: '#F97316', peak: '#EF4444' };
+            return (
+              <View style={styles.wfCard}>
+                <View style={styles.wfHeader}>
+                  <Text style={styles.wfTitle}>✦ Worship Flow AI</Text>
+                  <TouchableOpacity
+                    style={[styles.wfAnalyzeBtn, isLoading && { opacity: 0.5 }]}
+                    onPress={() => handleWorshipFlowAnalyze(song)}
+                    disabled={!!isLoading}
+                  >
+                    <Text style={styles.wfAnalyzeBtnTxt}>
+                      {isLoading ? '⏳ Analyzing…' : insights ? '↻ Refresh' : '✦ Analyze'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {!insights && !isLoading && (
+                  <Text style={styles.wfHint}>
+                    AI insights: energy flow, mixing tips, worship-freely prediction & transition advice.
+                  </Text>
+                )}
+
+                {insights && (
+                  <>
+                    {/* Worship Freely likelihood */}
+                    <View style={styles.wfFreelyRow}>
+                      <View style={[styles.wfFreelyBar, {
+                        width: `${Math.round((insights.worshipFreelyLikelihood || 0) * 100)}%`,
+                        backgroundColor: (insights.worshipFreelyLikelihood || 0) > 0.6 ? '#8B5CF6' : '#374151',
+                      }]} />
+                      <Text style={styles.wfFreelyTxt}>
+                        🕊 Worship Freely: {Math.round((insights.worshipFreelyLikelihood || 0) * 100)}%
+                        {insights.worshipFreelyMoment ? `  ·  ${insights.worshipFreelyMoment}` : ''}
+                      </Text>
+                    </View>
+
+                    {/* Energy flow */}
+                    {Array.isArray(insights.energyFlow) && insights.energyFlow.length > 0 && (
+                      <View style={styles.wfEnergyRow}>
+                        {insights.energyFlow.map((seg, i) => (
+                          <View key={i} style={styles.wfEnergySegment}>
+                            <View style={[styles.wfEnergyDot, { backgroundColor: ENERGY_COLOR[seg.energy] || '#6B7280' }]} />
+                            <Text style={styles.wfEnergySectionTxt} numberOfLines={1}>{seg.section}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Mixing tips */}
+                    {Array.isArray(insights.mixingTips) && insights.mixingTips.length > 0 && (
+                      <View style={styles.wfSection}>
+                        <Text style={styles.wfSectionTitle}>🎚 Mixing</Text>
+                        {insights.mixingTips.map((tip, i) => (
+                          <Text key={i} style={styles.wfBullet}>· {tip}</Text>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Arrangement tips */}
+                    {Array.isArray(insights.arrangementTips) && insights.arrangementTips.length > 0 && (
+                      <View style={styles.wfSection}>
+                        <Text style={styles.wfSectionTitle}>🎵 Arrangement</Text>
+                        {insights.arrangementTips.map((tip, i) => (
+                          <Text key={i} style={styles.wfBullet}>· {tip}</Text>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Transition tip */}
+                    {insights.transitionTip ? (
+                      <View style={[styles.wfSection, { backgroundColor: '#0B1120', borderRadius: 8, padding: 8 }]}>
+                        <Text style={styles.wfSectionTitle}>↪ Transition</Text>
+                        <Text style={styles.wfBullet}>{insights.transitionTip}</Text>
+                      </View>
+                    ) : null}
+
+                    {/* Tempo feel + key notes */}
+                    {(insights.tempoFeel || insights.keyNotes) ? (
+                      <View style={styles.wfFooterRow}>
+                        {insights.tempoFeel ? <Text style={styles.wfTag}>{insights.tempoFeel}</Text> : null}
+                        {insights.keyNotes ? <Text style={styles.wfKeyNote}>{insights.keyNotes}</Text> : null}
+                      </View>
+                    ) : null}
+                  </>
+                )}
+
+                {/* 3-tap hint for worship leader */}
+                {(normalizedRole === 'worship_leader' || normalizedRole === 'music_director') && (
+                  <Text style={styles.wfTripleTapHint}>
+                    💡 Triple-tap song title to broadcast Worship Freely to all devices
+                  </Text>
+                )}
+              </View>
+            );
+          })()}
+
           {/* ── Media Tech: lyrics + light cues ── */}
           {isMediaTech && (() => {
             const rawLyrics = (song.lyrics || song.chordChart || song.lyricsChordChart || '').trim();
@@ -1365,6 +1548,18 @@ export default function SetlistScreen({ navigation, route }) {
         <Text style={styles.title}>Setlist</Text>
         <Text style={styles.subtitle}>{selectedAssignment.service_name}</Text>
       </View>
+
+      {/* Worship Freely active banner */}
+      {worshipFreelyActive && (
+        <TouchableOpacity
+          style={styles.wfActiveBanner}
+          onPress={() => setWorshipFreelyActive(false)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.wfActiveDot}>●</Text>
+          <Text style={styles.wfActiveTxt}>WORSHIP FREELY — Tap to end</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Service selector pills — one per unique service_id */}
       {(() => {
@@ -1833,6 +2028,32 @@ const styles = StyleSheet.create({
   presetChipActive: { backgroundColor:'#312e81', borderColor:'#6366f1' },
   presetChipText: { color:'#94a3b8', fontSize:11 },
   presetChipTextActive: { color:'#a5b4fc' },
+
+  // Worship Flow AI styles
+  wfActiveBanner:    { flexDirection:'row', alignItems:'center', gap:8, backgroundColor:'#4C1D95', marginHorizontal:16, marginBottom:8, borderRadius:12, paddingHorizontal:14, paddingVertical:10, borderWidth:1, borderColor:'#7C3AED' },
+  wfActiveDot:       { color:'#C4B5FD', fontSize:10 },
+  wfActiveTxt:       { color:'#E9D5FF', fontSize:13, fontWeight:'800', letterSpacing:0.5 },
+  wfCard:            { marginTop:10, backgroundColor:'#070D1F', borderRadius:12, borderWidth:1, borderColor:'#1E2A40', padding:12 },
+  wfHeader:          { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:8 },
+  wfTitle:           { fontSize:12, fontWeight:'800', color:'#818CF8', letterSpacing:0.4 },
+  wfAnalyzeBtn:      { backgroundColor:'#1E1B4B', borderRadius:8, borderWidth:1, borderColor:'#4F46E5', paddingHorizontal:12, paddingVertical:5 },
+  wfAnalyzeBtnTxt:   { fontSize:11, fontWeight:'700', color:'#A5B4FC' },
+  wfHint:            { fontSize:11, color:'#4B5563', lineHeight:16 },
+  wfFreelyRow:       { marginBottom:8, position:'relative' },
+  wfFreelyBar:       { height:3, borderRadius:2, marginBottom:4 },
+  wfFreelyTxt:       { fontSize:11, color:'#C4B5FD', fontWeight:'600' },
+  wfEnergyRow:       { flexDirection:'row', flexWrap:'wrap', gap:6, marginBottom:8 },
+  wfEnergySegment:   { flexDirection:'row', alignItems:'center', gap:4 },
+  wfEnergyDot:       { width:8, height:8, borderRadius:4 },
+  wfEnergySectionTxt:{ fontSize:10, color:'#6B7280', maxWidth:70 },
+  wfSection:         { marginBottom:8 },
+  wfSectionTitle:    { fontSize:10, fontWeight:'800', color:'#6B7280', textTransform:'uppercase', letterSpacing:0.8, marginBottom:4 },
+  wfBullet:          { fontSize:11, color:'#9CA3AF', lineHeight:17 },
+  wfFooterRow:       { flexDirection:'row', alignItems:'center', gap:8, marginTop:6 },
+  wfTag:             { paddingHorizontal:8, paddingVertical:3, backgroundColor:'#1F2937', borderRadius:6, fontSize:10, color:'#818CF8', fontWeight:'700', textTransform:'capitalize' },
+  wfKeyNote:         { fontSize:10, color:'#4B5563', fontStyle:'italic', flex:1 },
+  wfTripleTapHint:   { fontSize:10, color:'#374151', marginTop:8, fontStyle:'italic', textAlign:'center' },
+
   practiceBtn: {
     marginTop: 10,
     paddingVertical: 10,

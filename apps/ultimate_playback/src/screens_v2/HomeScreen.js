@@ -835,7 +835,8 @@ export default function HomeScreen({ navigation }) {
                     {mdRole === 'org_owner' ? '🏛 Org Owner'
                       : mdRole === 'admin'   ? '👑 Admin'
                       : mdRole === 'manager' ? '🛡 Worship Leader'
-                      : '🎛 Music Director'}
+                      : mdRole === 'md'      ? '🎼 Music Director'
+                      : '🎛 Panel'}
                   </Text>
                 </View>
                 <Text style={styles.adminCardTitle}>Admin Panel</Text>

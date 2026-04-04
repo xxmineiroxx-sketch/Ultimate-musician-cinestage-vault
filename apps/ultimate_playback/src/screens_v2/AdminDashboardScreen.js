@@ -407,12 +407,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
   const isOrgOwner = mdRole === 'org_owner';
   const isAdmin    = mdRole === 'admin' || isOrgOwner;
-  const isManager  = mdRole === 'manager';
-  // canApprove = admin, manager, or org_owner
+  // Worship Leader ('manager') and Music Director ('md') share the same access level
+  const isManager  = mdRole === 'manager' || mdRole === 'md';
+  // canApprove = org_owner, admin, worship_leader, md
   const canApprove = isAdmin || isManager;
-  // manager can add/edit members, add songs, create services
+  // add/edit members, add songs, create services — available to all elevated roles
   const canManageMembers = isAdmin || isManager;
-  const canDeleteServices = isAdmin || isManager || mdRole === 'md';
+  // Only Org Owner and Admin can delete services
+  const canDeleteServices = isAdmin;
 
   const [tab, setTab]         = useState('Calendar');
   const [loading, setLoading] = useState(false);
@@ -2491,7 +2493,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         <View style={s.topCenter}>
           <View style={[s.mdBadge, isAdmin && s.adminBadgeStyle]}>
             <Text style={s.mdBadgeText}>
-              {isOrgOwner ? '🏛 Org Owner' : isAdmin ? '👑 Admin' : isManager ? '🛡 Worship Leader' : '🎛 Music Director'}
+              {isOrgOwner ? '🏛 Org Owner' : isAdmin ? '👑 Admin' : mdRole === 'md' ? '🎼 Music Director' : isManager ? '🛡 Worship Leader' : '🎛 Panel'}
             </Text>
           </View>
           <Text style={s.topBarTitle}>Admin Dashboard</Text>
@@ -2804,22 +2806,34 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Grant Role</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
               Set role for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🛡 Manager: can only grant Leader role' : ''}
+              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can only grant Leader role' : ''}
+              {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, or Leader' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-              {(isOrgOwner ? ['org_owner', 'admin', 'manager', 'leader', 'none']
-                : isAdmin  ? ['manager', 'leader', 'none']
-                : ['leader', 'none']).map(r => (
-                <TouchableOpacity key={r}
-                  style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
-                    backgroundColor: grantingRole === r ? '#7C3AED' : '#1F2937',
-                    borderColor: grantingRole === r ? '#7C3AED' : '#374151' }}
-                  onPress={() => setGrantingRole(r)}>
-                  <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700', textTransform: 'capitalize' }}>
-                    {r === 'manager' ? 'Worship Leader' : r}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {(
+                isOrgOwner ? ['org_owner', 'admin', 'manager', 'md', 'leader', 'none']
+                : isAdmin  ? ['manager', 'md', 'leader', 'none']
+                :             ['leader', 'none']
+              ).map(r => {
+                const label =
+                  r === 'org_owner' ? 'Org Owner'
+                  : r === 'admin'   ? 'Admin'
+                  : r === 'manager' ? 'Worship Leader'
+                  : r === 'md'      ? 'Music Director'
+                  : r === 'leader'  ? 'Leader'
+                  : 'Remove Role';
+                return (
+                  <TouchableOpacity key={r}
+                    style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
+                      backgroundColor: grantingRole === r ? '#7C3AED' : '#1F2937',
+                      borderColor: grantingRole === r ? '#7C3AED' : '#374151' }}
+                    onPress={() => setGrantingRole(r)}>
+                    <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700' }}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowGrantRole(null)}>

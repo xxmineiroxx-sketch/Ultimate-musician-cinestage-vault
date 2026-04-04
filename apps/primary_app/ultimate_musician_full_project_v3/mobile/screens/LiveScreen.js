@@ -947,7 +947,7 @@ export default function LiveScreen({ route, navigation }) {
   const waveformRaw    = paramPeaks || song?.analysis?.waveformPeaks || song?.waveformPeaks || stemsResult?.waveformPeaks || null;
   const waveformPointCount = Math.max(
     220,
-    Math.min(960, Math.floor(Dimensions.get('window').width * 1.4)),
+    Math.min(1280, Math.floor(Dimensions.get('window').width * (Dimensions.get('window').width > 700 ? 2.2 : 1.4))),
   );
   const waveformPeaks  = processPeaksForDisplay(waveformRaw, waveformPointCount);
   const sourceSections = useMemo(() => (
@@ -1006,7 +1006,8 @@ export default function LiveScreen({ route, navigation }) {
   }, [sectionJumpList, waveMarkers, effectiveDuration]);
 
   const playheadPct    = effectiveDuration > 0 ? position / effectiveDuration : 0;
-  const waveformH      = Math.round(Dimensions.get('window').height * 0.60);
+  const isIpadDevice = Dimensions.get('window').width > 700;
+  const waveformH      = Math.round(Dimensions.get('window').height * (isIpadDevice ? 0.72 : 0.60));
 
   const persistLivePipelineState = useCallback(async ({
     nextMarkers = markersRef.current,
@@ -2171,6 +2172,46 @@ export default function LiveScreen({ route, navigation }) {
               />
             </View>
 
+            {/* ── Worship Flow AI compact strip ──────────────────────────── */}
+            {(() => {
+              const wfi = song?.worshipFlowInsights;
+              if (!wfi) return null;
+              const likelihood = Number(wfi.worshipFreelyLikelihood || 0);
+              const ENERGY_COLOR = { low: '#6B7280', medium: '#F59E0B', high: '#EC4899', peak: '#EF4444' };
+              return (
+                <View style={{ backgroundColor: '#0D1B2F', borderRadius: 10, borderWidth: 1,
+                  borderColor: '#8B5CF620', padding: 10, marginTop: 8, gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Text style={{ color: '#A78BFA', fontSize: 10, fontWeight: '900', letterSpacing: 1 }}>✦ WORSHIP FLOW</Text>
+                    {wfi.tempoFeel ? (
+                      <View style={{ backgroundColor: '#1E1040', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: '#A78BFA', fontSize: 9, fontWeight: '800' }}>{String(wfi.tempoFeel).toUpperCase()}</Text>
+                      </View>
+                    ) : null}
+                    {likelihood > 0.5 && (
+                      <View style={{ backgroundColor: '#0F2A1C', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: '#10B981', fontSize: 9, fontWeight: '700' }}>🙏 {Math.round(likelihood * 100)}% freely</Text>
+                      </View>
+                    )}
+                  </View>
+                  {Array.isArray(wfi.energyFlow) && wfi.energyFlow.length > 0 && (
+                    <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+                      {wfi.energyFlow.slice(0, 6).map((e, i) => (
+                        <View key={i} style={{ borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2, backgroundColor: ENERGY_COLOR[e.energy] || '#6366F1', opacity: 0.85 }}>
+                          <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }} numberOfLines={1}>{e.section}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  {wfi.worshipFreelyMoment ? (
+                    <Text style={{ color: '#4ADE80', fontSize: 10, fontWeight: '600' }} numberOfLines={1}>🙏 {wfi.worshipFreelyMoment}</Text>
+                  ) : null}
+                  {Array.isArray(wfi.mixingTips) && wfi.mixingTips[0] ? (
+                    <Text style={{ color: '#64748B', fontSize: 10 }} numberOfLines={1}>🎚 {wfi.mixingTips[0]}</Text>
+                  ) : null}
+                </View>
+              );
+            })()}
 
           </View>
         </View>

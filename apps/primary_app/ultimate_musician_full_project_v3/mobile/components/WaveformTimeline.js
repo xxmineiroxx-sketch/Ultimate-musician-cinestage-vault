@@ -132,7 +132,7 @@ const DEFAULT_SECTIONS_PCT = [
   { label: "Outro", s: 0.82, e: 1.0 },
 ];
 
-const BAR_COUNT = 300;
+const BAR_COUNT = 480;
 
 /**
  * Pro waveform timeline with section marker pins.
@@ -178,6 +178,20 @@ export default function WaveformTimeline({
   const widthRef = useRef(300);
   const containerRef = useRef(null);
   const containerPageXRef = useRef(0);
+
+  // ── iPad Optimization: Adaptive UI ──────────────────────────────────────
+  const [isIpad, setIsIpad] = useState(false);
+  useEffect(() => {
+    // iPad Mini A17 Pro has high DPI and specific aspect ratio. 
+    // We increase touch targets and density for this form factor.
+    const { width, height } = require('react-native').Dimensions.get('window');
+    const aspectRatio = height / width;
+    if (width > 700 || height > 700) {
+      setIsIpad(true);
+    }
+  }, []);
+
+  const ADAPTIVE_BAR_COUNT = isIpad ? 640 : 480; 
 
   // ── Worship Free Pulse ──────────────────────────────────────────────────
   const pulseAnim = useRef(new Animated.Value(0)).current;
@@ -337,10 +351,10 @@ export default function WaveformTimeline({
       // Normalize + smooth for consistent visual quality regardless of source gain
       const processed = smoothPeaks(normalizePeaksRange(peakValues), 2);
       const stride =
-        processed.length > BAR_COUNT
-          ? Math.ceil(processed.length / BAR_COUNT)
+        processed.length > ADAPTIVE_BAR_COUNT
+          ? Math.ceil(processed.length / ADAPTIVE_BAR_COUNT)
           : 1;
-      return processed.filter((_, i) => i % stride === 0).slice(0, BAR_COUNT);
+      return processed.filter((_, i) => i % stride === 0).slice(0, ADAPTIVE_BAR_COUNT);
     }
     const rng = makeRng(songTitle || "song");
     const totalW = segments.reduce((s, g) => s + g.width, 0) || 100;
@@ -350,8 +364,8 @@ export default function WaveformTimeline({
       cum += seg.width;
       return { label: seg.label, start: st, end: cum / totalW };
     });
-    return Array.from({ length: BAR_COUNT }, (_, i) => {
-      const pct = i / BAR_COUNT;
+    return Array.from({ length: ADAPTIVE_BAR_COUNT }, (_, i) => {
+      const pct = i / ADAPTIVE_BAR_COUNT;
       const sec = bounds.find((b) => pct >= b.start && pct < b.end);
       const lbl = normLabel(sec?.label || "");
       const amp =
@@ -535,7 +549,7 @@ export default function WaveformTimeline({
           })}
 
         {/* Waveform bars — two-tone frequency simulation (bass zone + high zone) */}
-        <View style={styles.peaksRow} pointerEvents="none">
+        <View style={[styles.peaksRow, isIpad && { top: 52, bottom: 12, left: 6, right: 6 }]} pointerEvents="none">
           {bars.map((v, idx) => {
             const pct = idx / bars.length;
             const isPast = clampedPlayhead != null && pct < clampedPlayhead;
@@ -577,6 +591,7 @@ export default function WaveformTimeline({
                 <View
                   style={[
                     styles.barHighFreq,
+                    isIpad && { height: "25%" },
                     { backgroundColor: highColor, opacity: barAlpha },
                   ]}
                 />
@@ -866,13 +881,13 @@ export default function WaveformTimeline({
           const color = sec.color;
           const canDragSection = typeof onSectionMarkerDrag === "function";
           // Oversized touch targets for iPad mini / Stage use
-          const pinHeight = MARKER_PIN_HEIGHT + 14; 
-          const pinMinWidth = 64;
-          const pinPaddingHorizontal = 12;
-          const pinPaddingVertical = 10;
+          const pinHeight = isIpad ? 44 : 32; 
+          const pinMinWidth = isIpad ? 84 : 64;
+          const pinPaddingHorizontal = isIpad ? 16 : 12;
+          const pinPaddingVertical = isIpad ? 14 : 10;
           const pinMarginLeft = -4;
-          const pinRadius = 8;
-          const pinGap = 6;
+          const pinRadius = isIpad ? 10 : 8;
+          const pinGap = isIpad ? 8 : 6;
           const lineTop = 0;
 
           // Pin icon based on tap state
@@ -991,11 +1006,14 @@ export default function WaveformTimeline({
                     paddingHorizontal: pinPaddingHorizontal,
                     paddingVertical: pinPaddingVertical,
                     marginLeft: 2,
-                    borderRadius: 6,
+                    borderRadius: pinRadius,
                     gap: pinGap,
-                    borderColor: color + "60",
-                    backgroundColor: "rgba(10, 15, 30, 0.75)",
-                    borderWidth: 1,
+                    borderColor: isActive ? "#FFF" : color + "60",
+                    backgroundColor: isActive ? color : "rgba(10, 15, 30, 0.85)",
+                    borderWidth: isActive ? 2 : 1,
+                    shadowColor: color,
+                    shadowOpacity: isActive ? 0.6 : 0,
+                    shadowRadius: 10,
                   },
                 ]}
                 onStartShouldSetResponder={() => true}
@@ -1008,19 +1026,19 @@ export default function WaveformTimeline({
                 onResponderTerminationRequest={() => false}
               >
                 {pinIcon ? (
-                  <Text style={[styles.markerPinIcon, { fontSize: 10, color }]}>
+                  <Text style={[styles.markerPinIcon, { fontSize: isIpad ? 14 : 10, color: isActive ? "#FFF" : color }]}>
                     {pinIcon}
                   </Text>
                 ) : null}
                 <Text
-                  style={[styles.markerPinText, { color }]}
+                  style={[styles.markerPinText, { fontSize: isIpad ? 13 : 10, fontWeight: "800", color: isActive ? "#FFF" : color }]}
                   numberOfLines={1}
                 >
                   {displayLabel}
                 </Text>
                 {tapCount > 0 && (
-                  <View style={[styles.tapDot, { backgroundColor: color }]}>
-                    <Text style={[styles.tapDotText, { color: "#000" }]}>
+                  <View style={[styles.tapDot, { backgroundColor: isActive ? "#FFF" : color, width: isIpad ? 20 : 16, height: isIpad ? 20 : 16, borderRadius: isIpad ? 10 : 8 }]}>
+                    <Text style={[styles.tapDotText, { color: "#000", fontSize: isIpad ? 10 : 8 }]}>
                       {tapCount}
                     </Text>
                   </View>
@@ -1111,11 +1129,11 @@ const styles = StyleSheet.create({
   container: { marginTop: 8, marginBottom: 4 },
 
   waveBar: {
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: "#050C1A",
-    borderWidth: 1,
-    borderColor: "#1A2540",
-    height: 200,
+    borderWidth: 1.2,
+    borderColor: "#1E293B",
+    height: 240, // Default height for phone
     position: "relative",
     overflow: "hidden",
   },
@@ -1126,10 +1144,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 4,
+    height: 6,
     flexDirection: "row",
   },
-  sectionSegment: { height: 4 },
+  sectionSegment: { height: 6 },
 
   // Loop region overlay
   loopRegion: {

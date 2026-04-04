@@ -16,6 +16,7 @@ import {
   Clipboard,
 } from "react-native";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SYNC_URL, syncHeaders } from "./config";
 import { getBrainStats, getPersonHistory } from "../services/cinestageDataAPI";
 import Chip from "../components/Chip";
@@ -153,6 +154,7 @@ function PersonCard({
   showInvite,
   servedTotal,
   lastServed,
+  myRole,
 }) {
   const isFromPlayback =
     person._source === "playback" || person._source === "both";
@@ -161,23 +163,20 @@ function PersonCard({
     "No roles assigned";
 
   function handleLongPress() {
-    Alert.alert(
-      `Role for ${person.name}`,
-      "Set this person's organizational role:",
-      [
-        { text: "Admin", onPress: () => onSetOrgRole(person, "admin") },
-        {
-          text: "Worship Leader",
-          onPress: () => onSetOrgRole(person, "worship_leader"),
-        },
-        {
-          text: "Remove Role",
-          style: "destructive",
-          onPress: () => onSetOrgRole(person, null),
-        },
-        { text: "Cancel", style: "cancel" },
-      ],
-    );
+    const isOwner = myRole === "owner";
+    const isAdmin = myRole === "admin";
+    if (!isOwner && !isAdmin) return; // non-admins: long-press does nothing
+
+    const buttons = [];
+    if (isOwner) {
+      buttons.push({ text: "Organization Owner", onPress: () => onSetOrgRole(person, "owner") });
+      buttons.push({ text: "Admin", onPress: () => onSetOrgRole(person, "admin") });
+    }
+    buttons.push({ text: "Worship Leader", onPress: () => onSetOrgRole(person, "worship_leader") });
+    buttons.push({ text: "Remove Role", style: "destructive", onPress: () => onSetOrgRole(person, null) });
+    buttons.push({ text: "Cancel", style: "cancel" });
+
+    Alert.alert(`Role for ${person.name}`, "Set this person's organizational role:", buttons);
   }
 
   return (
@@ -276,6 +275,7 @@ function getPersonCardKey(person, index) {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function PeopleRolesScreen({ navigation }) {
   const [people, setPeople] = useState([]);
+  const [myRole, setMyRole] = useState(null); // current user's org role
   const [orgRoles, setOrgRoles] = useState({}); // { "email": "admin" | "worship_leader" }
   const [brainStats, setBrainStats] = useState({}); // { [personId]: { total, byRole, lastServed } }
 
@@ -352,6 +352,23 @@ export default function PeopleRolesScreen({ navigation }) {
   }, []);
 
   async function handleSetOrgRole(person, role) {
+    // Permission check: owner can set any role, admin can set worship_leader or remove,
+    // worship_leader cannot grant org roles at all.
+    const isOwner = myRole === "owner";
+    const isAdmin = myRole === "admin";
+    if (!isOwner && !isAdmin) {
+      Alert.alert("Permission Denied", "Only Admins and Org Owners can assign organization roles.");
+      return;
+    }
+    if (!isOwner && role === "owner") {
+      Alert.alert("Permission Denied", "Only an Organization Owner can grant the Owner role.");
+      return;
+    }
+    if (!isOwner && role === "admin") {
+      Alert.alert("Permission Denied", "Only an Organization Owner can grant the Admin role.");
+      return;
+    }
+
     const email = (person.email || "").toLowerCase().trim();
     if (!email) {
       Alert.alert(
@@ -386,13 +403,30 @@ export default function PeopleRolesScreen({ navigation }) {
     }
   }
 
+  // Load the current user's own org role
+  const loadMyRole = useCallback(async () => {
+    try {
+      const email = await AsyncStorage.getItem("@user_email");
+      if (!email) return;
+      const res = await fetch(`${SYNC_URL}/sync/role?email=${encodeURIComponent(email)}`, {
+        headers: syncHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.role) setMyRole(data.role);
+      }
+    } catch { /* no-op */ }
+  }, []);
+
   useEffect(() => {
     const unsub = navigation?.addListener?.("focus", () => {
       load();
       loadOrgRoles();
+      loadMyRole();
     });
     load();
     loadOrgRoles();
+    loadMyRole();
     getSettings()
       .then((settings) => {
         const senderName = String(
@@ -405,7 +439,7 @@ export default function PeopleRolesScreen({ navigation }) {
       .catch(() => {});
     getBrainStats().then(({ stats }) => { if (stats) setBrainStats(stats); }).catch(() => {});
     return unsub;
-  }, [navigation, load, loadOrgRoles]);
+  }, [navigation, load, loadOrgRoles, loadMyRole]);
 
   // ── Shared sync helper ──────────────────────────────────────────────────────
   async function syncToShared(person) {
@@ -811,6 +845,7 @@ export default function PeopleRolesScreen({ navigation }) {
               }
               orgRole={orgRoles[(person.email || "").toLowerCase()] || null}
               onSetOrgRole={handleSetOrgRole}
+              myRole={myRole}
               servedTotal={(brainStats[person.id] || {}).total || 0}
               lastServed={(brainStats[person.id] || {}).lastServed || ""}
             />
