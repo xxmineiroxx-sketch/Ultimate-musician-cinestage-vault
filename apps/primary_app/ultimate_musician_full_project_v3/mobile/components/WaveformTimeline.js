@@ -134,6 +134,11 @@ const DEFAULT_SECTIONS_PCT = [
 
 const BAR_COUNT = 480;
 
+function pickNiceTimeStep(rawSeconds) {
+  const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300];
+  return steps.find((step) => step >= rawSeconds) || 600;
+}
+
 /**
  * Pro waveform timeline with section marker pins.
  *
@@ -179,6 +184,7 @@ export default function WaveformTimeline({
   const widthRef = useRef(300);
   const containerRef = useRef(null);
   const containerPageXRef = useRef(0);
+  const [timelineWidth, setTimelineWidth] = useState(0);
 
   // ── iPad Optimization: Adaptive UI ──────────────────────────────────────
   const [isIpad, setIsIpad] = useState(false);
@@ -413,18 +419,44 @@ export default function WaveformTimeline({
   // ── Time Ticks (DAW-style) ─────────────────────────────────────────────
   const timeTicks = useMemo(() => {
     if (total <= 0) return [];
-    // Show a tick every 30s or 60s depending on length
-    const interval = total > 600 ? 60 : 30;
-    const count = Math.floor(total / interval);
-    return Array.from({ length: count }, (_, i) => {
-      const s = (i + 1) * interval;
-      return {
-        key: `t-${s}`,
-        label: fmtSec(s),
-        pct: (s / total) * 100,
-      };
-    });
-  }, [total]);
+    const safeWidth = Math.max(timelineWidth || widthRef.current || 0, 320);
+    const minorTargetPx = isIpad ? 52 : 64;
+    const labelTargetPx = isIpad ? 78 : 92;
+    const approxMinorTickCount = Math.max(4, Math.floor(safeWidth / minorTargetPx));
+    const minorStep = pickNiceTimeStep(total / approxMinorTickCount);
+    const minorSpacingPx = safeWidth * (minorStep / total);
+    const majorEvery = Math.max(
+      1,
+      Math.ceil(labelTargetPx / Math.max(minorSpacingPx, 1)),
+    );
+
+    const ticks = [];
+    let index = 0;
+    for (let seconds = 0; seconds <= total + 0.01; seconds += minorStep) {
+      const clamped = Math.min(total, seconds);
+      const isLast = total - clamped <= 0.5;
+      const isMajor = index === 0 || isLast || index % majorEvery === 0;
+      ticks.push({
+        key: `t-${clamped.toFixed(2)}-${index}`,
+        label: isMajor ? fmtSec(clamped) : null,
+        pct: (clamped / total) * 100,
+        isMajor,
+      });
+      if (isLast) break;
+      index += 1;
+    }
+
+    const lastTick = ticks[ticks.length - 1];
+    if (!lastTick || lastTick.pct < 99.9) {
+      ticks.push({
+        key: `t-${total.toFixed(2)}-final`,
+        label: fmtSec(total),
+        pct: 100,
+        isMajor: true,
+      });
+    }
+    return ticks;
+  }, [isIpad, timelineWidth, total]);
 
   function updateContainerMetrics() {
     if (!containerRef.current?.measureInWindow) return;
@@ -492,6 +524,7 @@ export default function WaveformTimeline({
         style={[styles.waveBar, heightProp && { height: heightProp }]}
         onLayout={(e) => {
           widthRef.current = e.nativeEvent.layout.width;
+          setTimelineWidth(e.nativeEvent.layout.width);
           updateContainerMetrics();
         }}
       >
@@ -616,9 +649,17 @@ export default function WaveformTimeline({
           <View
             key={tick.key}
             pointerEvents="none"
-            style={[styles.timeTickLine, { left: `${tick.pct}%` }]}
+            style={[
+              styles.timeTickLine,
+              tick.isMajor ? styles.timeTickMajor : styles.timeTickMinor,
+              { left: `${tick.pct}%` },
+            ]}
           >
-            <Text style={styles.timeTickLabel}>{tick.label}</Text>
+            {tick.label ? (
+              <Text style={[styles.timeTickLabel, isIpad && styles.timeTickLabelIpad]}>
+                {tick.label}
+              </Text>
+            ) : null}
           </View>
         ))}
 
@@ -1216,18 +1257,28 @@ const styles = StyleSheet.create({
   timeTickLine: {
     position: "absolute",
     bottom: 0,
-    height: 14,
     width: 1,
-    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  timeTickMajor: {
+    height: 18,
+    backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  timeTickMinor: {
+    height: 10,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   timeTickLabel: {
     position: "absolute",
-    bottom: 16,
+    bottom: 20,
     left: 4,
     fontSize: 9,
     fontWeight: "700",
     color: "rgba(255,255,255,0.4)",
     fontVariant: ["tabular-nums"],
+  },
+  timeTickLabelIpad: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.55)",
   },
 
   // Played region

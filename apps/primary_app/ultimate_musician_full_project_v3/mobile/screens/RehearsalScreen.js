@@ -55,7 +55,7 @@ import {
   TRANSITION_MODES,
 } from "../services/wavePipelineEngine";
 import { useResponsive } from "../utils/responsive";
-import { addOrUpdateSong } from "../data/storage";
+import { addOrUpdateSong, getSongs } from "../data/storage";
 import { speak } from "../services/voiceGuide";
 import { parseSectionsForWaveform } from "../utils/parseSectionsForWaveform";
 import {
@@ -227,6 +227,73 @@ function normalizeSectionsForStorage(list) {
       color: sec?.color || "#6366F1",
     }))
     .sort((a, b) => a.timeSec - b.timeSec);
+}
+
+function readCueMarkerTimeSec(cue = {}) {
+  const direct = Number(
+    cue?.timeSec ??
+      cue?.positionSeconds ??
+      cue?.time ??
+      cue?.start ??
+      cue?.startSec,
+  );
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+
+  const msValue = Number(cue?.time_ms ?? cue?.start_ms);
+  if (Number.isFinite(msValue) && msValue >= 0) return msValue / 1000;
+
+  return null;
+}
+
+function readCueMarkerEndSec(cue = {}) {
+  const direct = Number(
+    cue?.endTimeSec ??
+      cue?.end ??
+      cue?.endSec,
+  );
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+
+  const msValue = Number(cue?.end_ms);
+  if (Number.isFinite(msValue) && msValue >= 0) return msValue / 1000;
+
+  return null;
+}
+
+function buildMarkersFromAnalysisCues(cues = [], durationSec = 0) {
+  const total = Math.max(Number(durationSec || 0), 1);
+  const sorted = (Array.isArray(cues) ? cues : [])
+    .map((cue) => ({
+      ...cue,
+      timeSec:
+        readCueMarkerTimeSec(cue) ??
+        Number(cue?.positionSeconds || 0),
+      endSec: readCueMarkerEndSec(cue),
+    }))
+    .filter((cue) => Number.isFinite(cue.timeSec))
+    .sort((a, b) => a.timeSec - b.timeSec);
+
+  return sorted.map((cue, index) => {
+    const nextCue = sorted[index + 1];
+    const type = coerceMarkerType(cue?.type || "cue");
+    const fallbackEnd = nextCue?.timeSec ?? cue.timeSec + 4;
+    const end = Math.min(
+      total,
+      Math.max(cue.timeSec + 0.5, cue.endSec ?? fallbackEnd),
+    );
+    return applyMarkerType(
+      {
+        ...markerTemplate(
+          cue?.label || `Cue ${index + 1}`,
+          cue.timeSec,
+          end,
+          cue?.color,
+        ),
+        id: String(cue?.id || `mk_ai_${index}`),
+        sectionRef: cue?.sectionRef || cue?.section_id || null,
+      },
+      type,
+    );
+  });
 }
 
 const LOAD_STEPS = ["Initializing audio", "Loading stems", "Ready"];
@@ -1022,7 +1089,7 @@ const dawSt = StyleSheet.create({
 export default function RehearsalScreen({ route, navigation }) {
   const R = useResponsive();
   const {
-    song,
+    song: songParam,
     apiBase,
     userRole: routeRole,
     nextSong,
@@ -1038,6 +1105,20 @@ export default function RehearsalScreen({ route, navigation }) {
     hideVocalSection = false,
     autoPlay = false,
   } = route.params || {};
+
+  // ── Always load the full/fresh song from storage so analysis data is present ─
+  const [song, setSong] = useState(songParam);
+  useEffect(() => {
+    if (!songParam?.id) return;
+    getSongs().then((all) => {
+      const fresh = all.find((s) => s.id === songParam.id);
+      if (fresh) {
+        // Merge: fresh storage record wins on analysis/content fields;
+        // keep any live route params (key, role, etc.) that aren't in storage
+        setSong((prev) => ({ ...songParam, ...fresh }));
+      }
+    }).catch(() => {});
+  }, [songParam?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Full setlist — if passed, use it; otherwise fall back to just current song
   const setlist =
@@ -1742,10 +1823,15 @@ export default function RehearsalScreen({ route, navigation }) {
       setMarkersReady(true);
       return;
     }
+    const derivedAnalysisMarkers = buildMarkersFromAnalysisCues(
+      song?.analysis?.cues || [],
+      effectiveDuration,
+    );
     const stored = normalizeMarkersForStorage(
       song?.rehearsalMarkers ||
         song?.markers ||
         song?.analysis?.markers ||
+        derivedAnalysisMarkers ||
         [],
     );
     const storedSections = normalizeSectionsForStorage(
@@ -1786,7 +1872,18 @@ export default function RehearsalScreen({ route, navigation }) {
       sections: storedSections,
     });
     setMarkersReady(true);
-  }, [song?.id]);
+  }, [
+    effectiveDuration,
+    song?.analysis?.cues,
+    song?.analysis?.markers,
+    song?.customSections,
+    song?.id,
+    song?.markers,
+    song?.rehearsalLoopEnabled,
+    song?.rehearsalLoopMarkerId,
+    song?.rehearsalMarkers,
+    song?.rehearsalSections,
+  ]);
 
   useEffect(() => {
     (async () => {

@@ -440,6 +440,190 @@ function buildFallbackWaveformCues(sectionList = [], waveformSections = []) {
   }));
 }
 
+function normalizeCueMatchKey(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function readCueTimeSec(cue = {}) {
+  const directValue = Number(
+    cue?.timeSec ??
+      cue?.positionSeconds ??
+      cue?.time ??
+      cue?.time_sec ??
+      cue?.start ??
+      cue?.startSec ??
+      cue?.start_sec,
+  );
+  if (Number.isFinite(directValue) && directValue >= 0) return directValue;
+
+  const msValue = Number(cue?.time_ms ?? cue?.start_ms);
+  if (Number.isFinite(msValue) && msValue >= 0) return msValue / 1000;
+
+  return null;
+}
+
+function readCueEndSec(cue = {}) {
+  const directValue = Number(
+    cue?.endTimeSec ??
+      cue?.end ??
+      cue?.endSec ??
+      cue?.end_sec,
+  );
+  if (Number.isFinite(directValue) && directValue >= 0) return directValue;
+
+  const msValue = Number(cue?.end_ms);
+  if (Number.isFinite(msValue) && msValue >= 0) return msValue / 1000;
+
+  return null;
+}
+
+function buildAlignedWaveformCues(rawCues = [], waveformSections = [], sectionList = []) {
+  const normalizedSections = (waveformSections || []).map((section, index) => {
+    const timeSec = Number(
+      section?.timeSec ??
+        section?.positionSeconds ??
+        ((section?.start_ms ?? 0) / 1000),
+    );
+    const endSec = Number(
+      section?.endTimeSec ??
+        section?.endSec ??
+        ((section?.end_ms ?? 0) / 1000),
+    );
+    const label =
+      section?.label ||
+      section?.name ||
+      sectionList[index]?.name ||
+      `Section ${index + 1}`;
+    return {
+      ...section,
+      label,
+      timeSec: Number.isFinite(timeSec) ? timeSec : 0,
+      endSec: Number.isFinite(endSec) && endSec > timeSec ? endSec : null,
+      matchKey: normalizeCueMatchKey(label),
+    };
+  });
+
+  const sectionById = new Map(
+    normalizedSections.map((section) => [String(section?.id || ""), section]),
+  );
+  const sectionByLabel = new Map();
+  normalizedSections.forEach((section) => {
+    if (!section.matchKey) return;
+    if (!sectionByLabel.has(section.matchKey)) {
+      sectionByLabel.set(section.matchKey, section);
+    }
+  });
+
+  const baseCues =
+    Array.isArray(rawCues) && rawCues.length > 0
+      ? rawCues
+      : buildFallbackWaveformCues(sectionList, waveformSections);
+
+  const aligned = baseCues.map((cue, index) => {
+    const cueLabel =
+      cue?.label ||
+      cue?.name ||
+      cue?.cue ||
+      sectionList[index]?.name ||
+      normalizedSections[index]?.label ||
+      `Cue ${index + 1}`;
+    const explicitStart = readCueTimeSec(cue);
+    const explicitEnd = readCueEndSec(cue);
+    const matchedSection =
+      sectionById.get(String(cue?.sectionRef || cue?.section_id || cue?.sectionId || "")) ||
+      sectionByLabel.get(normalizeCueMatchKey(cueLabel)) ||
+      normalizedSections[index] ||
+      null;
+    const startSec =
+      explicitStart ??
+      matchedSection?.timeSec ??
+      Number(cue?.positionSeconds || 0);
+    const sectionEndSec =
+      matchedSection?.endSec ??
+      (Number.isFinite(matchedSection?.end_ms)
+        ? Number(matchedSection.end_ms) / 1000
+        : null);
+    return {
+      id: String(cue?.id || `smart_cue_${index}`),
+      label: cueLabel,
+      type: String(cue?.type || "cue").toLowerCase(),
+      time: startSec,
+      timeSec: startSec,
+      positionSeconds: startSec,
+      start_ms: Math.round(startSec * 1000),
+      end_ms: Math.round(
+        Math.max(startSec, explicitEnd ?? sectionEndSec ?? startSec) * 1000,
+      ),
+      color:
+        cue?.color ||
+        matchedSection?.color ||
+        buildSectionColor(cueLabel, index),
+      cue: cue?.cue || sectionList[index]?.cue || "",
+      energy: cue?.energy || sectionList[index]?.energy || "",
+      sectionRef: matchedSection?.id || cue?.sectionRef || null,
+    };
+  });
+
+  const sorted = aligned
+    .filter((cue) => Number.isFinite(cue.timeSec))
+    .sort((a, b) => a.timeSec - b.timeSec);
+
+  return sorted.map((cue, index) => {
+    const nextCue = sorted[index + 1];
+    const fallbackEnd = nextCue?.timeSec ?? cue.timeSec + 4;
+    const storedEnd = Number(cue?.end_ms || 0) / 1000;
+    const endSec =
+      Number.isFinite(storedEnd) && storedEnd > cue.timeSec
+        ? storedEnd
+        : fallbackEnd;
+    return {
+      ...cue,
+      end_ms: Math.round(Math.max(cue.timeSec + 0.5, endSec) * 1000),
+    };
+  });
+}
+
+function buildAnalysisMarkersFromCues(cues = [], durationMs = 0) {
+  const totalSec = Math.max(Number(durationMs || 0) / 1000, 1);
+  const sorted = (cues || [])
+    .map((cue) => ({
+      ...cue,
+      timeSec: readCueTimeSec(cue) ?? Number(cue?.positionSeconds || 0),
+      endSec:
+        readCueEndSec(cue) ??
+        (Number.isFinite(cue?.end_ms) ? Number(cue.end_ms) / 1000 : null),
+    }))
+    .filter((cue) => Number.isFinite(cue.timeSec))
+    .sort((a, b) => a.timeSec - b.timeSec);
+
+  return sorted.map((cue, index) => {
+    const nextCue = sorted[index + 1];
+    const type = normalizeRoleKey(cue?.type || "cue");
+    const endSec = Math.min(
+      totalSec,
+      Math.max(
+        cue.timeSec + 0.5,
+        cue.endSec ??
+          nextCue?.timeSec ??
+          cue.timeSec + 4,
+      ),
+    );
+    return {
+      id: String(cue?.id || `mk_ai_${index}`),
+      label: String(cue?.label || `Cue ${index + 1}`),
+      start: cue.timeSec,
+      end: endSec,
+      type: ["section", "jump", "loop"].includes(type) ? type : "cue",
+      color: cue?.color || buildSectionColor(cue?.label, index),
+      sectionRef: cue?.sectionRef || null,
+    };
+  });
+}
+
 function mergeArrangedSections(baseSections = [], arrangedSections = []) {
   const baseById = new Map(baseSections.map((section) => [String(section.id || ""), section]));
   const baseByName = new Map(
@@ -1110,10 +1294,13 @@ export default function SongDetailScreen({ route, navigation }) {
           end_ms: endMs,
         };
       });
-      const cues =
+      const cueSource =
         waveformData?.analysis?.cues ||
         arrangement.cues ||
-        buildFallbackWaveformCues(mergedSections, waveformSections);
+        null;
+      const cues = cueSource
+        ? buildAlignedWaveformCues(cueSource, waveformSections, mergedSections)
+        : buildFallbackWaveformCues(mergedSections, waveformSections);
       const waveformPeaks =
         waveformData?.analysis?.waveformPeaks ||
         waveformData?.analysis?.peaks ||
@@ -1128,6 +1315,9 @@ export default function SongDetailScreen({ route, navigation }) {
           energy: mergedSections[index]?.energy || "medium",
           cue: mergedSections[index]?.cue || "",
         }));
+      const analysisMarkers = cueSource
+        ? buildAnalysisMarkersFromCues(cues, durationMs)
+        : currentSong?.analysis?.markers || [];
       const roleCharts = arrangement.roleCharts || arrangement.role_charts || {};
       const previewChart = getPreviewChartForInstrument(roleCharts, aiChartInstrument);
 
@@ -1147,6 +1337,7 @@ export default function SongDetailScreen({ route, navigation }) {
           ...(currentSong?.analysis || {}),
           sections: waveformSections,
           cues,
+          markers: analysisMarkers,
           duration_ms: durationMs,
           waveformPeaks,
           peaks: waveformPeaks,
