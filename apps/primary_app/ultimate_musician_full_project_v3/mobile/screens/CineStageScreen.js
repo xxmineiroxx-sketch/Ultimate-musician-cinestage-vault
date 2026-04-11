@@ -24,6 +24,7 @@ import {
 import { useTheme } from "../context/ThemeContext";
 import {
   analyzeAudio,
+  bootstrapBrain,
   createJob,
   pollJob,
   CINESTAGE_API_BASE_URL,
@@ -53,24 +54,34 @@ function fmtMs(ms) {
 
 // ── Subcomponents ──────────────────────────────────────────────────────────
 
-function AnalysisResult({ result, colors }) {
+function AnalysisResult({ result, originalKey, colors }) {
   if (!result) return null;
   const sections = result.sections || [];
   const cues     = result.cues    || [];
   const graph    = result.performance_graph || [];
-  const chords   = (result.chords || []).slice(0, 12); // first 12 chords
+  const chords   = (result.chords || []).slice(0, 24);
+  const timeSig  = result.time_signature || result.timeSig || '4/4';
+  const detectedKey = result.key || '';
 
   return (
     <View>
-      {/* Key + BPM + Duration */}
+      {/* Key + BPM + Time Sig + Duration */}
       <View style={badgeRow.row}>
         <View style={[badgeRow.badge, { backgroundColor: '#1E1B4B' }]}>
           <Text style={[badgeRow.badgeLabel, { color: '#818CF8' }]}>KEY</Text>
-          <Text style={[badgeRow.badgeValue, { color: '#C7D2FE' }]}>{result.key || '—'}</Text>
+          <Text style={[badgeRow.badgeValue, { color: '#C7D2FE' }]}>{detectedKey || '—'}</Text>
+          {/* Show ORIG badge if this differs from the stored original */}
+          {!!originalKey && originalKey !== detectedKey && (
+            <Text style={{ fontSize: 9, color: '#6366F1', marginTop: 2 }}>orig: {originalKey}</Text>
+          )}
         </View>
         <View style={[badgeRow.badge, { backgroundColor: '#1C1917' }]}>
           <Text style={[badgeRow.badgeLabel, { color: '#FB923C' }]}>BPM</Text>
           <Text style={[badgeRow.badgeValue, { color: '#FED7AA' }]}>{result.bpm || '—'}</Text>
+        </View>
+        <View style={[badgeRow.badge, { backgroundColor: '#0C1A2E' }]}>
+          <Text style={[badgeRow.badgeLabel, { color: '#60A5FA' }]}>TIME</Text>
+          <Text style={[badgeRow.badgeValue, { color: '#BAE6FD' }]}>{timeSig}</Text>
         </View>
         {!!result.duration_ms && (
           <View style={[badgeRow.badge, { backgroundColor: '#052E16' }]}>
@@ -158,21 +169,25 @@ function AnalysisResult({ result, colors }) {
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
-export default function CineStageScreen({ navigation }) {
+export default function CineStageScreen({ navigation, route }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { width: screenWidth } = useWindowDimensions();
   const isIPad = screenWidth >= 768;
 
+  // Song passed in from SongDetail (may be undefined if opened standalone)
+  const incomingSong = route?.params?.song ?? null;
+
   const [planTier, setPlanTier]   = useState(PlanTiers.PRO);
   const [activeTab, setActiveTab] = useState(0); // 0=Analyze, 1=Stems
 
   // ── Analyze tab ──
-  const [audioUrl, setAudioUrl]       = useState('');
-  const [songTitle, setSongTitle]     = useState('');
+  const [audioUrl, setAudioUrl]       = useState(incomingSong?.sourceUrl || incomingSong?.youtubeLink || '');
+  const [songTitle, setSongTitle]     = useState(incomingSong?.title || '');
   const [analyzing, setAnalyzing]     = useState(false);
   const [analysisResult, setResult]   = useState(null);
-  const [savedSongId, setSavedSongId] = useState(null);
+  const [savedSongId, setSavedSongId] = useState(incomingSong?.id || null);
+  const [brainBootstrap, setBrainBootstrap] = useState(null);
 
   // ── Stems tab ──
   const [projectId, setProjectId] = useState('demo-project');
@@ -191,6 +206,21 @@ export default function CineStageScreen({ navigation }) {
     })();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const bootstrap = await bootstrapBrain();
+        if (!cancelled) setBrainBootstrap(bootstrap);
+      } catch {
+        if (!cancelled) setBrainBootstrap(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Run audio analysis ──
   async function runAnalysis() {
     if (!entitlements.cineStage) {
@@ -203,7 +233,6 @@ export default function CineStageScreen({ navigation }) {
     }
     setAnalyzing(true);
     setResult(null);
-    setSavedSongId(null);
     try {
       const res = await analyzeAudio({
         file_url:   audioUrl.trim(),
@@ -213,16 +242,29 @@ export default function CineStageScreen({ navigation }) {
       setResult(res);
 
       // Auto-save analysis to song library
+      // Priority: match by incoming song ID → match by title → create new
       const allSongs = await getSongs();
-      const existing = allSongs.find(
-        (s) => s.title?.toLowerCase() === (songTitle.trim() || '').toLowerCase()
-      );
+      const existing = incomingSong?.id
+        ? allSongs.find((s) => s.id === incomingSong.id) || allSongs.find((s) => s.title?.toLowerCase() === (songTitle.trim() || '').toLowerCase())
+        : allSongs.find((s) => s.title?.toLowerCase() === (songTitle.trim() || '').toLowerCase());
+
+      const detectedKey = res.key || '';
+      const detectedTimeSig = res.time_signature || res.timeSig || '4/4';
+
+      // originalKey is set once and never overwritten — preserve it if already stored
+      const storedOriginalKey = existing?.originalKey || '';
+      const newOriginalKey = storedOriginalKey || detectedKey;
+
       const saved = await addOrUpdateSong({
-        id:       existing?.id || makeId('song'),
-        ...(existing || {}),
-        title:    res.title    || songTitle.trim() || 'Untitled',
-        bpm:      res.bpm      || existing?.bpm,
-        originalKey: res.key  || existing?.originalKey,
+        id:           existing?.id || incomingSong?.id || makeId('song'),
+        sourceUrl:    audioUrl.trim(),
+        youtubeLink:  audioUrl.trim(),
+        ...(existing || incomingSong || {}),
+        title:        res.title || songTitle.trim() || existing?.title || 'Untitled',
+        bpm:          res.bpm          || existing?.bpm,
+        timeSig:      detectedTimeSig  || existing?.timeSig || '4/4',
+        originalKey:  newOriginalKey,
+        key:          detectedKey      || existing?.key || newOriginalKey,
         analysis: {
           sections:          res.sections,
           chords:            res.chords,
@@ -280,6 +322,22 @@ export default function CineStageScreen({ navigation }) {
         </View>
       )}
 
+      {brainBootstrap?.brain ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>CineStage Brain</Text>
+          <Text style={styles.bodyText}>
+            {brainBootstrap.brain.service} v{brainBootstrap.brain.version}
+          </Text>
+          <Text style={styles.bodyText}>
+            {brainBootstrap.brain.summary?.feature_group_count || 0} feature groups ·{" "}
+            {brainBootstrap.brain.summary?.internal_agent_count || 0} internal agents
+          </Text>
+          <Text style={styles.bodyText}>
+            Apps: {(brainBootstrap.brain.apps || []).join(", ")}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Tab bar — only on phone */}
       {!isIPad && (
         <View style={styles.tabRow}>
@@ -293,6 +351,57 @@ export default function CineStageScreen({ navigation }) {
               <Text style={[styles.tabText, activeTab === i && styles.tabTextActive]}>{t}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {/* ── Song context banner (shown when opened from a song) ── */}
+      {(isIPad || activeTab === 0) && !!incomingSong && (
+        <View style={[styles.card, { backgroundColor: '#0C1020', borderColor: '#2D2060', marginBottom: 8 }]}>
+          <Text style={[styles.label, { color: '#818CF8', marginBottom: 8 }]}>Analyzing Song</Text>
+          <Text style={{ color: '#E5E7EB', fontSize: 15, fontWeight: '800', marginBottom: 6 }}>
+            {incomingSong.title || 'Untitled'}
+            {incomingSong.artist ? <Text style={{ color: '#9CA3AF', fontWeight: '400' }}> — {incomingSong.artist}</Text> : null}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {!!incomingSong.originalKey && (
+              <View style={{ backgroundColor: '#1E1B4B', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 9, color: '#818CF8', fontWeight: '800', letterSpacing: 0.6 }}>ORIG KEY</Text>
+                <Text style={{ color: '#C7D2FE', fontSize: 14, fontWeight: '900' }}>{incomingSong.originalKey}</Text>
+              </View>
+            )}
+            {!!(incomingSong.key && incomingSong.key !== incomingSong.originalKey) && (
+              <View style={{ backgroundColor: '#1C1A07', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 9, color: '#F59E0B', fontWeight: '800', letterSpacing: 0.6 }}>CURRENT KEY</Text>
+                <Text style={{ color: '#FCD34D', fontSize: 14, fontWeight: '900' }}>{incomingSong.key}</Text>
+              </View>
+            )}
+            {!!incomingSong.bpm && (
+              <View style={{ backgroundColor: '#1C1917', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 9, color: '#FB923C', fontWeight: '800', letterSpacing: 0.6 }}>BPM</Text>
+                <Text style={{ color: '#FED7AA', fontSize: 14, fontWeight: '900' }}>{incomingSong.bpm}</Text>
+              </View>
+            )}
+            {!!incomingSong.timeSig && (
+              <View style={{ backgroundColor: '#0C1A2E', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+                <Text style={{ fontSize: 9, color: '#60A5FA', fontWeight: '800', letterSpacing: 0.6 }}>TIME SIG</Text>
+                <Text style={{ color: '#BAE6FD', fontSize: 14, fontWeight: '900' }}>{incomingSong.timeSig}</Text>
+              </View>
+            )}
+          </View>
+          {!!(incomingSong.analysis?.chords?.length) && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={{ fontSize: 9, color: '#4B5563', fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 }}>
+                STORED CHORDS ({incomingSong.analysis.chords.length})
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                {incomingSong.analysis.chords.slice(0, 16).map((c, i) => (
+                  <View key={i} style={{ backgroundColor: '#1E293B', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                    <Text style={{ color: '#CBD5E1', fontSize: 11, fontWeight: '700' }}>{c.chord}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
         </View>
       )}
 
@@ -347,7 +456,7 @@ export default function CineStageScreen({ navigation }) {
           )}
 
           {/* On iPad, results live in right panel — on phone, show inline */}
-          {!isIPad && <AnalysisResult result={analysisResult} colors={colors} />}
+          {!isIPad && <AnalysisResult result={analysisResult} originalKey={incomingSong?.originalKey} colors={colors} />}
         </View>
       )}
 
@@ -422,7 +531,7 @@ export default function CineStageScreen({ navigation }) {
     <ScrollView style={{ flex: 1, paddingLeft: 12 }} showsVerticalScrollIndicator={false}>
       <Text style={[styles.label, { marginBottom: 8 }]}>Analysis Results</Text>
       {analysisResult
-        ? <AnalysisResult result={analysisResult} colors={colors} />
+        ? <AnalysisResult result={analysisResult} originalKey={incomingSong?.originalKey} colors={colors} />
         : <Text style={styles.caption}>Run an analysis to see results here.</Text>
       }
     </ScrollView>

@@ -1,4 +1,8 @@
-import { CINESTAGE_API_BASE_URL } from "./config";
+import {
+  CINESTAGE_API_BASE_URL,
+  CINESTAGE_BRAIN_BOOTSTRAP_URL,
+  CINESTAGE_BRAIN_CAPABILITIES_URL,
+} from "./config";
 
 async function http(path, init) {
   const res = await fetch(`${CINESTAGE_API_BASE_URL}${path}`, {
@@ -7,6 +11,42 @@ async function http(path, init) {
   });
   if (!res.ok) throw new Error(`CineStage API ${res.status}`);
   return await res.json();
+}
+
+let _brainBootstrap = null;
+let _brainBootstrapAt = 0;
+const BRAIN_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export const getCineStageHealth = () => http("/health");
+
+export async function getBrainCapabilities(force = false) {
+  if (!force && _brainBootstrap?.brain?.capabilities && Date.now() - _brainBootstrapAt < BRAIN_CACHE_TTL_MS) {
+    return _brainBootstrap.brain;
+  }
+
+  const res = await fetch(CINESTAGE_BRAIN_CAPABILITIES_URL, {
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`CineStage capabilities ${res.status}`);
+  return await res.json();
+}
+
+export async function bootstrapBrain(force = false) {
+  if (!force && _brainBootstrap && Date.now() - _brainBootstrapAt < BRAIN_CACHE_TTL_MS) {
+    return _brainBootstrap;
+  }
+
+  const res = await fetch(CINESTAGE_BRAIN_BOOTSTRAP_URL, {
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!res.ok) {
+    throw new Error(`CineStage bootstrap ${res.status}`);
+  }
+
+  _brainBootstrap = await res.json();
+  _brainBootstrapAt = Date.now();
+  return _brainBootstrap;
 }
 
 // ── Jobs / Stems ──────────────────────────────────────────────────────────────

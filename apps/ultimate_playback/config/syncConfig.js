@@ -5,7 +5,10 @@
  * LOCAL MIDI:  http://localhost:8099           (local only — for MIDI bridge)
  */
 export const SYNC_URL        = 'https://ultimatelabs.pages.dev';
-export const CINESTAGE_URL   = 'https://cinestage.studio-cinestage.workers.dev';
+export const CINESTAGE_URL   = 'https://cinestage.ultimatelabs.co';
+export const CINESTAGE_WS_URL = CINESTAGE_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
+export const CINESTAGE_BRAIN_URL = `${CINESTAGE_URL}/api/brain/capabilities`;
+export const CINESTAGE_BOOTSTRAP_URL = `${CINESTAGE_URL}/api/brain/bootstrap`;
 export const SYNC_ORG_ID     = 'zpneef0a5ov732c0';
 export const SYNC_SECRET_KEY = 'erflpo0e4pg33h85v58v7cfvpd6eoycv';
 

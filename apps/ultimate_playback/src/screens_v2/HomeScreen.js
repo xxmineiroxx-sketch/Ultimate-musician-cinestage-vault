@@ -19,12 +19,14 @@ import {
   Pressable,
   useWindowDimensions,
   Image,
+  Animated,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ModernDashboardCard from '../components_v2/ModernDashboardCard';
 import PreparationHub from '../components_v2/PreparationHub';
 import ServiceCommandCenter from '../components_v2/ServiceCommandCenter';
+import { CineStageAPI } from '../api/cinestage';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -375,6 +377,9 @@ export default function HomeScreen({ navigation }) {
     roleLabels: [],
   });
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [brainStatus, setBrainStatus] = useState(null);
+  const [practiceStats, setPracticeStats] = useState(null); // { sessionCount, totalMs, mostPracticedSong }
   const _initDate = new Date();
   const _initTheme = getThemeByDate(_initDate);
   const _initVerses = THEMED_VERSES[_initTheme.key];
@@ -387,6 +392,47 @@ export default function HomeScreen({ navigation }) {
   const lastTriggerTsRef = useRef(null);
   const lastMsgTsRef = useRef(null);          // tracks latest message timestamp for sound
   const notifIdsRef = useRef([]);              // scheduled reminder notification IDs
+
+  // ── Response-deadline reminder banner ─────────────────────────────────────
+  const [deadlineBannerDismissed, setDeadlineBannerDismissed] = useState(false);
+  const deadlineBannerAnim = useRef(new Animated.Value(-80)).current;
+
+  // ── "We're Live" banner ───────────────────────────────────────────────────
+  const [liveBannerVisible, setLiveBannerVisible] = useState(false);
+  const [liveBannerTitle, setLiveBannerTitle] = useState('');
+  const liveBannerAnim = useRef(new Animated.Value(-60)).current;
+  const liveBannerOpacity = useRef(new Animated.Value(1)).current;
+  const liveBannerShown = useRef(false);
+  const liveBannerHideTimer = useRef(null);
+
+  const showLiveBanner = useCallback((title) => {
+    clearTimeout(liveBannerHideTimer.current);
+    liveBannerOpacity.setValue(1);
+    setLiveBannerTitle(title || 'Service');
+    setLiveBannerVisible(true);
+    Animated.spring(liveBannerAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
+    liveBannerHideTimer.current = setTimeout(() => {
+      Animated.timing(liveBannerOpacity, { toValue: 0, duration: 500, useNativeDriver: true }).start(() => {
+        setLiveBannerVisible(false);
+        liveBannerAnim.setValue(-60);
+        liveBannerOpacity.setValue(1);
+      });
+    }, 8000);
+  }, [liveBannerAnim, liveBannerOpacity]);
+
+  const checkLiveStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${SYNC_URL}/sync/live-status`, { headers: syncHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.isLive && !liveBannerShown.current) {
+        liveBannerShown.current = true;
+        showLiveBanner(data.title || 'Service');
+      } else if (!data?.isLive) {
+        liveBannerShown.current = false;
+      }
+    } catch (_) {}
+  }, [showLiveBanner]);
 
   // ── Sync verse + service data to Apple Watch and iOS Widget ─────────────────
   useEffect(() => {
@@ -517,8 +563,22 @@ export default function HomeScreen({ navigation }) {
             await saveAssignments(merged);
             userAssignments = merged;
           }
+          // Cache successful fetch for offline use
+          await AsyncStorage.setItem('up/cache/assignments', JSON.stringify(userAssignments)).catch(() => {});
+          await AsyncStorage.setItem('up/cache/profile', JSON.stringify(userProfile)).catch(() => {});
+          setIsOffline(false);
         }
-      } catch (_) {}
+      } catch (_) {
+        // Network failed — fall back to cached assignments
+        try {
+          const cached = await AsyncStorage.getItem('up/cache/assignments').catch(() => null);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            userAssignments = parsed;
+            setIsOffline(true);
+          }
+        } catch (_e) {}
+      }
     }
 
     // Check if this user has an MD/Admin grant
@@ -618,11 +678,46 @@ export default function HomeScreen({ navigation }) {
     };
     setMonthlyStats(stats);
     await maybeShowMonthlyPopup(stats);
+
+    // ── Practice history stats (this week) ───────────────────────────────────
+    try {
+      const historyRaw = await AsyncStorage.getItem('up/history/v1');
+      if (historyRaw) {
+        const history = JSON.parse(historyRaw);
+        const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const thisWeek = history.filter((e) => new Date(e.practiceDate).getTime() >= weekAgoMs);
+        if (thisWeek.length > 0) {
+          const distinctSongs = new Set(thisWeek.map((e) => e.songId || e.title).filter(Boolean));
+          const totalMs = thisWeek.reduce((sum, e) => sum + (e.durationMs || 0), 0);
+          // Find most practiced song title by entry count
+          const titleCounts = {};
+          thisWeek.forEach((e) => {
+            const key = e.title || e.songId;
+            if (key) titleCounts[key] = (titleCounts[key] || 0) + 1;
+          });
+          const mostPracticedSong = Object.entries(titleCounts)
+            .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+          setPracticeStats({
+            sessionCount: thisWeek.length,
+            distinctSongCount: distinctSongs.size,
+            totalMs,
+            mostPracticedSong,
+          });
+        } else {
+          setPracticeStats(null);
+        }
+      }
+    } catch (_) {}
   }, [maybeShowMonthlyPopup, scheduleServiceReminders]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadDashboardData();
+    await Promise.all([
+      loadDashboardData(),
+      CineStageAPI.bootstrapBrain(true)
+        .then((payload) => setBrainStatus(payload?.brain || null))
+        .catch(() => setBrainStatus(null)),
+    ]);
     setRefreshing(false);
   }, [loadDashboardData]);
 
@@ -633,18 +728,36 @@ export default function HomeScreen({ navigation }) {
   }, [navigation, loadDashboardData]);
 
   useEffect(() => {
+    let cancelled = false;
+    CineStageAPI.bootstrapBrain()
+      .then((payload) => {
+        if (!cancelled) setBrainStatus(payload?.brain || null);
+      })
+      .catch(() => {
+        if (!cancelled) setBrainStatus(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     maybeShowVersePopup();
+    checkLiveStatus(); // check on mount
     const sub = AppState.addEventListener('change', (nextState) => {
       const wasBackground = appStateRef.current === 'background' || appStateRef.current === 'inactive';
       if (wasBackground && nextState === 'active') {
         maybeShowVersePopup();
+        checkLiveStatus(); // check whenever app comes to foreground
       }
       appStateRef.current = nextState;
     });
     return () => {
       sub?.remove?.();
+      clearTimeout(liveBannerHideTimer.current);
     };
-  }, [maybeShowVersePopup]);
+  }, [maybeShowVersePopup, checkLiveStatus]);
 
   // Load persisted trigger timestamp so we don't re-fire on app restart
   useEffect(() => {
@@ -768,6 +881,57 @@ export default function HomeScreen({ navigation }) {
   const pendingCount  = serviceGroups.filter(g => groupStatus(g) === 'pending').length;
   const acceptedCount = serviceGroups.filter(g => groupStatus(g) === 'accepted').length;
 
+  // ── Deadline reminder: pending assignments with service_date within 3 days ──
+  const urgentAssignments = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const threeDaysOut = new Date(today.getTime() + 3 * 24 * 60 * 60 * 1000);
+    return assignments.filter(a => {
+      if (a.status !== 'pending') return false;
+      if (!a.service_date) return false;
+      const svc = new Date(String(a.service_date).includes('T') ? a.service_date : a.service_date + 'T00:00:00');
+      svc.setHours(0, 0, 0, 0);
+      return svc >= today && svc <= threeDaysOut;
+    });
+  }, [assignments]);
+
+  // Compute the label for the soonest urgent service date
+  const urgentBannerLabel = useMemo(() => {
+    if (urgentAssignments.length === 0) return null;
+    // Find the earliest service_date among urgent assignments
+    const sorted = [...urgentAssignments].sort((a, b) => {
+      const da = new Date(String(a.service_date).includes('T') ? a.service_date : a.service_date + 'T00:00:00');
+      const db = new Date(String(b.service_date).includes('T') ? b.service_date : b.service_date + 'T00:00:00');
+      return da - db;
+    });
+    const earliest = sorted[0];
+    const svc = new Date(String(earliest.service_date).includes('T') ? earliest.service_date : earliest.service_date + 'T00:00:00');
+    svc.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((svc - today) / (24 * 60 * 60 * 1000));
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[svc.getDay()];
+    const count = urgentAssignments.length;
+    const countLabel = count === 1 ? '1 assignment needs' : `${count} assignments need`;
+    const daysLabel = diffDays === 0 ? 'today' : diffDays === 1 ? '1 day away' : `${diffDays} days away`;
+    return `${countLabel} your response — ${dayName} (${daysLabel})`;
+  }, [urgentAssignments]);
+
+  // Slide-down animation when urgent banner becomes visible
+  useEffect(() => {
+    if (urgentAssignments.length > 0 && !deadlineBannerDismissed) {
+      Animated.spring(deadlineBannerAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 70,
+        friction: 12,
+      }).start();
+    } else {
+      deadlineBannerAnim.setValue(-80);
+    }
+  }, [urgentAssignments.length, deadlineBannerDismissed, deadlineBannerAnim]);
+
   // ── Service card tap: always go straight to Setlist with full group ──────────
   function openServiceCard(group) {
     navigation.navigate('Setlist', {
@@ -813,6 +977,50 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+      {isOffline && (
+        <View style={{ backgroundColor: '#78350F', paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ color: '#FDE68A', fontSize: 12, fontWeight: '700' }}>📡 Offline — showing cached data</Text>
+        </View>
+      )}
+
+      {/* We're Live animated banner */}
+      {liveBannerVisible ? (
+        <Animated.View
+          style={[
+            styles.liveBanner,
+            { transform: [{ translateY: liveBannerAnim }], opacity: liveBannerOpacity },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.liveBannerText}>🔴 LIVE — {liveBannerTitle}</Text>
+        </Animated.View>
+      ) : null}
+
+      {/* Response-deadline reminder banner */}
+      {urgentAssignments.length > 0 && !deadlineBannerDismissed && urgentBannerLabel ? (
+        <Animated.View
+          style={[styles.deadlineBanner, { transform: [{ translateY: deadlineBannerAnim }] }]}
+        >
+          <View style={styles.deadlineBannerContent}>
+            <Text style={styles.deadlineBannerText}>⏰ {urgentBannerLabel}</Text>
+            <TouchableOpacity
+              style={styles.deadlineBannerBtn}
+              onPress={() => navigation.navigate('Assignments')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.deadlineBannerBtnText}>Respond Now →</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={styles.deadlineBannerClose}
+            onPress={() => setDeadlineBannerDismissed(true)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.deadlineBannerCloseText}>✕</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
+
       <View style={isTablet && styles.tabletRow}>
         <View style={isTablet && styles.tabletColumn}>
           {profile ? (
@@ -842,6 +1050,21 @@ export default function HomeScreen({ navigation }) {
               </ModernDashboardCard>
             </TouchableOpacity>
           )}
+
+          {brainStatus ? (
+            <ModernDashboardCard variant="setup">
+              <View style={{ alignItems: 'center' }}>
+                <Text style={styles.setupIcon}>🧠</Text>
+                <Text style={styles.setupTitle}>CineStage Brain Online</Text>
+                <Text style={styles.setupText}>
+                  v{brainStatus.version} · {brainStatus.summary?.feature_group_count || 0} feature groups
+                </Text>
+                <Text style={styles.setupText}>
+                  Agents: {brainStatus.summary?.internal_agent_count || 0} · Apps: {(brainStatus.apps || []).join(', ')}
+                </Text>
+              </View>
+            </ModernDashboardCard>
+          ) : null}
 
           {/* Admin / Manager / MD Panel card */}
           {mdRole && mdRole !== 'leader' && (
@@ -1144,6 +1367,20 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* ── This Week Practice Summary ───────────────────────────────────── */}
+      {practiceStats && (
+        <View style={styles.practiceSummaryCard}>
+          <Text style={styles.practiceSummaryLine}>
+            🎵 This week: {practiceStats.sessionCount} practice session{practiceStats.sessionCount !== 1 ? 's' : ''} · {Math.round(practiceStats.totalMs / 60000)} min
+          </Text>
+          {practiceStats.mostPracticedSong ? (
+            <Text style={styles.practiceSummaryMost}>
+              Most practiced: {practiceStats.mostPracticedSong}
+            </Text>
+          ) : null}
+        </View>
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>
@@ -1793,5 +2030,88 @@ const styles = StyleSheet.create({
   },
   tabletColumn: {
     flex: 1,
+  },
+
+  // We're Live banner
+  liveBanner: {
+    backgroundColor: '#065F46',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#34D399',
+    marginHorizontal: 0,
+  },
+  liveBannerText: {
+    color: '#ECFDF5',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  // Response-deadline reminder banner
+  deadlineBanner: {
+    backgroundColor: '#78350F',
+    borderBottomWidth: 1,
+    borderBottomColor: '#D97706',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  deadlineBannerContent: {
+    flex: 1,
+    flexDirection: 'column',
+    gap: 8,
+  },
+  deadlineBannerText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  deadlineBannerBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#D97706',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  deadlineBannerBtnText: {
+    color: '#1C1917',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  deadlineBannerClose: {
+    paddingLeft: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deadlineBannerCloseText: {
+    color: '#FCD34D',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  practiceSummaryCard: {
+    marginHorizontal: 0,
+    marginBottom: 16,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1E3A5F',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  practiceSummaryLine: {
+    color: '#93C5FD',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  practiceSummaryMost: {
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: 4,
   },
 });
