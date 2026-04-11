@@ -11,6 +11,18 @@ export class CineStageAPI {
   static _brainBootstrapAt = 0;
   static brainCacheTtlMs = 5 * 60 * 1000;
 
+  static buildBootstrapPayload(brain, apiBase) {
+    return {
+      status: 'ok',
+      brain,
+      recommended: {
+        api_base_url: brain?.api_base_url || apiBase || null,
+        ws_url: brain?.ws_url || null,
+        sync_url: brain?.sync_url || null,
+      },
+    };
+  }
+
   static normalizeScanResult(result) {
     const outputs = Array.isArray(result?.outputs)
       ? result.outputs
@@ -60,7 +72,21 @@ export class CineStageAPI {
       return this._brainBootstrap.brain;
     }
 
-    return this.fetchJson('/api/brain/capabilities');
+    const apiBase = await this.getApiBase();
+    const response = await fetch(`${apiBase}/api/brain/capabilities`, {
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      const bootstrap = await this.bootstrapBrain(force);
+      return bootstrap.brain;
+    }
+
+    const brain = await response.json();
+    this._brainBootstrap = this.buildBootstrapPayload(brain, apiBase);
+    this._brainBootstrapAt = Date.now();
+    return brain;
   }
 
   static async bootstrapBrain(force = false) {
@@ -72,7 +98,27 @@ export class CineStageAPI {
       return this._brainBootstrap;
     }
 
-    const payload = await this.fetchJson('/api/brain/bootstrap');
+    const apiBase = await this.getApiBase();
+    const response = await fetch(`${apiBase}/api/brain/bootstrap`, {
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+    });
+
+    let payload;
+    if (!response.ok) {
+      const fallback = await fetch(`${apiBase}/api/brain/capabilities`, {
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      });
+      if (!fallback.ok) {
+        throw new Error(`CineStage bootstrap ${response.status}`);
+      }
+      const brain = await fallback.json();
+      payload = this.buildBootstrapPayload(brain, apiBase);
+    } else {
+      payload = await response.json();
+    }
+
     this._brainBootstrap = payload;
     this._brainBootstrapAt = Date.now();
     return payload;
