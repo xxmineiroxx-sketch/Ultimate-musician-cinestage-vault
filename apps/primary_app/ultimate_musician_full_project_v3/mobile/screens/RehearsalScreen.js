@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import Slider from "@react-native-community/slider";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -8,6 +7,7 @@ import {
   Modal,
   PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,7 +21,14 @@ import * as audioEngine from "../audioEngine";
 import CineStageProcessingOverlay from "../components/CineStageProcessingOverlay";
 import StemChannelStrip from "../components/StemChannelStrip";
 import WaveformTimeline from "../components/WaveformTimeline";
+import { getScopedRecordItem, setScopedRecordItem } from "../data/orgScopedStorage";
+import { getVocalAssignments as cloudGetVocalAssignments } from "../services/cinestageDataAPI";
 import { resolvePadUrl } from "../services/audioGuide";
+import predictiveConductor from "../services/predictiveConductor";
+import {
+  getWaveformAnalysis,
+  normalizeWaveformAnalysis,
+} from "../services/waveformService";
 import {
   startSequence,
   stopSequence,
@@ -44,7 +51,28 @@ import {
   updateMarkerRange,
 } from "../services/rehearsalPipelineStore";
 import { resolveRoleFilteredTracks } from "../services/roleStemRouter";
+import {
+  formatStemJobFailure,
+  hasStemJobResult,
+  pollStemJob,
+  submitStemJob,
+} from "../services/stemJobService";
 import { broadcastWorshipFreelyEvent } from "../services/worshipFlowService";
+import {
+  startHapticClock,
+  stopHapticClock,
+  setHapticIntensity,
+  HAPTIC_MODES,
+} from "../services/hapticClickTrack";
+import {
+  startEnergyDetection,
+  stopEnergyDetection,
+} from "../services/congregationEnergy";
+import {
+  startPad,
+  stopPad,
+  keyFromWaveformData,
+} from "../services/spontaneousPad";
 import {
   buildJumpTargets,
   buildTransientMarkers,
@@ -52,18 +80,33 @@ import {
   downsamplePeaks,
   normalizeWaveformPeaks,
   processPeaksForDisplay,
+  quantizedJumpTarget,
   TRANSITION_MODES,
 } from "../services/wavePipelineEngine";
+import { evaluateJumpSafety } from "../services/livePerformancePolicy";
 import { useResponsive } from "../utils/responsive";
-import { addOrUpdateSong, getSongs } from "../data/storage";
+import {
+  addOrUpdateSong,
+  getSettings,
+  getSongs,
+} from "../data/storage";
 import { speak } from "../services/voiceGuide";
 import { parseSectionsForWaveform } from "../utils/parseSectionsForWaveform";
 import {
   hasBackendStemEntries,
   normalizeBackendStemEntries,
 } from "../utils/stemPayload";
+import {
+  getOutputOptions,
+  makeDefaultSettings,
+  OUTPUT_COLORS,
+  ROUTING_TRACKS,
+} from "../data/models";
 
 // ── Chromatic notes ───────────────────────────────────────────────────────────
+const VOCAL_ASSIGNMENTS_PREFIX = "um/vocals/v1";
+const LIGHT_CUES_PREFIX = "um/lightcues/v1";
+
 const CHROMATIC_NOTES = [
   "C",
   "C#",
@@ -200,6 +243,14 @@ function applyMarkerType(marker, typeId) {
   };
 }
 
+function pickFirstResolvedUrl(...values) {
+  for (const value of values) {
+    const trimmed = String(value || "").trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
+}
+
 function normalizeMarkersForStorage(list) {
   return (list || [])
     .map((m, idx) => {
@@ -297,6 +348,17 @@ function buildMarkersFromAnalysisCues(cues = [], durationSec = 0) {
 }
 
 const LOAD_STEPS = ["Initializing audio", "Loading stems", "Ready"];
+const CINESTAGE_ANALYSIS_STEPS = [
+  "Reading arrangement",
+  "Building waveform",
+  "Saving rehearsal analysis",
+];
+const CINESTAGE_STEM_STEPS = [
+  "Submitting job",
+  "Waiting in queue",
+  "Separating stems",
+  "Reloading rehearsal audio",
+];
 const AUTOMATION_EVENT_TYPES = ["MIDI", "LIGHTS", "LYRICS"];
 const SAFETY_MODES = ["strict", "guided", "tech"];
 const SONG_TRANSITION_MODES = [
@@ -1108,6 +1170,16 @@ export default function RehearsalScreen({ route, navigation }) {
 
   // ── Always load the full/fresh song from storage so analysis data is present ─
   const [song, setSong] = useState(songParam);
+  const [songRouting, setSongRouting] = useState(songParam?.routing || {});
+  const [routingExpanded, setRoutingExpanded] = useState(false);
+  const [routingPicker, setRoutingPicker] = useState({ open: false, key: null });
+  const [routingSettings, setRoutingSettings] = useState(() => {
+    const defaults = makeDefaultSettings();
+    return {
+      interfaceChannels: defaults.routing.interfaceChannels,
+      global: { ...defaults.routing.global },
+    };
+  });
   useEffect(() => {
     if (!songParam?.id) return;
     getSongs().then((all) => {
@@ -1119,6 +1191,36 @@ export default function RehearsalScreen({ route, navigation }) {
       }
     }).catch(() => {});
   }, [songParam?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setSongRouting(song?.routing || {});
+  }, [song?.id, song?.updatedAt]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const settings = await getSettings();
+        const defaults = makeDefaultSettings();
+        if (!alive) return;
+        setRoutingSettings({
+          interfaceChannels:
+            settings?.routing?.interfaceChannels ??
+            defaults.routing.interfaceChannels,
+          global: {
+            ...defaults.routing.global,
+            ...(settings?.routing?.global || {}),
+          },
+        });
+      } catch {
+        // Fall back to defaults already in state.
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Full setlist — if passed, use it; otherwise fall back to just current song
   const setlist =
@@ -1181,6 +1283,16 @@ export default function RehearsalScreen({ route, navigation }) {
   const [worshipLoopActive, setWorshipLoopActive] = useState(false);
   const sectionTapCountRef = useRef({ label: null, count: 0, time: 0 });
 
+  // ── Haptic Click Track ───────────────────────────────────────────────────
+  const [hapticMode, setHapticMode] = useState(HAPTIC_MODES.OFF);
+  const hapticClockRef = useRef(null);
+
+  // ── Congregation Energy ──────────────────────────────────────────────────
+  const [energyLevel, setEnergyLevel] = useState(null); // 0-100
+  const [energyTrend, setEnergyTrend] = useState(null); // 'rising'|'falling'|'stable'
+  const [energySuggestion, setEnergySuggestion] = useState(null); // { message, type }
+  const energyStopRef = useRef(null);
+
   // ── Predictive Flow AI ───────────────────────────────────────────────────
   const sectionRepeatCountRef = useRef({ label: null, count: 0 });
   const [aiSuggestion, setAiSuggestion] = useState(null); // { section, reason }
@@ -1188,72 +1300,538 @@ export default function RehearsalScreen({ route, navigation }) {
   // ── CineStage Pipeline Analysis ─────────────────────────────────────────
   const [csAnalysis, setCsAnalysis]       = useState(null);   // full pipeline result
   const [csAnalyzing, setCsAnalyzing]     = useState(false);
+  const [waveformRefreshing, setWaveformRefreshing] = useState(false);
+  const [stemSeparating, setStemSeparating] = useState(false);
   const [cueGenerating, setCueGenerating] = useState(false);
+  const [cineStageFlow, setCineStageFlow] = useState({
+    visible: false,
+    title: "CineStage™ is processing",
+    subtitle: "",
+    steps: CINESTAGE_ANALYSIS_STEPS,
+    currentStepIndex: 0,
+    progress: 0,
+  });
+  const rehearsalWaveformPointCount = R.isAnyTablet ? 1280 : 480;
+
+  const openCineStageFlow = useCallback((config = {}) => {
+    setCineStageFlow({
+      visible: true,
+      title: config.title || "CineStage™ is processing",
+      subtitle: config.subtitle || "Wait — we’ll let you know when it’s done.",
+      steps: config.steps || CINESTAGE_ANALYSIS_STEPS,
+      currentStepIndex: config.currentStepIndex ?? 0,
+      progress: config.progress ?? 0,
+    });
+  }, []);
+
+  const updateCineStageFlow = useCallback((patch = {}) => {
+    setCineStageFlow((prev) => ({
+      ...prev,
+      visible: true,
+      ...patch,
+    }));
+  }, []);
+
+  const closeCineStageFlow = useCallback(() => {
+    setCineStageFlow((prev) => ({
+      ...prev,
+      visible: false,
+      progress: 0,
+      currentStepIndex: 0,
+      subtitle: "",
+    }));
+  }, []);
+
+  const resolveSongSourceUrl = useCallback((candidate = song) => (
+    pickFirstResolvedUrl(
+      candidate?.sourceUrl,
+      candidate?.audioUrl,
+      candidate?.url,
+      candidate?.audio_url,
+      candidate?.youtubeLink,
+      candidate?.latestStemsJob?.input?.fileUrl,
+      candidate?.latestStemsJob?.input?.sourceUrl,
+      candidate?.latestStemsJob?.sourceUrl,
+      candidate?.latestStemsJob?.result?.sourceUrl,
+    )
+  ), [song]);
+
+  const persistSongPatch = useCallback(async (patch) => {
+    const nextSong = {
+      ...song,
+      ...patch,
+      id: song?.id || song?.songId,
+    };
+    return addOrUpdateSong(nextSong);
+  }, [song]);
+
+  const updateSongRouting = useCallback(async (trackKey, nextOutput) => {
+    const normalizedTrackKey = String(trackKey || "").trim();
+    if (!normalizedTrackKey) return;
+
+    const cleanedRouting = {
+      ...(songRouting || {}),
+      [normalizedTrackKey]: nextOutput === "Use Global" ? null : nextOutput,
+    };
+
+    Object.keys(cleanedRouting).forEach((key) => {
+      if (!cleanedRouting[key]) delete cleanedRouting[key];
+    });
+
+    setSongRouting(cleanedRouting);
+
+    try {
+      const savedSong = await persistSongPatch({ routing: cleanedRouting });
+      setSong(savedSong);
+    } catch (error) {
+      Alert.alert("Routing Error", String(error?.message || error));
+    }
+  }, [persistSongPatch, songRouting]);
+
+  const syncStemResultToCloud = useCallback((nextSong, finalJob, detectedKey, detectedBpm) => {
+    const result = finalJob?.result || {};
+    if (!nextSong?.id || !result?.stems || Object.keys(result.stems).length === 0) return;
+
+    fetch(`${SYNC_URL}/sync/stems-store`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({
+        songId: nextSong.id,
+        title: nextSong.title || "Untitled Song",
+        stems: result.stems,
+        harmonies: result.harmonies || {},
+        key: detectedKey || nextSong.key || nextSong.originalKey || null,
+        bpm: detectedBpm || nextSong.bpm || null,
+        jobId: finalJob.id || finalJob.job_id || "",
+      }),
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!song?.analysis) return;
+    setCsAnalysis((prev) => ({
+      ...(prev || {}),
+      ...song.analysis,
+      waveformPeaks:
+        song.analysis?.waveformPeaks ||
+        song.analysis?.peaks ||
+        prev?.waveformPeaks ||
+        null,
+      peaks:
+        song.analysis?.peaks ||
+        song.analysis?.waveformPeaks ||
+        prev?.peaks ||
+        null,
+    }));
+  }, [
+    song?.id,
+    song?.analysis?.analyzedAt,
+    song?.analysis?.waveformSourceUrl,
+    song?.analysis?.waveformPointCount,
+  ]);
 
   const runCineStageAnalysis = useCallback(async () => {
-    const audioUrl = song?.audioUrl || song?.url || song?.audio_url || song?.sourceUrl || song?.youtubeLink;
+    const audioUrl = resolveSongSourceUrl(song);
     if (!audioUrl) {
       Alert.alert('CineStage™', 'No audio URL found for this song.\nAttach an audio file first.');
       return;
     }
+
+    const existingWaveformPeaks =
+      song?.analysis?.waveformPeaks ||
+      song?.analysis?.peaks ||
+      null;
+    const canReuseWaveform = Boolean(
+      existingWaveformPeaks &&
+      song?.analysis?.waveformSourceUrl === audioUrl &&
+      Number(song?.analysis?.waveformPointCount || 0) >= rehearsalWaveformPointCount,
+    );
+
     try {
       setCsAnalyzing(true);
-      const { analyzeAudio, analyzeWaveform } = await import('../services/cinestage/client');
-      const result = await analyzeAudio({
-        file_url:   audioUrl,
-        title:      song?.title || 'Untitled',
-        song_id:    song?.id   || song?.songId || undefined,
-        n_sections: 6,
+      openCineStageFlow({
+        title: "CineStage Smart Analyze",
+        subtitle: "Reading arrangement and building waveform data for rehearsal…",
+        steps: CINESTAGE_ANALYSIS_STEPS,
+        currentStepIndex: 0,
+        progress: 8,
       });
-      setCsAnalysis(result);
-      if (result.bpm) setAdaptedBpm(result.bpm);
 
-      // Fetch real waveform peaks from visual engine if not included in analysis
-      let waveformPeaks = result.waveformPeaks || result.peaks || null;
-      if (!waveformPeaks && (song?.id || audioUrl)) {
-        try {
-          const waveResult = await analyzeWaveform({
-            file_url:      audioUrl,
-            song_id:       song?.id || song?.songId || undefined,
-            title:         song?.title || 'Untitled',
-            waveform_points: R.isAnyTablet ? 1280 : 480,
-          });
-          waveformPeaks = waveResult?.analysis?.waveformPeaks || waveResult?.peaks || waveResult?.waveformPeaks || null;
-        } catch { /* non-fatal — waveform is visual only */ }
+      const { analyzeAudio } = await import('../services/cinestage/client');
+      const [analysisResult, waveformResult] = await Promise.allSettled([
+        analyzeAudio({
+          file_url: audioUrl,
+          title: song?.title || 'Untitled',
+          song_id: song?.id || song?.songId || undefined,
+          n_sections: 6,
+        }),
+        canReuseWaveform
+          ? Promise.resolve({
+              sections: song?.analysis?.sections || [],
+              cues: song?.analysis?.cues || [],
+              duration_ms: song?.analysis?.duration_ms || null,
+              waveformPeaks: existingWaveformPeaks,
+              peaks: existingWaveformPeaks,
+              cached: true,
+            })
+          : getWaveformAnalysis(
+              song?.id || song?.songId || null,
+              audioUrl,
+              {
+                title: song?.title || 'Untitled',
+                waveformPoints: rehearsalWaveformPointCount,
+                nSections: 6,
+                includeCues: true,
+                force: true,
+              }
+            ),
+      ]);
+
+      if (analysisResult.status === "rejected" && waveformResult.status === "rejected") {
+        throw analysisResult.reason || waveformResult.reason || new Error("CineStage analysis failed.");
       }
 
-      // Persist full analysis (including peaks) so waveform survives screen navigation
-      if (song?.id || song?.songId) {
-        try {
-          await addOrUpdateSong({
-            ...song,
-            id: song.id || song.songId,
-            bpm: result.bpm || song?.bpm,
-            originalKey: result.key || song?.originalKey,
-            analysis: {
-              sections:          result.sections,
-              chords:            result.chords,
-              cues:              result.cues,
-              beats_ms:          result.beats_ms,
-              performance_graph: result.performance_graph,
-              duration_ms:       result.duration_ms,
-              waveformPeaks:     waveformPeaks,
-              peaks:             waveformPeaks,
-              analyzedAt:        new Date().toISOString(),
-            },
-          });
-          // Merge peaks into live csAnalysis state so waveform renders immediately
-          if (waveformPeaks) {
-            setCsAnalysis(prev => ({ ...result, ...prev, waveformPeaks, peaks: waveformPeaks }));
-          }
-        } catch { /* non-fatal */ }
+      updateCineStageFlow({
+        currentStepIndex: 1,
+        progress: 58,
+        subtitle: canReuseWaveform
+          ? "Using the cached rehearsal waveform and merging fresh arrangement data…"
+          : "Waveform analysis is complete — saving results to rehearsal…",
+      });
+
+      const analysisPayload = analysisResult.status === "fulfilled" ? (analysisResult.value || {}) : {};
+      const waveformPayload = waveformResult.status === "fulfilled" ? (waveformResult.value || {}) : {};
+      const waveformPeaks =
+        analysisPayload?.waveformPeaks ||
+        analysisPayload?.peaks ||
+        waveformPayload?.analysis?.waveformPeaks ||
+        waveformPayload?.analysis?.peaks ||
+        waveformPayload?.waveformPeaks ||
+        waveformPayload?.peaks ||
+        existingWaveformPeaks ||
+        null;
+      const mergedSections =
+        (Array.isArray(analysisPayload?.sections) && analysisPayload.sections.length > 0)
+          ? analysisPayload.sections
+          : (Array.isArray(waveformPayload?.sections) && waveformPayload.sections.length > 0)
+            ? waveformPayload.sections
+            : song?.analysis?.sections || [];
+      const mergedCues =
+        (Array.isArray(analysisPayload?.cues) && analysisPayload.cues.length > 0)
+          ? analysisPayload.cues
+          : (Array.isArray(waveformPayload?.cues) && waveformPayload.cues.length > 0)
+            ? waveformPayload.cues
+            : song?.analysis?.cues;
+      const durationMs =
+        waveformPayload?.duration_ms ||
+        analysisPayload?.duration_ms ||
+        song?.analysis?.duration_ms ||
+        null;
+      const nextAnalysis = {
+        ...(song?.analysis || {}),
+        sections: mergedSections,
+        chords: analysisPayload?.chords || song?.analysis?.chords,
+        cues: mergedCues,
+        beats_ms: analysisPayload?.beats_ms || song?.analysis?.beats_ms,
+        performance_graph:
+          analysisPayload?.performance_graph ||
+          song?.analysis?.performance_graph,
+        duration_ms: durationMs,
+        waveformPeaks,
+        peaks: waveformPeaks,
+        waveformSourceUrl: audioUrl,
+        waveformPointCount: rehearsalWaveformPointCount,
+        analyzedAt: new Date().toISOString(),
+      };
+
+      updateCineStageFlow({
+        currentStepIndex: 2,
+        progress: 88,
+        subtitle: "Saving CineStage analysis into the rehearsal song…",
+      });
+
+      await persistSongPatch({
+        bpm: analysisPayload?.bpm || song?.bpm,
+        originalKey: analysisPayload?.key || song?.originalKey,
+        analysis: nextAnalysis,
+      });
+
+      setCsAnalysis((prev) => ({
+        ...(prev || {}),
+        ...analysisPayload,
+        ...nextAnalysis,
+        waveformPeaks,
+        peaks: waveformPeaks,
+      }));
+
+      if (analysisPayload?.bpm) {
+        setAdaptedBpm(analysisPayload.bpm);
+        setBpmInput(String(Math.round(analysisPayload.bpm)));
+      }
+
+      if (mergedSections.length > 0 && !song?.role_content?.lead_vocal?.cues) {
+        setTimeout(() => handleGenerateAllRoleCues(), 300);
       }
     } catch (e) {
       Alert.alert('CineStage™ Error', String(e?.message || e));
     } finally {
+      closeCineStageFlow();
       setCsAnalyzing(false);
     }
-  }, [song, R.isAnyTablet]);
+  }, [
+    song,
+    closeCineStageFlow,
+    handleGenerateAllRoleCues,
+    openCineStageFlow,
+    persistSongPatch,
+    rehearsalWaveformPointCount,
+    resolveSongSourceUrl,
+    updateCineStageFlow,
+  ]);
+
+  const handleRefreshWaveformAnalysis = useCallback(async () => {
+    const audioUrl = resolveSongSourceUrl(song);
+    if (!audioUrl) {
+      Alert.alert('CineStage™', 'No audio URL found for this song.\nAttach an audio file first.');
+      return;
+    }
+
+    try {
+      setWaveformRefreshing(true);
+      openCineStageFlow({
+        title: "CineStage Waveform",
+        subtitle: "Refreshing the waveform pipeline for this rehearsal song…",
+        steps: [
+          "Requesting waveform",
+          "Processing peaks",
+          "Saving rehearsal waveform",
+        ],
+        currentStepIndex: 0,
+        progress: 12,
+      });
+
+      const result = await getWaveformAnalysis(
+        song?.id || song?.songId || null,
+        audioUrl,
+        {
+          title: song?.title || 'Untitled',
+          waveformPoints: rehearsalWaveformPointCount,
+          nSections: 6,
+          includeCues: true,
+          force: true,
+        }
+      );
+
+      updateCineStageFlow({
+        currentStepIndex: 1,
+        progress: 62,
+        subtitle: "Waveform peaks are ready — saving them into rehearsal…",
+      });
+
+      const waveformPeaks =
+        result?.waveformPeaks ||
+        result?.peaks ||
+        null;
+      const nextAnalysis = {
+        ...(song?.analysis || {}),
+        sections:
+          (Array.isArray(result?.sections) && result.sections.length > 0)
+            ? result.sections
+            : song?.analysis?.sections || [],
+        cues:
+          (Array.isArray(result?.cues) && result.cues.length > 0)
+            ? result.cues
+            : song?.analysis?.cues,
+        duration_ms:
+          result?.duration_ms ||
+          song?.analysis?.duration_ms ||
+          null,
+        waveformPeaks,
+        peaks: waveformPeaks,
+        waveformSourceUrl: audioUrl,
+        waveformPointCount: rehearsalWaveformPointCount,
+        analyzedAt: new Date().toISOString(),
+      };
+
+      updateCineStageFlow({
+        currentStepIndex: 2,
+        progress: 90,
+        subtitle: "Saving waveform data for this rehearsal song…",
+      });
+
+      await persistSongPatch({ analysis: nextAnalysis });
+      setCsAnalysis((prev) => ({
+        ...(prev || {}),
+        ...nextAnalysis,
+        waveformPeaks,
+        peaks: waveformPeaks,
+      }));
+    } catch (e) {
+      Alert.alert('Waveform Error', String(e?.message || e));
+    } finally {
+      closeCineStageFlow();
+      setWaveformRefreshing(false);
+    }
+  }, [
+    song,
+    closeCineStageFlow,
+    openCineStageFlow,
+    persistSongPatch,
+    rehearsalWaveformPointCount,
+    resolveSongSourceUrl,
+    updateCineStageFlow,
+  ]);
+
+  const handleRunStemJob = useCallback(async () => {
+    const audioUrl = resolveSongSourceUrl(song);
+    if (!audioUrl) {
+      Alert.alert('CineStage™', 'No audio URL found for this song.\nAttach an audio file first.');
+      return;
+    }
+
+    try {
+      setStemSeparating(true);
+      openCineStageFlow({
+        title: "CineStage Stem Job",
+        subtitle: "Submitting this rehearsal song for stem separation…",
+        steps: CINESTAGE_STEM_STEPS,
+        currentStepIndex: 0,
+        progress: 8,
+      });
+
+      const { job, fileUrl: resolvedSourceUrl } = await submitStemJob({
+        sourceUrl: audioUrl,
+        title: song?.title || "Untitled",
+        songId: song?.id || song?.songId,
+        separateHarmonies: true,
+        voiceCount: 3,
+        enhanceInstrumentStems: true,
+      });
+
+      updateCineStageFlow({
+        currentStepIndex: 1,
+        progress: 18,
+        subtitle: "Stem job is queued — waiting for CineStage to pick it up…",
+      });
+
+      const finalJob = await pollStemJob(job.id, {
+        initialJob: job,
+        onUpdate: (nextJob, { polls }) => {
+          const status = String(nextJob?.status || "").toUpperCase();
+          if (status === "PENDING") {
+            updateCineStageFlow({
+              currentStepIndex: 1,
+              progress: Math.min(36, 18 + polls * 2),
+              subtitle: "Stem job is queued — waiting for CineStage to pick it up…",
+            });
+            return;
+          }
+
+          const stageName =
+            nextJob?.result?.processingStage ||
+            nextJob?.result?.processing_stage ||
+            "";
+          updateCineStageFlow({
+            currentStepIndex: 2,
+            progress: Math.min(88, 42 + polls * 1.2),
+            subtitle: stageName
+              ? `Separating stems — ${stageName}…`
+              : "Separating stems…",
+          });
+        },
+      });
+
+      if (!hasStemJobResult(finalJob)) {
+        throw new Error(formatStemJobFailure(finalJob));
+      }
+
+      updateCineStageFlow({
+        currentStepIndex: 3,
+        progress: 92,
+        subtitle: "Rehearsal is reloading the new stem bundle…",
+      });
+
+      const result = finalJob?.result || {};
+      const normalizedWaveform = normalizeWaveformAnalysis(result, {
+        audioUrl: resolvedSourceUrl || audioUrl,
+        waveformPoints:
+          song?.analysis?.waveformPointCount || rehearsalWaveformPointCount,
+      });
+      const detectedKey =
+        finalJob?.key ||
+        result?.key ||
+        result?.original_key ||
+        song?.key ||
+        song?.originalKey ||
+        "";
+      const detectedBpm =
+        finalJob?.bpm ||
+        result?.bpm ||
+        result?.tempo ||
+        song?.bpm ||
+        null;
+      const durationMs =
+        normalizedWaveform.duration_ms ||
+        song?.analysis?.duration_ms ||
+        null;
+      const nextAnalysis = {
+        ...(song?.analysis || {}),
+        sections:
+          (Array.isArray(normalizedWaveform.sections) && normalizedWaveform.sections.length > 0)
+            ? normalizedWaveform.sections
+            : song?.analysis?.sections || [],
+        cues:
+          (Array.isArray(normalizedWaveform.cues) && normalizedWaveform.cues.length > 0)
+            ? normalizedWaveform.cues
+            : song?.analysis?.cues,
+        duration_ms: durationMs,
+        waveformPeaks: normalizedWaveform.waveformPeaks || song?.analysis?.waveformPeaks || song?.analysis?.peaks || null,
+        peaks: normalizedWaveform.peaks || song?.analysis?.waveformPeaks || song?.analysis?.peaks || null,
+        waveformSourceUrl: resolvedSourceUrl || audioUrl,
+        waveformPointCount:
+          song?.analysis?.waveformPointCount || rehearsalWaveformPointCount,
+        analyzedAt: song?.analysis?.analyzedAt || new Date().toISOString(),
+      };
+
+      const savedSong = await persistSongPatch({
+        sourceUrl: resolvedSourceUrl || audioUrl,
+        originalKey: song?.originalKey || detectedKey,
+        key: detectedKey || song?.key || song?.originalKey,
+        bpm: detectedBpm || song?.bpm,
+        latestStemsJob: finalJob,
+        analysis: nextAnalysis,
+      });
+
+      syncStemResultToCloud(savedSong, finalJob, detectedKey, detectedBpm);
+      setCsAnalysis((prev) => ({
+        ...(prev || {}),
+        ...nextAnalysis,
+        waveformPeaks: nextAnalysis.waveformPeaks,
+        peaks: nextAnalysis.peaks,
+      }));
+      setAudioLoaded(false);
+      setTracks([]);
+      setCustomTracks([]);
+      setLoading(true);
+      setLoadStep(0);
+      setLoadProgress(0);
+      setSong(savedSong);
+    } catch (e) {
+      Alert.alert("Stem Job Error", String(e?.message || e));
+    } finally {
+      closeCineStageFlow();
+      setStemSeparating(false);
+    }
+  }, [
+    song,
+    closeCineStageFlow,
+    openCineStageFlow,
+    persistSongPatch,
+    rehearsalWaveformPointCount,
+    resolveSongSourceUrl,
+    syncStemResultToCloud,
+    updateCineStageFlow,
+  ]);
 
   const autoAnalysisSongRef = useRef(null);
   useEffect(() => {
@@ -1303,6 +1881,42 @@ export default function RehearsalScreen({ route, navigation }) {
       setCueGenerating(false);
     }
   }, [song, userRole, csAnalysis]);
+
+  const handleGenerateAllRoleCues = useCallback(async () => {
+    const sections = song?.analysis?.sections || csAnalysis?.sections || [];
+    if (!sections.length) {
+      Alert.alert('CineStage™', 'Run Smart Analyze first to get song sections.');
+      return;
+    }
+    setCueGenerating(true);
+    try {
+      const { generateCues } = await import('../services/cinestage/client');
+      const ALL_ROLES = [
+        'worship_leader', 'lead_vocal', 'bgv_1', 'bgv_2',
+        'keyboard', 'electric_guitar', 'bass', 'drums',
+        'music_director', 'foh_engineer'
+      ];
+      const results = await Promise.allSettled(
+        ALL_ROLES.map(role => generateCues({ sections, role }))
+      );
+      const role_content = { ...(song?.role_content || {}) };
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value) {
+          const rk = ALL_ROLES[i].toLowerCase().replace(/[\s-]/g, '_');
+          const cueText = r.value?.cues || r.value?.text || r.value?.content || (typeof r.value === 'string' ? r.value : '');
+          if (cueText) {
+            role_content[rk] = { ...(role_content[rk] || {}), cues: cueText };
+          }
+        }
+      });
+      await addOrUpdateSong({ ...song, id: song?.id || song?.songId, role_content });
+      Alert.alert('✅ Done', 'Role cues generated for all instruments.');
+    } catch (e) {
+      Alert.alert('Error', String(e?.message || e));
+    } finally {
+      setCueGenerating(false);
+    }
+  }, [song, csAnalysis]);
 
   const handleGenerateRehearsalPreset = useCallback(async () => {
     setRehearsalPresetLoading(true);
@@ -1422,6 +2036,13 @@ export default function RehearsalScreen({ route, navigation }) {
     waveformPeaksRaw,
     R.isAnyTablet ? 1280 : 480,
   );
+  const cineStageSourceUrl = resolveSongSourceUrl(song);
+  const hasWaveformAnalysis = Boolean(
+    (Array.isArray(waveformPeaksRaw) && waveformPeaksRaw.length > 0) ||
+    (Array.isArray(waveformPeaksRaw?.peaks) && waveformPeaksRaw.peaks.length > 0),
+  );
+  const hasStemBundle = hasStemJobResult(song?.latestStemsJob);
+  const stemJobStatus = String(song?.latestStemsJob?.status || "").toUpperCase();
 
   // Role cue for waveform display
   const waveRoleCue = (() => {
@@ -1450,7 +2071,7 @@ export default function RehearsalScreen({ route, navigation }) {
   const markerSelectionCount = markerSelectionIds.length;
   const markerSelectionType = (() => {
     if (markerSelectionIds.length === 0) return null;
-    const map = new Map(markers.map((m) => [m.id, m]));
+    const map = new Map((Array.isArray(markers) ? markers : []).map((m) => [m.id, m]));
     const types = markerSelectionIds
       .map((id) => map.get(id)?.type)
       .filter(Boolean);
@@ -1527,7 +2148,7 @@ export default function RehearsalScreen({ route, navigation }) {
       const dur = await audioEngine.getDuration();
 
       if (loopEnabled && loopMarkerId) {
-        const loopMarker = markers.find((marker) => marker.id === loopMarkerId);
+        const loopMarker = Array.isArray(markers) ? markers.find((marker) => marker.id === loopMarkerId) : null;
         if (
           loopMarker &&
           pos >= loopMarker.end - 0.03 &&
@@ -1800,14 +2421,103 @@ export default function RehearsalScreen({ route, navigation }) {
     return () => clearInterval(id);
   }, [nextSong?.id, loading]);
 
-  // Load vocal assignments from AsyncStorage if not passed via params
+  // ── Haptic click track — starts with beats_ms when playing ───────────────
+  useEffect(() => {
+    const beats = song?.analysis?.beats_ms;
+    if (!beats?.length || hapticMode === HAPTIC_MODES.OFF) {
+      if (hapticClockRef.current) {
+        hapticClockRef.current.stop();
+        hapticClockRef.current = null;
+      }
+      return;
+    }
+    if (isPlaying) {
+      hapticClockRef.current = startHapticClock({
+        beats_ms: beats,
+        bpm: adaptedBpm,
+        mode: hapticMode,
+        startOffsetMs: Math.round(position * 1000),
+      });
+    } else if (hapticClockRef.current) {
+      hapticClockRef.current.stop();
+      hapticClockRef.current = null;
+    }
+    return () => {
+      if (hapticClockRef.current) {
+        hapticClockRef.current.stop();
+        hapticClockRef.current = null;
+      }
+    };
+  }, [isPlaying, hapticMode, song?.analysis?.beats_ms, adaptedBpm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Congregation energy — admin-only, runs while playing ─────────────────
+  useEffect(() => {
+    if (!isAdmin || !isPlaying) {
+      if (energyStopRef.current) {
+        energyStopRef.current();
+        energyStopRef.current = null;
+        setEnergyLevel(null);
+        setEnergyTrend(null);
+      }
+      return;
+    }
+    let alive = true;
+    startEnergyDetection({
+      sensitivity: 'medium',
+      onEnergyUpdate: ({ level, trend }) => {
+        if (!alive) return;
+        setEnergyLevel(level);
+        setEnergyTrend(trend);
+      },
+      onSuggestion: (suggestion) => {
+        if (!alive) return;
+        setEnergySuggestion(suggestion);
+        setTimeout(() => setEnergySuggestion(null), 8000);
+      },
+    }).then((handle) => {
+      if (!alive) { handle?.stop(); return; }
+      energyStopRef.current = handle?.stop;
+    }).catch(() => {});
+    return () => {
+      alive = false;
+      if (energyStopRef.current) {
+        energyStopRef.current();
+        energyStopRef.current = null;
+      }
+    };
+  }, [isAdmin, isPlaying]);
+
+  // ── Spontaneous pad — auto-starts on freely mode, stops when released ────
+  useEffect(() => {
+    const padKey = keyFromWaveformData(song?.analysis || song);
+    if (worshipLoopActive && padKey) {
+      startPad({ key: padKey.key, mode: padKey.mode, volume: 0.55, fadeInMs: 3000 }).catch(() => {});
+    } else {
+      stopPad({ fadeOutMs: 3500 }).catch(() => {});
+    }
+    return () => { stopPad({ fadeOutMs: 0 }).catch(() => {}); };
+  }, [worshipLoopActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load vocal assignments: params → cloud → AsyncStorage fallback
   useEffect(() => {
     if (!serviceId || vocalAssignmentsParam) return;
-    AsyncStorage.getItem(`um/vocals/v1/${serviceId}`)
-      .then((raw) => {
+    (async () => {
+      try {
+        const cloudData = await cloudGetVocalAssignments(serviceId);
+        if (cloudData && Object.keys(cloudData).length > 0) {
+          setVocalAssignments(cloudData);
+          return;
+        }
+      } catch {
+        // offline or not found — fall through to local
+      }
+      try {
+        const raw = await getScopedRecordItem(VOCAL_ASSIGNMENTS_PREFIX, serviceId);
         if (raw) setVocalAssignments(JSON.parse(raw));
-      })
-      .catch(() => {});
+      } catch {
+        // ignore
+      }
+    })();
   }, [serviceId]);
 
   // ── Load persisted rehearsal markers for this song ─────────────────────
@@ -1915,7 +2625,7 @@ export default function RehearsalScreen({ route, navigation }) {
   // ── Load light cues for this song ────────────────────────────────────────
   useEffect(() => {
     if (!song?.id) return;
-    AsyncStorage.getItem(`um/lightcues/${song.id}`)
+    getScopedRecordItem(LIGHT_CUES_PREFIX, song.id)
       .then((raw) => {
         if (raw)
           try {
@@ -2093,14 +2803,29 @@ export default function RehearsalScreen({ route, navigation }) {
   }
 
   async function handleSeek(seconds) {
-    await audioEngine.seek(seconds);
-    setPosition(seconds);
+    const safeBpm = Number(bpmInput) || song?.bpm || 120;
+    // Apply launch quantization (IMMEDIATE / BEAT / BAR)
+    const quantized = quantizedJumpTarget(seconds, launchQuantization, safeBpm);
+    // Safety gate — blocks long-range jumps in strict mode, etc.
+    const safety = evaluateJumpSafety(
+      { safetyPolicy: { mode: safetyMode } },
+      position,
+      quantized,
+    );
+    if (!safety.ok) {
+      Alert.alert("Jump Blocked", safety.reason);
+      return;
+    }
+    const target = safety.correctedTargetSec ?? quantized;
+    await audioEngine.seek(target);
+    setPosition(target);
   }
 
   async function handlePlayPause() {
     if (isPlaying) {
       await audioEngine.pause();
       stopSequence();
+      predictiveConductor.stopConductor();
       stopPolling();
       setIsPlaying(false);
     } else {
@@ -2140,6 +2865,15 @@ export default function RehearsalScreen({ route, navigation }) {
             setIsPlaying(true);
             startPolling();
             setCountInActive(false);
+
+            // Start Predictive Conductor (Voice Cues + Haptics)
+            if (song?.analysis?.worship_intelligence) {
+              predictiveConductor.startConductor({
+                analysis: song.analysis.worship_intelligence,
+                position: 0,
+                lang: "PT"
+              });
+            }
           },
         });
       } else {
@@ -2147,6 +2881,16 @@ export default function RehearsalScreen({ route, navigation }) {
         audioEngine.play();
         setIsPlaying(true);
         startPolling();
+
+        // Start Predictive Conductor (Voice Cues + Haptics)
+        if (song?.analysis?.worship_intelligence) {
+          predictiveConductor.startConductor({
+            analysis: song.analysis.worship_intelligence,
+            position: startPosition,
+            lang: "PT"
+          });
+        }
+
         scheduleCuesFromPosition({
           markers,
           position: startPosition,
@@ -2164,6 +2908,7 @@ export default function RehearsalScreen({ route, navigation }) {
 
   async function handleStop() {
     stopSequence();
+    predictiveConductor.stopConductor();
     await audioEngine.stop();
     stopPolling();
     setIsPlaying(false);
@@ -2178,7 +2923,7 @@ export default function RehearsalScreen({ route, navigation }) {
   async function armForLivePerformance() {
     try {
       setArming(true);
-      const activeLoop = markers.find((m) => m.id === loopMarkerId);
+      const activeLoop = Array.isArray(markers) ? markers.find((m) => m.id === loopMarkerId) : null;
       const history = await getArmedPipelineHistory();
       const previous = history[0] || null;
       const draftPayload = {
@@ -3319,20 +4064,18 @@ export default function RehearsalScreen({ route, navigation }) {
     const next = [...lightCues, cue].sort((a, b) => a.time - b.time);
     setLightCues(next);
     if (song?.id)
-      AsyncStorage.setItem(
-        `um/lightcues/${song.id}`,
-        JSON.stringify(next),
-      ).catch(() => {});
+      setScopedRecordItem(LIGHT_CUES_PREFIX, song.id, JSON.stringify(next)).catch(
+        () => {},
+      );
     setNewLightLabel("");
   }
   function deleteLightCue(id) {
     const next = lightCues.filter((c) => c.id !== id);
     setLightCues(next);
     if (song?.id)
-      AsyncStorage.setItem(
-        `um/lightcues/${song.id}`,
-        JSON.stringify(next),
-      ).catch(() => {});
+      setScopedRecordItem(LIGHT_CUES_PREFIX, song.id, JSON.stringify(next)).catch(
+        () => {},
+      );
   }
 
   // ── Add stem track (recording track) ────────────────────────────────────
@@ -3686,8 +4429,12 @@ export default function RehearsalScreen({ route, navigation }) {
         >
           {/* Playback Controls Group */}
           <View style={styles.tbPlaybackGroup}>
-            <TouchableOpacity style={styles.tbBtn} disabled>
-              <Text style={[styles.tbBtnText, { opacity: 0.3 }]}>⏮</Text>
+            <TouchableOpacity
+              style={[styles.tbBtn, setlistIndex <= 0 && { opacity: 0.3 }]}
+              disabled={setlistIndex <= 0}
+              onPress={() => setlistIndex > 0 && jumpToSetlistSong(setlistIndex - 1)}
+            >
+              <Text style={styles.tbBtnText}>⏮</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tbBtn} onPress={handleStop}>
               <Text style={[styles.tbBtnText, { color: "#F87171", fontSize: 10, marginTop: 2 }]}>■</Text>
@@ -3865,8 +4612,12 @@ export default function RehearsalScreen({ route, navigation }) {
             lengthSeconds={effectiveDuration}
             playheadPct={effectiveDuration > 0 ? position / effectiveDuration : 0}
             waveformPeaks={waveformPeaks}
+            hapticMap={song?.analysis?.worship_intelligence?.haptic_map || []}
+            hapticsEnabled={true}
             onSeek={(pct) => handleSeek(pct * effectiveDuration)}
+
             bpm={adaptedBpm}
+            jumpMode={launchQuantization}
             songTitle={song?.title || ''}
             sectionMarkers={sectionJumpList}
             activeSectionLabel={activeSectionLabel}
@@ -3930,6 +4681,37 @@ export default function RehearsalScreen({ route, navigation }) {
             </View>
           );
         })()}
+
+        {/* ── Haptic Click Track toggle ─────────────────────────────────────── */}
+        <View style={styles.hapticRow}>
+          <Text style={styles.hapticLabel}>Haptic Click</Text>
+          {[HAPTIC_MODES.OFF, HAPTIC_MODES.DOWNBEAT_ONLY, HAPTIC_MODES.CLICK].map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[styles.hapticBtn, hapticMode === mode && styles.hapticBtnActive]}
+              onPress={() => setHapticMode(mode)}
+            >
+              <Text style={[styles.hapticBtnText, hapticMode === mode && styles.hapticBtnTextActive]}>
+                {mode === HAPTIC_MODES.OFF ? 'Off' : mode === HAPTIC_MODES.DOWNBEAT_ONLY ? '1 only' : 'All beats'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ── Congregation Energy (admin only) ──────────────────────────────── */}
+        {isAdmin && energyLevel != null && (
+          <View style={styles.energyRow}>
+            <View style={[styles.energyBar, { width: `${energyLevel}%`, backgroundColor: energyLevel > 70 ? '#EC4899' : energyLevel > 40 ? '#F59E0B' : '#6366F1' }]} />
+            <Text style={styles.energyLabel}>
+              Room {energyLevel}%{energyTrend === 'rising' ? ' ↑' : energyTrend === 'falling' ? ' ↓' : ''}
+            </Text>
+          </View>
+        )}
+        {isAdmin && energySuggestion && (
+          <View style={styles.energySuggestion}>
+            <Text style={styles.energySuggestionText}>{energySuggestion.message}</Text>
+          </View>
+        )}
 
         {/* ── Stem Mixer ────────────────────────────────────────────────────── */}
         {filteredTracks.length > 0 && (() => {
@@ -4281,47 +5063,220 @@ export default function RehearsalScreen({ route, navigation }) {
             </View>
           </View>
 
-          {/* Actions */}
           <View style={styles.settingsDivider} />
-          <Text style={styles.settingsSectionLabel}>ACTIONS</Text>
+          <Text style={styles.settingsSectionLabel}>SONG ROUTING</Text>
+          {(() => {
+            const overrideCount = ROUTING_TRACKS.filter((track) => songRouting[track.key]).length;
+            const outputOptions = [
+              "Use Global",
+              ...getOutputOptions(routingSettings.interfaceChannels),
+            ];
+            const pickerTrack = ROUTING_TRACKS.find(
+              (track) => track.key === routingPicker.key,
+            );
 
-          <View style={styles.settingsActionsRow}>
+            return (
+              <>
+                <TouchableOpacity
+                  style={styles.songRoutingToggleRow}
+                  onPress={() => setRoutingExpanded((prev) => !prev)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={styles.songRoutingToggleLabel}>🔊 Audio Routing</Text>
+                    {overrideCount > 0 && (
+                      <View style={styles.songRoutingOverrideBadge}>
+                        <Text style={styles.songRoutingOverrideBadgeText}>
+                          {overrideCount} override{overrideCount !== 1 ? "s" : ""}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ color: "#4B5563", fontSize: 14 }}>
+                    {routingExpanded ? "∧" : "∨"}
+                  </Text>
+                </TouchableOpacity>
+
+                {routingExpanded && (
+                  <View style={styles.songRoutingCard}>
+                    {["Timing", "Instruments", "Mix"].map((group, groupIndex) => {
+                      const tracks = ROUTING_TRACKS.filter((track) => track.group === group);
+                      return (
+                        <View key={group}>
+                          {groupIndex > 0 && <View style={styles.songRoutingCardDivider} />}
+                          <Text style={styles.songRoutingGroupName}>{group}</Text>
+                          {tracks.map((track) => {
+                            const override = songRouting[track.key];
+                            const globalValue =
+                              routingSettings.global[track.key] || "Main L/R";
+                            const color = override
+                              ? OUTPUT_COLORS[override] || "#818CF8"
+                              : "#374151";
+
+                            return (
+                              <TouchableOpacity
+                                key={track.key}
+                                style={styles.songRoutingRow}
+                                onPress={() => setRoutingPicker({ open: true, key: track.key })}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={styles.songRoutingLabel}>{track.label}</Text>
+                                <View
+                                  style={[
+                                    styles.songRoutingBadge,
+                                    override && {
+                                      borderColor: `${color}55`,
+                                      backgroundColor: `${color}15`,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.songRoutingValue,
+                                      { color: override ? color : "#4B5563" },
+                                    ]}
+                                  >
+                                    {override || `Global · ${globalValue}`}
+                                  </Text>
+                                  <Text style={{ color: "#374151", fontSize: 10 }}>▾</Text>
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                <Modal
+                  visible={routingPicker.open}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setRoutingPicker({ open: false, key: null })}
+                >
+                  <Pressable
+                    style={styles.songRoutingModalOverlay}
+                    onPress={() => setRoutingPicker({ open: false, key: null })}
+                  >
+                    <View style={styles.songRoutingPickerCard}>
+                      <Text style={styles.songRoutingPickerTitle}>
+                        {pickerTrack?.label || ""}
+                      </Text>
+                      {outputOptions.map((option) => {
+                        const trackKey = routingPicker.key;
+                        const currentValue = trackKey
+                          ? songRouting[trackKey] || "Use Global"
+                          : "Use Global";
+                        const isActive = currentValue === option;
+                        const color =
+                          option === "Use Global"
+                            ? "#6B7280"
+                            : OUTPUT_COLORS[option] || "#818CF8";
+                        const globalValue = trackKey
+                          ? routingSettings.global[trackKey] || "Main L/R"
+                          : "";
+
+                        return (
+                          <TouchableOpacity
+                            key={option}
+                            style={[
+                              styles.songRoutingPickerOption,
+                              isActive && {
+                                backgroundColor: `${color}20`,
+                                borderColor: `${color}44`,
+                              },
+                            ]}
+                            onPress={() => {
+                              updateSongRouting(trackKey, option);
+                              setRoutingPicker({ open: false, key: null });
+                            }}
+                          >
+                            <View
+                              style={[
+                                styles.songRoutingPickerDot,
+                                { backgroundColor: isActive ? color : "#1F2937" },
+                              ]}
+                            />
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[
+                                  styles.songRoutingPickerText,
+                                  isActive && { color, fontWeight: "800" },
+                                ]}
+                              >
+                                {option}
+                              </Text>
+                              {option === "Use Global" && (
+                                <Text style={styles.songRoutingPickerSubtext}>
+                                  → {globalValue}
+                                </Text>
+                              )}
+                            </View>
+                            {isActive && (
+                              <Text style={{ color, fontWeight: "800", fontSize: 14 }}>
+                                ✓
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </Pressable>
+                </Modal>
+              </>
+            );
+          })()}
+
+          {/* ── CineStage AI ── */}
+          <View style={styles.settingsDivider} />
+          <Text style={styles.settingsSectionLabel}>CINESTAGE AI</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            <View style={[styles.pipelinePill, cineStageSourceUrl && styles.pipelinePillActive]}>
+              <Text style={[styles.pipelinePillText, cineStageSourceUrl && styles.pipelinePillTextActive]}>
+                Source {cineStageSourceUrl ? 'Ready' : 'Missing'}
+              </Text>
+            </View>
+            <View style={[styles.pipelinePill, hasWaveformAnalysis && styles.pipelinePillActive]}>
+              <Text style={[styles.pipelinePillText, hasWaveformAnalysis && styles.pipelinePillTextActive]}>
+                Waveform {hasWaveformAnalysis ? 'Ready' : 'Missing'}
+              </Text>
+            </View>
+            <View style={[styles.pipelinePill, hasStemBundle && styles.pipelinePillActive]}>
+              <Text style={[styles.pipelinePillText, hasStemBundle && styles.pipelinePillTextActive]}>
+                {hasStemBundle ? 'Stems Ready' : `Stems ${stemJobStatus ? stemJobStatus.toLowerCase() : 'missing'}`}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
             <TouchableOpacity
-              style={[styles.settingsActionBtn, isRecording && { borderColor: '#EF4444', backgroundColor: '#3A0A0A' }]}
-              onPress={() => { setSettingsModalVisible(false); handleRecord(); }}
+              style={[styles.cueGenBtn, { flex: 1 }]}
+              onPress={() => { setSettingsModalVisible(false); runCineStageAnalysis(); }}
+              disabled={csAnalyzing || waveformRefreshing || stemSeparating || !cineStageSourceUrl}
             >
-              <View style={[styles.tbRecordDot, isRecording && styles.tbRecordDotActive]} />
-              <Text style={[styles.settingsActionText, isRecording && { color: '#FCA5A5' }]}>
-                {isRecording ? 'REC' : armedTrackId ? 'ARMED' : 'REC'}
+              <Text style={styles.cueGenBtnText}>
+                {csAnalyzing ? '⏳ Analyzing…' : '🧠 Analyze Song'}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[styles.settingsActionBtn, lightPanelOpen && { borderColor: '#FCD34D', backgroundColor: '#1A1500' }]}
-              onPress={() => { setSettingsModalVisible(false); setLightPanelOpen((v) => !v); setMarkersPanelOpen(false); }}
+              style={[styles.cueGenBtn, { flex: 1, backgroundColor: '#1A1208', borderColor: '#F59E0B' }]}
+              onPress={() => { setSettingsModalVisible(false); handleRunStemJob(); }}
+              disabled={stemSeparating || csAnalyzing || waveformRefreshing || !cineStageSourceUrl}
             >
-              <Text style={[styles.settingsActionText, lightPanelOpen && { color: '#FCD34D' }]}>💡 LIGHTS</Text>
+              <Text style={[styles.cueGenBtnText, { color: '#FCD34D' }]}>
+                {stemSeparating ? '⏳ Stem Job…' : hasStemBundle ? '🎚 Rebuild Stems' : '🎚 Stem Job'}
+              </Text>
             </TouchableOpacity>
-
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 4 }}>
             <TouchableOpacity
-              style={styles.settingsActionBtn}
-              onPress={() => { setSettingsModalVisible(false); setAddTrackVisible(true); }}
+              style={[styles.cueGenBtn, { flex: 1, backgroundColor: '#1E1B4B', borderColor: '#6366F1' }]}
+              onPress={() => { setSettingsModalVisible(false); handleGenerateRoleCues(); }}
+              disabled={cueGenerating || !hasWaveformAnalysis}
             >
-              <Text style={styles.settingsActionText}>+ TRACK</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.settingsActionBtn, { borderColor: '#4F46E5' }]}
-              onPress={() => { setSettingsModalVisible(false); navigation.navigate('Studio', { song }); }}
-            >
-              <Text style={[styles.settingsActionText, { color: '#A5B4FC' }]}>🎛 STUDIO</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.settingsActionBtn, { borderColor: "#F59E0B", backgroundColor: "#1A1208" }]}
-              onPress={() => { setSettingsModalVisible(false); setSectionEditorVisible(true); }}
-            >
-              <Text style={[styles.settingsActionText, { color: "#FCD34D" }]}>✂ SECTIONS</Text>
+              <Text style={[styles.cueGenBtnText, { color: '#818CF8' }]}>
+                {cueGenerating ? '⏳ Generating…' : '🎯 Role Cues'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -4376,6 +5331,15 @@ export default function RehearsalScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
       </Modal>
+
+      <CineStageProcessingOverlay
+        visible={cineStageFlow.visible}
+        title={cineStageFlow.title}
+        subtitle={cineStageFlow.subtitle}
+        steps={cineStageFlow.steps}
+        currentStepIndex={cineStageFlow.currentStepIndex}
+        progress={cineStageFlow.progress}
+      />
 
     </ScrollView>
   );
@@ -5666,6 +6630,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  cueGenBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  cueGenBtnText: {
+    color: '#818CF8',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   csResultRow: {
     backgroundColor: '#052E16',
     borderRadius: 6,
@@ -5945,6 +6925,134 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     fontWeight: '700',
+  },
+  songRoutingToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 10,
+    backgroundColor: "#060D1E",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  songRoutingToggleLabel: {
+    color: "#E5E7EB",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  songRoutingOverrideBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: "#4338CA",
+    backgroundColor: "#1E1B4B",
+  },
+  songRoutingOverrideBadgeText: {
+    color: "#A5B4FC",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  songRoutingCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 12,
+    backgroundColor: "#060D1E",
+    padding: 12,
+    gap: 10,
+  },
+  songRoutingCardDivider: {
+    height: 1,
+    backgroundColor: "#1E293B",
+    marginVertical: 8,
+  },
+  songRoutingGroupName: {
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  songRoutingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 8,
+  },
+  songRoutingLabel: {
+    color: "#D1D5DB",
+    fontWeight: "700",
+    fontSize: 13,
+    flex: 1,
+  },
+  songRoutingBadge: {
+    minWidth: 126,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#020617",
+  },
+  songRoutingValue: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#9CA3AF",
+    flexShrink: 1,
+  },
+  songRoutingModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2, 6, 23, 0.82)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  songRoutingPickerCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    backgroundColor: "#0B1120",
+    padding: 16,
+  },
+  songRoutingPickerTitle: {
+    color: "#F8FAFC",
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  songRoutingPickerOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    borderRadius: 12,
+    backgroundColor: "#060D1E",
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginBottom: 8,
+  },
+  songRoutingPickerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  songRoutingPickerText: {
+    color: "#9CA3AF",
+    fontSize: 14,
+  },
+  songRoutingPickerSubtext: {
+    color: "#475569",
+    fontSize: 11,
+    marginTop: 1,
   },
   sectionEditorHint: {
     color: "#94A3B8",
@@ -6272,6 +7380,83 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     paddingBottom: 4,
+  },
+
+  // ── Haptic click track ───────────────────────────────────────────────────
+  hapticRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    marginHorizontal: 4,
+    gap: 6,
+  },
+  hapticLabel: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    marginRight: 4,
+    fontWeight: '500',
+  },
+  hapticBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  hapticBtnActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#6366F1',
+  },
+  hapticBtnText: {
+    color: '#94A3B8',
+    fontSize: 11,
+  },
+  hapticBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+
+  // ── Congregation energy ──────────────────────────────────────────────────
+  energyRow: {
+    marginTop: 6,
+    marginHorizontal: 4,
+    height: 20,
+    backgroundColor: '#1E293B',
+    borderRadius: 4,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  energyBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 4,
+    opacity: 0.5,
+  },
+  energyLabel: {
+    color: '#E2E8F0',
+    fontSize: 11,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    zIndex: 1,
+  },
+  energySuggestion: {
+    marginTop: 4,
+    marginHorizontal: 4,
+    backgroundColor: '#1E3A5F',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: '#6366F1',
+  },
+  energySuggestionText: {
+    color: '#C7D2FE',
+    fontSize: 12,
+    fontWeight: '500',
   },
 
   // ── Worship Flow compact card ────────────────────────────────────────────
