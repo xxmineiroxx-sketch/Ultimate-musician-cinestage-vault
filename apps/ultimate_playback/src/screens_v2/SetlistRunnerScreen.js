@@ -16,11 +16,22 @@ import {
   PanResponder,
   Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
-import { SYNC_URL, CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
+import { SYNC_URL, CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY, syncHeaders } from '../../config/syncConfig';
 import { sendPlaybackState, onWatchCommand, IS_WATCH_SUPPORTED } from '../services/watchBridge';
 import { getSongLookupId } from '../utils/songMedia';
+import { normalizeRoleKey } from '../utils/roleUtils';
+import {
+  startHapticClock,
+  stopHapticClock,
+  HAPTIC_MODES,
+} from '../services/hapticClickTrack';
+import {
+  startEnergyDetection,
+  stopEnergyDetection,
+} from '../services/congregationEnergy';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const SWIPE_THRESHOLD   = 60;
@@ -32,55 +43,6 @@ const AUTO_ADVANCE_DELAY = 3000;  // ms after reaching song end
 // Synth/Pad shares the same chord chart slot as Keys
 const CHART_SLOT = { 'Synth/Pad': 'Keys' };
 function chartKey(instr) { return CHART_SLOT[instr] || instr; }
-
-function normalizeRoleKey(role) {
-  const raw = String(role || '').trim();
-  if (!raw) return '';
-
-  const lower = raw.toLowerCase();
-  const aliases = {
-    leader: 'worship_leader',
-    'worship leader': 'worship_leader',
-    'music director': 'music_director',
-    'vocal lead': 'lead_vocal',
-    'lead vocal': 'lead_vocal',
-    'lead vocals': 'lead_vocal',
-    'vocal bgv': 'bgv_1',
-    'bgv 1': 'bgv_1',
-    'bgv 2': 'bgv_2',
-    'bgv 3': 'bgv_3',
-    keys: 'keyboard',
-    keyboardist: 'keyboard',
-    'synth/pad': 'synth',
-    'electric guitar': 'electric_guitar',
-    guitarist: 'electric_guitar',
-    'acoustic guitar': 'acoustic_guitar',
-    'acoustic guitarist': 'acoustic_guitar',
-    bassist: 'bass',
-    drummer: 'drums',
-    vocalist: 'lead_vocal',
-    sound: 'sound_tech',
-    'sound tech': 'sound_tech',
-    'sound technician': 'sound_tech',
-    'sound engineer': 'sound_tech',
-    'foh engineer': 'foh_engineer',
-    'front of house': 'foh_engineer',
-    'monitor engineer': 'monitor_engineer',
-    'stream engineer': 'stream_engineer',
-    media: 'media',
-    'media tech': 'media_tech',
-    'media operator': 'media',
-    'slide operator': 'slides',
-    'slides operator': 'slides',
-    slides: 'slides',
-    projection: 'projection',
-    'screen operator': 'screen_operator',
-    visuals: 'visual',
-    graphics: 'graphics',
-  };
-
-  return aliases[lower] || lower.replace(/\s+/g, '_');
-}
 
 const ROLE_TO_INSTRUMENT = {
   keyboard:        'Keys',
@@ -102,6 +64,7 @@ const CHART_INSTRUMENTS = ['Keys', 'Acoustic Guitar', 'Electric Guitar', 'Bass',
 
 const SOUND_TECH_ROLES = new Set(['sound_tech', 'foh_engineer', 'monitor_engineer', 'stream_engineer']);
 const MEDIA_ROLES = new Set(['media', 'media_tech', 'slides', 'slide_operator', 'projection', 'screen_operator', 'visual', 'graphics']);
+const LEADER_ROLES = new Set(['worship_leader', 'music_director', 'md', 'admin', 'leader']);
 
 const DRUM_PATTERNS = [
   { label: 'Driving',   text: 'Driving — K on 1&3, S on 2&4, HH 8ths' },
@@ -234,6 +197,76 @@ function parseSections(text) {
   return sections;
 }
 
+// ── Compute active section label from scroll position ────────────────────────
+// Uses line-index proportion (not char offset) — all lines have equal pixel
+// height in a Text block, so this is far more accurate than char counting.
+function getActiveSectionFromScroll(text, scrollTop, totalContentH) {
+  if (!text || totalContentH <= 0) return null;
+  const sections = parseSections(text);
+  if (!sections.length) return null;
+  const totalLines = text.split('\n').length || 1;
+  let active = sections[0].name;
+  for (let i = 0; i < sections.length; i++) {
+    const sectionY = (sections[i].lineIndex / totalLines) * totalContentH;
+    if (scrollTop + 60 >= sectionY) {
+      active = sections[i].name;
+    } else {
+      break;
+    }
+  }
+  return active;
+}
+
+// ── Chord transposition & capo engine ────────────────────────────────────────
+const NOTES_SHARP = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const NOTES_FLAT  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const FLAT_KEY_SET = new Set(['F','Bb','Eb','Ab','Db','Gb']);
+function noteIdx(n) {
+  const s = NOTES_SHARP.indexOf(n); return s >= 0 ? s : NOTES_FLAT.indexOf(n);
+}
+function idxToNote(i, flats) {
+  const n = ((i % 12) + 12) % 12; return flats ? NOTES_FLAT[n] : NOTES_SHARP[n];
+}
+function useFlatsForKey(key) { return FLAT_KEY_SET.has((key || '').replace(/m$/, '').trim()); }
+const CHORD_IN_LINE_RE = /[A-G][#b]?(m|M|maj|min|dim|aug|sus[24]?|add|dom)?[0-9]?(\/[A-G][#b]?)?/g;
+const CHORD_TOKEN_RE = /^[A-G][#b]?(m|M|maj|min|dim|aug|sus[24]?|add|dom)?[0-9]?(\/[A-G][#b]?)?$/;
+function isChordLine(line) {
+  const t = line.trim();
+  if (!t) return false;
+  if (t.split('|').length > 2) return true;
+  const tokens = t.split(/\s+/).filter(Boolean);
+  const n = tokens.filter(tok => CHORD_TOKEN_RE.test(tok)).length;
+  return n > 0 && n / tokens.length > 0.5;
+}
+function transposeToken(chord, semitones, flats) {
+  if (semitones === 0) return chord;
+  const m = chord.match(/^([A-G][#b]?)(.*)$/);
+  if (!m) return chord;
+  const [, root, rest] = m;
+  const slashM = rest.match(/^(.*?)\/([A-G][#b]?)$/);
+  if (slashM) {
+    const [, mod, bass] = slashM;
+    return idxToNote(noteIdx(root) + semitones, flats) + mod + '/' +
+           idxToNote(noteIdx(bass) + semitones, flats);
+  }
+  return idxToNote(noteIdx(root) + semitones, flats) + rest;
+}
+function transposeChart(chart, semitones, targetKey) {
+  if (!chart || semitones === 0) return chart;
+  const flats = useFlatsForKey(targetKey);
+  return chart.split('\n').map(line =>
+    isChordLine(line) ? line.replace(CHORD_IN_LINE_RE, tok => transposeToken(tok, semitones, flats)) : line
+  ).join('\n');
+}
+function capoShapesKey(concertKey, capoFret) {
+  if (!concertKey || capoFret === 0) return concertKey || '';
+  const idx = noteIdx(concertKey.trim());
+  if (idx < 0) return concertKey;
+  return NOTES_SHARP[((idx - capoFret) % 12 + 12) % 12];
+}
+const GUITAR_INSTRUMENTS = new Set(['Acoustic Guitar', 'Electric Guitar']);
+const GUITAR_CAPO_OPTIONS = [0, 1, 2, 3, 4, 5, 7];
+
 // ── Convert http:// SYNC_URL to ws:// for WebSocket ──────────────────────────
 const WS_MIDI_URL = SYNC_URL.replace(/^http/, 'ws') + '/midi/ws';
 
@@ -244,6 +277,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const {
     songs = [],
     startIndex = 0,
+    serviceId = null,
     userRole,
     userRoles,
     vocalAssignments = {},
@@ -264,7 +298,32 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const [scrollSpeed, setScrollSpeed] = useState(1);
   const [reachedEnd, setReachedEnd]   = useState(false);
   const [transitionMode, setTransitionMode] = useState('cut'); // 'cut' | 'crossfade'
+  const [activeSectionLabel, setActiveSectionLabel] = useState(null);
+  const [guitarCapo, setGuitarCapo] = useState({}); // songId → capo fret
   const transitionModeRef = useRef('cut');
+
+  // ── Practice tracking ─────────────────────────────────────────────────────
+  const [readySongs, setReadySongs] = useState(new Set());
+  const readySongsRef   = useRef(new Set());
+  const songStartTime   = useRef(Date.now());
+  const prevSongIdxRef  = useRef(startIndex);
+
+  // ── Beat countdown state ──────────────────────────────────────────────────
+  const [countdownActive, setCountdownActive] = useState(false);
+  const [countdownBeat, setCountdownBeat]     = useState(4);
+  const pendingNextIndex  = useRef(null);
+  const countdownInterval = useRef(null);
+  const countdownScale    = useRef(new Animated.Value(1)).current;
+
+  // ── Haptic click track ───────────────────────────────────────────────────
+  const [hapticMode, setHapticMode] = useState(HAPTIC_MODES.OFF);
+  const hapticClockRef = useRef(null);
+
+  // ── Congregation energy (leader only) ────────────────────────────────────
+  const [energyLevel, setEnergyLevel] = useState(null);
+  const [energyTrend, setEnergyTrend] = useState(null);
+  const [energySuggestion, setEnergySuggestion] = useState(null);
+  const energyStopRef = useRef(null);
 
   // ── MIDI controller state ─────────────────────────────────────────────────
   const [midiConnected, setMidiConnected] = useState(false);
@@ -277,11 +336,35 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const [isLiveSession, setIsLiveSession] = useState(false);
   const perfWsRef = useRef(null);
 
+  // ── "We're Live" — Go Live broadcast ──────────────────────────────────────
+  const [goLiveToast, setGoLiveToast] = useState(false);
+  const goLiveToastTimer = useRef(null);
+
+  const handleGoLive = useCallback(async () => {
+    const currentSong = songs[currentIndexRef.current];
+    const title = currentSong?.title || 'Service';
+    try {
+      await fetch(`${SYNC_URL}/sync/live-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isLive: true, title }),
+      });
+      setGoLiveToast(true);
+      clearTimeout(goLiveToastTimer.current);
+      goLiveToastTimer.current = setTimeout(() => setGoLiveToast(false), 3000);
+    } catch (_) {
+      setGoLiveToast(true);
+      clearTimeout(goLiveToastTimer.current);
+      goLiveToastTimer.current = setTimeout(() => setGoLiveToast(false), 3000);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const scrollRef     = useRef(null);
   const scrollY       = useRef(0);
   const contentH      = useRef(0);
   const viewH         = useRef(0);
   const intervalRef   = useRef(null);
+  const lastManualScrollRef = useRef(0); // timestamp of last manual scroll
   const autoAdvanceTimer = useRef(null);
   const nextPulse      = useRef(new Animated.Value(1)).current;
   const contentOpacity = useRef(new Animated.Value(1)).current;
@@ -299,6 +382,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     clearInterval(intervalRef.current);
     setAutoScroll(false);
     setReachedEnd(false);
+    setActiveSectionLabel(null);
     if (transitionModeRef.current === 'crossfade') {
       Animated.timing(contentOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
         setCurrentIndex(index);
@@ -313,23 +397,177 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     }
   }, [contentOpacity]);
 
+  // ── Haptic clock — BPM-derived beats, starts/stops with autoScroll ───────
+  useEffect(() => {
+    if (hapticMode === HAPTIC_MODES.OFF || !song) {
+      if (hapticClockRef.current) { hapticClockRef.current.stop(); hapticClockRef.current = null; }
+      return;
+    }
+    const bpm = song?.bpm || song?.tempo || 0;
+    if (!bpm) return;
+    const durationSec = song?.duration || 300;
+    const beatIntervalMs = 60000 / bpm;
+    const beats_ms = Array.from(
+      { length: Math.floor((durationSec * 1000) / beatIntervalMs) },
+      (_, i) => Math.round(i * beatIntervalMs),
+    );
+    if (autoScroll) {
+      hapticClockRef.current = startHapticClock({ beats_ms, bpm, mode: hapticMode });
+    } else if (hapticClockRef.current) {
+      hapticClockRef.current.stop();
+      hapticClockRef.current = null;
+    }
+    return () => { if (hapticClockRef.current) { hapticClockRef.current.stop(); hapticClockRef.current = null; } };
+  }, [autoScroll, hapticMode, song?.id, song?.bpm]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Congregation energy — leader role only, runs while playing ────────────
+  useEffect(() => {
+    if (!isLeaderRole || !autoScroll) {
+      if (energyStopRef.current) { energyStopRef.current(); energyStopRef.current = null; setEnergyLevel(null); setEnergyTrend(null); }
+      return;
+    }
+    let alive = true;
+    startEnergyDetection({
+      sensitivity: 'medium',
+      onEnergyUpdate: ({ level, trend }) => { if (!alive) return; setEnergyLevel(level); setEnergyTrend(trend); },
+      onSuggestion: (s) => {
+        if (!alive) return;
+        setEnergySuggestion(s);
+        setTimeout(() => setEnergySuggestion(null), 8000);
+      },
+    }).then((handle) => {
+      if (!alive) { handle?.stop(); return; }
+      energyStopRef.current = handle?.stop;
+    }).catch(() => {});
+    return () => {
+      alive = false;
+      if (energyStopRef.current) { energyStopRef.current(); energyStopRef.current = null; }
+    };
+  }, [isLeaderRole, autoScroll]);
+
+  // ── Countdown helpers ────────────────────────────────────────────────────
+
+  const cancelCountdown = useCallback(() => {
+    clearInterval(countdownInterval.current);
+    countdownInterval.current = null;
+    pendingNextIndex.current = null;
+    setCountdownActive(false);
+    setCountdownBeat(4);
+    countdownScale.setValue(1);
+  }, [countdownScale]);
+
+  const startCountdown = useCallback((targetIndex) => {
+    const targetSong = songs[targetIndex];
+    const bpm = targetSong?.bpm || targetSong?.tempo;
+    // Skip countdown when bpm is missing or zero
+    if (!bpm) { goTo(targetIndex); return; }
+
+    pendingNextIndex.current = targetIndex;
+    const beatMs = Math.round(60000 / bpm);
+    let beat = 4;
+    setCountdownBeat(beat);
+    setCountdownActive(true);
+
+    // Initial pulse
+    countdownScale.setValue(1);
+    Animated.spring(countdownScale, { toValue: 1.15, useNativeDriver: true, speed: 40, bounciness: 6 }).start(() => {
+      Animated.spring(countdownScale, { toValue: 1.0, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+    });
+
+    countdownInterval.current = setInterval(() => {
+      beat -= 1;
+      if (beat <= 0) {
+        clearInterval(countdownInterval.current);
+        countdownInterval.current = null;
+        setCountdownActive(false);
+        setCountdownBeat(4);
+        countdownScale.setValue(1);
+        const idx = pendingNextIndex.current;
+        pendingNextIndex.current = null;
+        goTo(idx);
+      } else {
+        setCountdownBeat(beat);
+        // Pulse animation on each beat
+        countdownScale.setValue(1);
+        Animated.spring(countdownScale, { toValue: 1.15, useNativeDriver: true, speed: 40, bounciness: 6 }).start(() => {
+          Animated.spring(countdownScale, { toValue: 1.0, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+        });
+      }
+    }, beatMs);
+  }, [songs, goTo, countdownScale]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const goNext = useCallback(() => {
-    if (currentIndex < songs.length - 1) goTo(currentIndex + 1);
-  }, [currentIndex, songs.length, goTo]);
+    if (currentIndex >= songs.length - 1) return;
+    const nextIdx = currentIndex + 1;
+    if (countdownActive) {
+      // Second press while counting down → skip immediately
+      cancelCountdown();
+      goTo(nextIdx);
+      return;
+    }
+    startCountdown(nextIdx);
+  }, [currentIndex, songs.length, goTo, countdownActive, cancelCountdown, startCountdown]);
 
   const goPrev = useCallback(() => {
+    if (countdownActive) cancelCountdown();
     if (currentIndex > 0) goTo(currentIndex - 1);
-  }, [currentIndex, goTo]);
+  }, [currentIndex, goTo, countdownActive, cancelCountdown]);
 
   // ── Cleanup on unmount ──────────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current);
+      clearInterval(countdownInterval.current);
       clearTimeout(autoAdvanceTimer.current);
+      clearTimeout(goLiveToastTimer.current);
       midiWsRef.current?.close();
     };
   }, []);
+
+  // ── Load persisted ready-songs on mount ────────────────────────────────────
+  useEffect(() => {
+    if (!serviceId) return;
+    AsyncStorage.getItem(`practice_ready/${serviceId}`)
+      .then(raw => {
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        const s = new Set(arr);
+        setReadySongs(s);
+        readySongsRef.current = s;
+      })
+      .catch(() => {});
+  }, [serviceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Report practice time when moving between songs ─────────────────────────
+  useEffect(() => {
+    const prevIdx = prevSongIdxRef.current;
+    if (prevIdx === currentIndex) return;
+
+    const prevSong   = songs[prevIdx];
+    const durationSec = Math.round((Date.now() - songStartTime.current) / 1000);
+
+    if (durationSec > 5 && prevSong && serviceId && userProfile) {
+      const songId = getSongLookupId(prevSong) || prevSong.id || `song_${prevIdx}`;
+      fetch(`${SYNC_URL}/sync/practice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceId,
+          personId:   userProfile.id || userProfile.email || '',
+          personName: [userProfile.name, userProfile.lastName].filter(Boolean).join(' ').trim() || 'Unknown',
+          personRole: activeRole || '',
+          songId,
+          songTitle:  prevSong.title || `Song ${prevIdx + 1}`,
+          durationSec,
+          markedReady: readySongsRef.current.has(prevIdx),
+        }),
+      }).catch(() => {});
+    }
+
+    prevSongIdxRef.current = currentIndex;
+    songStartTime.current  = Date.now();
+  }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Apple Watch sync ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -389,6 +627,24 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     const idx = secs.findIndex(s => s.name.toLowerCase().startsWith(label.toLowerCase()));
     if (idx >= 0) scrollToSection(idx);
   }
+
+  // ── Live section cue — push to all musicians in real-time ────────────────
+  const sendLiveSectionCue = async (sectionLabel, songId) => {
+    try {
+      await fetch(`${SYNC_URL}/sync/live-cue`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          type: 'SECTION_CUE',
+          sectionLabel,
+          songId: songId || (songs[currentIndexRef.current]
+            ? (getSongLookupId(songs[currentIndexRef.current]) || songs[currentIndexRef.current].id)
+            : ''),
+          timestamp: Date.now(),
+        }),
+      });
+    } catch (e) { /* fire and forget */ }
+  };
 
   // ── Performance sync — handle PERF events from UM ─────────────────────────
   const handlePerfEvent = useCallback((event) => {
@@ -560,6 +816,14 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         scrollRef.current?.scrollTo({ y: next, animated: false });
         scrollY.current = next;
 
+        // Update active section label during auto-scroll
+        const curSong = songs[currentIndexRef.current];
+        if (curSong) {
+          const text = curSong.lyrics || curSong.chordChart || '';
+          const label = getActiveSectionFromScroll(text, next, contentH.current);
+          setActiveSectionLabel(prev => (prev !== label ? label : prev));
+        }
+
         const remaining = contentH.current - (next + viewH.current);
         if (remaining < 80 && contentH.current > 0 && !reachedEnd) {
           setReachedEnd(true);
@@ -613,6 +877,40 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     })
   ).current;
 
+  // ── Mark current song as practiced ─────────────────────────────────────────
+  const handleSongReady = useCallback(() => {
+    const durationSec = Math.round((Date.now() - songStartTime.current) / 1000);
+
+    setReadySongs(prev => {
+      const next = new Set(prev);
+      next.add(currentIndex);
+      readySongsRef.current = next;
+      if (serviceId) {
+        AsyncStorage.setItem(`practice_ready/${serviceId}`, JSON.stringify([...next])).catch(() => {});
+      }
+      return next;
+    });
+
+    const curSong = songs[currentIndex];
+    if (serviceId && userProfile && curSong) {
+      const songId = getSongLookupId(curSong) || curSong.id || `song_${currentIndex}`;
+      fetch(`${SYNC_URL}/sync/practice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serviceId,
+          personId:   userProfile.id || userProfile.email || '',
+          personName: [userProfile.name, userProfile.lastName].filter(Boolean).join(' ').trim() || 'Unknown',
+          personRole: activeRole || '',
+          songId,
+          songTitle:  curSong.title || `Song ${currentIndex + 1}`,
+          durationSec,
+          markedReady: true,
+        }),
+      }).catch(() => {});
+    }
+  }, [currentIndex, songs, serviceId, userProfile, activeRole]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Determine content to show ───────────────────────────────────────────────
 
   const getContent = () => {
@@ -654,14 +952,25 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         return { type: 'drum_notes', text: instrChart || '', lyrics: song.lyrics || '' };
       }
 
-      const masterChart = song.chordChart || song.lyricsChordChart || '';
-      const chartText   = instrChart || masterChart;
-      if (chartText) {
+      const masterChart  = song.chordChart || song.lyricsChordChart || '';
+      const baseChart    = instrChart || masterChart;
+      if (baseChart) {
+        const isGuitar    = GUITAR_INSTRUMENTS.has(selectedInstrument);
+        const capoFret    = isGuitar ? (guitarCapo[song.id] ?? 0) : 0;
+        const concertKey  = (song.transposedKey || song.key || '').trim();
+        const shapesKey   = isGuitar && capoFret > 0 ? capoShapesKey(concertKey, capoFret) : concertKey;
+        const chartText   = isGuitar && capoFret > 0
+          ? transposeChart(baseChart, -capoFret, shapesKey)
+          : baseChart;
         return {
           type: 'chord_chart',
           text: chartText,
           isInstrumentSpecific: !!instrChart,
           instrumentName: selectedInstrument,
+          isGuitar,
+          capoFret,
+          concertKey,
+          shapesKey,
         };
       }
       if (song.notes) return { type: 'notes', text: song.notes };
@@ -679,8 +988,10 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const songLookupId   = song ? (getSongLookupId(song) || song.id) : '';
   const isSoundTech    = SOUND_TECH_ROLES.has(normalizedActiveRole);
   const isMediaTech    = activeRoleType === 'media';
+  const isLeaderRole   = LEADER_ROLES.has(normalizedActiveRole);
   const myPart         = song && activeRoleType === 'vocal' ? getMyPartForSong(songLookupId, vocalAssignments, userProfile) : null;
   const vocalLineup    = song && (isSoundTech || isMediaTech) ? getSongVocalLineup(songLookupId, vocalAssignments) : [];
+  const songSections   = song ? parseSections(song.lyrics || song.chordChart || '') : [];
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
@@ -715,7 +1026,11 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           <View style={styles.dotsRow}>
             {songs.map((_, i) => (
               <TouchableOpacity key={i} onPress={() => goTo(i)}>
-                <View style={[styles.dot, i === currentIndex && styles.dotActive]} />
+                <View style={[
+                  styles.dot,
+                  readySongs.has(i) && styles.dotReady,
+                  i === currentIndex && styles.dotActive,
+                ]} />
               </TouchableOpacity>
             ))}
           </View>
@@ -736,6 +1051,13 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           <View style={styles.liveBadge}>
             <Text style={styles.liveBadgeText}>🔴 LIVE</Text>
           </View>
+        )}
+
+        {/* Go Live button — leaders only */}
+        {isLeaderRole && (
+          <TouchableOpacity style={styles.goLiveBtn} onPress={handleGoLive} activeOpacity={0.75}>
+            <Text style={styles.goLiveBtnText}>🔴 Go Live</Text>
+          </TouchableOpacity>
         )}
 
         {/* MIDI connection indicator */}
@@ -864,6 +1186,59 @@ export default function SetlistRunnerScreen({ navigation, route }) {
             </View>
           );
         })()}
+
+        {/* ── Section pills strip ── */}
+        {(() => {
+          const text = song.lyrics || song.chordChart || '';
+          const secs = parseSections(text);
+          if (!secs.length) return null;
+          return (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginTop: 8 }}
+              contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingHorizontal: 2, paddingBottom: 2 }}
+            >
+              {secs.map((sec, idx) => {
+                const isActive = activeSectionLabel === sec.name;
+                return (
+                  <TouchableOpacity
+                    key={`${sec.name}_${idx}`}
+                    style={[
+                      styles.sectionPill,
+                      isActive && styles.sectionPillActive,
+                    ]}
+                    onPress={() => {
+                      lastManualScrollRef.current = Date.now();
+                      scrollToSection(idx);
+                    }}
+                  >
+                    <Text style={[styles.sectionPillText, isActive && styles.sectionPillTextActive]}>
+                      {sec.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          );
+        })()}
+
+        {/* ── Song Ready button ── */}
+        <TouchableOpacity
+          style={[
+            styles.songReadyBtn,
+            readySongs.has(currentIndex) && styles.songReadyBtnDone,
+          ]}
+          onPress={readySongs.has(currentIndex) ? null : handleSongReady}
+          activeOpacity={readySongs.has(currentIndex) ? 1 : 0.7}
+        >
+          <Text style={[
+            styles.songReadyBtnText,
+            readySongs.has(currentIndex) && styles.songReadyBtnTextDone,
+          ]}>
+            {readySongs.has(currentIndex) ? '✓ Song Ready' : '◯ Mark as Ready'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* ── Content Area ─────────────────────── */}
@@ -875,7 +1250,21 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         showsVerticalScrollIndicator={true}
         scrollIndicatorInsets={{ right: 1 }}
         scrollEventThrottle={16}
-        onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+        onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          scrollY.current = y;
+          // Track manual scrolls (distinguish from auto-scroll ticks via isTracking)
+          if (!autoScroll) {
+            lastManualScrollRef.current = Date.now();
+          }
+          // Update active section
+          const curSong = songs[currentIndexRef.current];
+          if (curSong) {
+            const text = curSong.lyrics || curSong.chordChart || '';
+            const label = getActiveSectionFromScroll(text, y, contentH.current);
+            setActiveSectionLabel(prev => (prev !== label ? label : prev));
+          }
+        }}
         onContentSizeChange={(_, h) => { contentH.current = h; }}
         onLayout={(e) => { viewH.current = e.nativeEvent.layout.height; }}
       >
@@ -932,8 +1321,50 @@ export default function SetlistRunnerScreen({ navigation, route }) {
                     {INSTRUMENT_ICON[content.instrumentName] || '🎼'} {content.instrumentName}
                   </Text>
                 </View>
+                {content.concertKey ? (
+                  <View style={styles.keyBadge}>
+                    <Text style={styles.keyBadgeText}>
+                      {content.capoFret > 0 ? content.shapesKey : content.concertKey}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             ) : null}
+
+            {/* Guitar capo picker */}
+            {content.isGuitar ? (
+              <View style={styles.capoRow}>
+                <Text style={styles.capoLabel}>🎸 Capo:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {GUITAR_CAPO_OPTIONS.map(fret => {
+                      const active = content.capoFret === fret;
+                      const sKey = fret > 0 && content.concertKey ? capoShapesKey(content.concertKey, fret) : null;
+                      return (
+                        <TouchableOpacity
+                          key={fret}
+                          style={[styles.capoPill, active && styles.capoPillActive]}
+                          onPress={() => setGuitarCapo(prev => ({ ...prev, [song.id]: fret }))}
+                        >
+                          <Text style={[styles.capoPillText, active && styles.capoPillTextActive]}>
+                            {fret === 0 ? 'Open' : `${fret}`}
+                          </Text>
+                          {sKey && active ? (
+                            <Text style={styles.capoPillKey}>{sKey}</Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+                {content.capoFret > 0 && content.concertKey ? (
+                  <Text style={styles.capoHint}>
+                    Play {content.shapesKey} shapes · sounds {content.concertKey}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
             <TouchableOpacity
               style={styles.editBtn}
               onPress={() => navigation.navigate('ContentEditor', {
@@ -1129,6 +1560,38 @@ export default function SetlistRunnerScreen({ navigation, route }) {
       </ScrollView>
       </Animated.View>
 
+      {/* ── Leader Section Cue Pills ─────────── */}
+      {isLeaderRole && songSections.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.sectionCueBar}
+          contentContainerStyle={styles.sectionCueBarContent}
+        >
+          {songSections.map((sec, idx) => (
+            <TouchableOpacity
+              key={`${sec.name}_${idx}`}
+              style={[
+                styles.sectionCuePill,
+                activeSectionLabel?.toLowerCase() === sec.name.toLowerCase() && styles.sectionCuePillActive,
+              ]}
+              onPress={() => {
+                scrollToSection(idx);
+                setActiveSectionLabel(sec.name);
+                sendLiveSectionCue(sec.name, songLookupId);
+              }}
+            >
+              <Text style={[
+                styles.sectionCuePillText,
+                activeSectionLabel?.toLowerCase() === sec.name.toLowerCase() && styles.sectionCuePillTextActive,
+              ]}>
+                {sec.name.toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : null}
+
       {/* ── Bottom Transport ─────────────────── */}
       <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 6 }]}>
         {/* Back */}
@@ -1180,6 +1643,61 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           ]}>Next</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── Haptic click track toggle ──── */}
+      <View style={styles.hapticRow}>
+        <Text style={styles.hapticRowLabel}>Click</Text>
+        {[HAPTIC_MODES.OFF, HAPTIC_MODES.DOWNBEAT_ONLY, HAPTIC_MODES.CLICK].map((mode) => (
+          <TouchableOpacity
+            key={mode}
+            style={[styles.hapticBtn, hapticMode === mode && styles.hapticBtnActive]}
+            onPress={() => setHapticMode(mode)}
+          >
+            <Text style={[styles.hapticBtnText, hapticMode === mode && styles.hapticBtnTextActive]}>
+              {mode === HAPTIC_MODES.OFF ? 'Off' : mode === HAPTIC_MODES.DOWNBEAT_ONLY ? '1 only' : 'All'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* ── Congregation energy (leader only) ─── */}
+      {isLeaderRole && energyLevel != null && (
+        <View style={styles.energyRow}>
+          <View style={[styles.energyFill, {
+            width: `${energyLevel}%`,
+            backgroundColor: energyLevel > 70 ? '#EC4899' : energyLevel > 40 ? '#F59E0B' : '#6366F1',
+          }]} />
+          <Text style={styles.energyText}>
+            Room {energyLevel}%{energyTrend === 'rising' ? ' ↑' : energyTrend === 'falling' ? ' ↓' : ''}
+          </Text>
+        </View>
+      )}
+      {isLeaderRole && energySuggestion && (
+        <View style={styles.energySuggestion}>
+          <Text style={styles.energySuggestionText}>{energySuggestion.message}</Text>
+        </View>
+      )}
+
+      {/* ── "We're Live" Go Live toast ─── */}
+      {goLiveToast ? (
+        <View style={styles.goLiveToast} pointerEvents="none">
+          <Text style={styles.goLiveToastText}>✅ Team notified — We're live!</Text>
+        </View>
+      ) : null}
+
+      {/* ── Beat Countdown Overlay ──────── */}
+      {countdownActive ? (
+        <View style={styles.countdownOverlay} pointerEvents="box-none">
+          <Animated.View style={[styles.countdownCircle, { transform: [{ scale: countdownScale }] }]}>
+            <Text style={styles.countdownNumber}>{countdownBeat}</Text>
+          </Animated.View>
+          {songs[pendingNextIndex.current] ? (
+            <Text style={styles.countdownNextLabel}>
+              next: {songs[pendingNextIndex.current].title}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1213,6 +1731,7 @@ const styles = StyleSheet.create({
   },
   dot:       { width: 6, height: 6, borderRadius: 3, backgroundColor: '#374151' },
   dotActive: { width: 16, borderRadius: 3, backgroundColor: '#8B5CF6' },
+  dotReady:  { backgroundColor: '#10B981' },
 
   // Transition mode pill
   transitionPill: {
@@ -1223,6 +1742,25 @@ const styles = StyleSheet.create({
   transitionPillActive: { borderColor: '#7C3AED', backgroundColor: '#1E1B4B' },
   transitionPillLabel:  { fontSize: 10, fontWeight: '700', color: '#6B7280', letterSpacing: 0.5 },
   transitionPillLabelActive: { color: '#A78BFA' },
+
+  // Go Live button
+  goLiveBtn: {
+    height: 30, paddingHorizontal: 10, borderRadius: 8, marginLeft: 4,
+    backgroundColor: '#7F1D1D', borderWidth: 1, borderColor: '#EF4444',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  goLiveBtnText: { fontSize: 11, fontWeight: '800', color: '#FCA5A5', letterSpacing: 0.3 },
+
+  // Go Live toast — bottom-center overlay
+  goLiveToast: {
+    position: 'absolute', bottom: 90, left: 20, right: 20,
+    backgroundColor: '#065F46', borderRadius: 12, borderWidth: 1, borderColor: '#34D399',
+    paddingVertical: 12, paddingHorizontal: 20,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8,
+    elevation: 10,
+  },
+  goLiveToastText: { color: '#ECFDF5', fontSize: 15, fontWeight: '700' },
 
   // MIDI indicator (top right) — shows role icon + green dot when connected
   liveBadge: {
@@ -1271,6 +1809,20 @@ const styles = StyleSheet.create({
   },
   tempoBadgeText: { fontSize: 10, color: '#9CA3AF', fontWeight: '600' },
   artistText: { fontSize: 13, color: '#9CA3AF', marginBottom: 10 },
+
+  // Capo picker
+  capoRow: { marginTop: 8, marginBottom: 4 },
+  capoLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  capoPill: {
+    paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: '#1F2937', borderRadius: 10,
+    borderWidth: 1, borderColor: '#374151', alignItems: 'center', minWidth: 44,
+  },
+  capoPillActive: { backgroundColor: '#4F46E520', borderColor: '#4F46E5' },
+  capoPillText: { fontSize: 13, fontWeight: '700', color: '#9CA3AF' },
+  capoPillTextActive: { color: '#4F46E5' },
+  capoPillKey: { fontSize: 10, color: '#4F46E5', fontWeight: '600', marginTop: 1 },
+  capoHint: { fontSize: 11, color: '#6B7280', marginTop: 6, fontStyle: 'italic' },
 
   // Role tabs
   roleTabs: { marginTop: 6 },
@@ -1411,6 +1963,67 @@ const styles = StyleSheet.create({
   transportPlayIcon: { fontSize: 26, color: '#FFF' },
   transportPlayLabel: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 2, fontWeight: '700' },
 
+  // Leader section cue pills
+  sectionCueBar: {
+    backgroundColor: '#050D1A',
+    borderTopWidth: 1,
+    borderTopColor: '#1F2937',
+    maxHeight: 46,
+  },
+  sectionCueBarContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    gap: 8,
+  },
+  sectionCuePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  sectionCuePillActive: {
+    backgroundColor: '#4C1D95',
+    borderColor: '#7C3AED',
+  },
+  sectionCuePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6B7280',
+    letterSpacing: 0.5,
+  },
+  sectionCuePillTextActive: {
+    color: '#DDD6FE',
+  },
+
+  // Song Ready button
+  songReadyBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(99,102,241,0.1)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(99,102,241,0.35)',
+  },
+  songReadyBtnDone: {
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderColor: 'rgba(16,185,129,0.35)',
+  },
+  songReadyBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#818CF8',
+    letterSpacing: 0.4,
+  },
+  songReadyBtnTextDone: {
+    color: '#10B981',
+  },
+
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
   emptyText:  { fontSize: 16, color: '#9CA3AF' },
   backLink:   { fontSize: 15, color: '#7C3AED', fontWeight: '600' },
@@ -1464,4 +2077,52 @@ const styles = StyleSheet.create({
   runnerLineupName: { flex: 1, fontSize: 12, fontWeight: '700', color: '#F3F4F6' },
   runnerLineupKey: { fontSize: 11, fontWeight: '700', color: '#DDD6FE' },
   runnerLineupEmpty: { fontSize: 12, color: '#C4B5FD' },
+
+  // Section pills strip
+  sectionPill: {
+    paddingHorizontal: 11, paddingVertical: 4,
+    backgroundColor: '#0F172A', borderRadius: 12,
+    borderWidth: 1, borderColor: '#374151',
+  },
+  sectionPillActive: {
+    backgroundColor: '#7C3AED', borderColor: '#7C3AED',
+  },
+  sectionPillText: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
+  sectionPillTextActive: { color: '#FFF', fontWeight: '700' },
+
+  // Haptic click track
+  hapticRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, gap: 6 },
+  hapticRowLabel: { color: '#6B7280', fontSize: 11, fontWeight: '500', marginRight: 2 },
+  hapticBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, backgroundColor: '#1C2432', borderWidth: 1, borderColor: '#2D3748' },
+  hapticBtnActive: { backgroundColor: '#4F46E5', borderColor: '#6366F1' },
+  hapticBtnText: { color: '#6B7280', fontSize: 11 },
+  hapticBtnTextActive: { color: '#FFF', fontWeight: '600' },
+
+  // Congregation energy
+  energyRow: { marginHorizontal: 12, marginBottom: 4, height: 20, backgroundColor: '#1C2432', borderRadius: 4, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
+  energyFill: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 4, opacity: 0.5 },
+  energyText: { color: '#E2E8F0', fontSize: 11, fontWeight: '600', paddingHorizontal: 8, zIndex: 1 },
+  energySuggestion: { marginHorizontal: 12, marginBottom: 6, backgroundColor: '#1a2744', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderLeftWidth: 3, borderLeftColor: '#6366F1' },
+  energySuggestionText: { color: '#C7D2FE', fontSize: 12, fontWeight: '500' },
+
+  // Beat countdown overlay
+  countdownOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  countdownCircle: {
+    width: 180, height: 180, borderRadius: 90,
+    borderWidth: 3, borderColor: 'rgba(255,255,255,0.35)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  countdownNumber: {
+    fontSize: 120, fontWeight: '900',
+    color: '#FFFFFF', lineHeight: 130,
+    textAlign: 'center',
+  },
+  countdownNextLabel: {
+    marginTop: 24, fontSize: 15, fontWeight: '600',
+    color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 32,
+  },
 });
