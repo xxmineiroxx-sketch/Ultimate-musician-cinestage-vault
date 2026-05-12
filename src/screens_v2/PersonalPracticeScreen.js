@@ -22,7 +22,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import audioEngine from '../services/audioEngine';
 import { getUserProfile, getAssignments } from '../services/storage';
-import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY } from '../../config/syncConfig';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import WaveformBar from '../components_v2/WaveformBar';
 import {
   getDirectSongMediaUrl,
@@ -621,7 +621,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   async function fetchSetlist(svcId) {
     try {
-      const headers = { 'x-org-id': SYNC_ORG_ID, 'x-secret-key': SYNC_SECRET_KEY };
+      const headers = syncHeaders();
 
       // Get library songs (basic metadata)
       const res = await fetch(`${SYNC_URL}/sync/library-pull`, { headers });
@@ -661,7 +661,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     const lookupId = typeof song === 'string' ? song : getSongLookupId(song);
     if (!lookupId) return {};
     try {
-      const headers = { 'x-org-id': SYNC_ORG_ID, 'x-secret-key': SYNC_SECRET_KEY };
+      const headers = syncHeaders();
       const res = await fetch(`${SYNC_URL}/sync/stems-result?songId=${encodeURIComponent(lookupId)}`, { headers });
       if (!res.ok) return {};
       const data = await res.json();

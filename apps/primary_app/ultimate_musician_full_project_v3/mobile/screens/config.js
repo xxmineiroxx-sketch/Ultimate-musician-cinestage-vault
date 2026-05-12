@@ -6,10 +6,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Sync server: Cloudflare Pages (global, always-on, no local server needed)
-export const SYNC_URL = "https://ultimatelabs.pages.dev";
+export const SYNC_URL = process.env.EXPO_PUBLIC_SYNC_URL || "https://ultimatelabs.pages.dev";
 
 // CineStage AI REST API — Cloudflare Container (deployed, Railway eliminated)
-export const CINESTAGE_URL = "https://cinestage.ultimatelabs.co";
+export const CINESTAGE_URL = process.env.EXPO_PUBLIC_CINESTAGE_URL || "https://cinestage.ultimatelabs.co";
 
 // CineStage Data API — use this for all data operations (songs/services/people/plans)
 // Mirrors the /sync/* contract but runs on CineStage Container
@@ -18,9 +18,11 @@ export const API_URL = CINESTAGE_URL;
 // CineStage WebSocket URL — real-time team sync + MIDI bridge
 export const WS_URL = CINESTAGE_URL.replace("https://", "wss://").replace("http://", "ws://");
 
-// ── Default (root org) credentials ───────────────────────────────────────────
-export const SYNC_ORG_ID = "zpneef0a5ov732c0";
-export const SYNC_SECRET_KEY = "erflpo0e4pg33h85v58v7cfvpd6eoycv";
+// ── Default (root org) credentials — loaded from environment variables ────────
+// ⚠️  SECURITY: Do NOT hardcode credentials. Use .env (gitignored).
+//     See .env.example in the project root for required variables.
+export const SYNC_ORG_ID = process.env.EXPO_PUBLIC_SYNC_ORG_ID || "";
+export const SYNC_SECRET_KEY = process.env.EXPO_PUBLIC_SYNC_SECRET_KEY || "";
 
 // ── Runtime credentials (may be overridden by loadBranchConfig) ───────────────
 let _orgId = SYNC_ORG_ID;
