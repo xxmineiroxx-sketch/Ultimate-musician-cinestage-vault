@@ -36,6 +36,13 @@ Notifications.setNotificationHandler({
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { sendVerseToWatch, sendServiceInfoToWatch } from '../services/watchBridge';
 import { updateWidgetData } from '../services/widgetDataWriter';
+import {
+  connectSocket,
+  subscribeRoom,
+  unsubscribeRoom,
+  onSocketEvent,
+  isConnected,
+} from '../services/socketClient';
 const SETLIST_HIDE_AFTER_SERVICE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MONTHLY_POPUP_SEEN_KEY = '@up_monthly_assignment_popup_seen_v1';
 const LAST_VERSE_DAY_KEY = '@up_last_verse_day_v1';
@@ -604,6 +611,21 @@ export default function HomeScreen({ navigation }) {
     return unsub;
   }, [navigation, loadDashboardData]);
 
+  // Subscribe to Socket.io org room when profile loads
+  useEffect(() => {
+    if (profile?.orgId) {
+      connectSocket();
+      subscribeRoom(`${profile.orgId}:services`);
+      subscribeRoom(`${profile.orgId}:messages`);
+    }
+    return () => {
+      if (profile?.orgId) {
+        unsubscribeRoom(`${profile.orgId}:services`);
+        unsubscribeRoom(`${profile.orgId}:messages`);
+      }
+    };
+  }, [profile?.orgId]);
+
   useEffect(() => {
     maybeShowVersePopup();
     const sub = AppState.addEventListener('change', (nextState) => {
@@ -625,28 +647,70 @@ export default function HomeScreen({ navigation }) {
     }).catch(() => {});
   }, []);
 
-  // Poll Cloudflare every 4s — navigate to Setlist when UM sends a trigger
+  // ── Real-time playback trigger via Socket.io ──
+  // Falls back to 10s HTTP poll when socket is disconnected
   useEffect(() => {
-    const poll = async () => {
-      try {
-        const res = await fetch(`${SYNC_URL}/sync/playback-trigger`, { headers: syncHeaders() });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data?.serviceId || !data?.timestamp) return;
-        if (data.timestamp === lastTriggerTsRef.current) return;
-        lastTriggerTsRef.current = data.timestamp;
-        AsyncStorage.setItem('@up_last_trigger_ts', data.timestamp).catch(() => {});
-        navigation.navigate('SetlistTab', { serviceId: data.serviceId });
-      } catch (_) {}
+    let mounted = true;
+    let fallbackInterval = null;
+
+    const handleTrigger = (data) => {
+      if (!mounted || !data?.serviceId || !data?.timestamp) return;
+      if (data.timestamp === lastTriggerTsRef.current) return;
+      lastTriggerTsRef.current = data.timestamp;
+      AsyncStorage.setItem('@up_last_trigger_ts', data.timestamp).catch(() => {});
+      navigation.navigate('SetlistTab', { serviceId: data.serviceId });
     };
-    const interval = setInterval(poll, 4000);
-    return () => clearInterval(interval);
+
+    const startFallbackPoll = () => {
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      fallbackInterval = setInterval(async () => {
+        if (!mounted || isConnected()) return;
+        try {
+          const res = await fetch(`${SYNC_URL}/sync/playback-trigger`, { headers: syncHeaders() });
+          if (!res.ok) return;
+          const data = await res.json();
+          handleTrigger(data);
+        } catch (_) {}
+      }, 10000);
+    };
+
+    // Setup Socket.io
+    connectSocket();
+    const unsubTrigger = onSocketEvent('playback:trigger', handleTrigger);
+    startFallbackPoll();
+
+    return () => {
+      mounted = false;
+      unsubTrigger();
+      if (fallbackInterval) clearInterval(fallbackInterval);
+    };
   }, [navigation]);
 
-  // Poll for new messages every 8s — play notification sound when new message arrives
+  // ── Real-time message notifications via Socket.io ──
+  // Falls back to 15s HTTP poll when socket is disconnected
   useEffect(() => {
-    let initialized = false;
-    const pollMessages = async () => {
+    let mounted = true;
+    let fallbackInterval = null;
+    let lastMsgTsRefLocal = lastMsgTsRef.current;
+
+    const playIfNew = (msg) => {
+      if (!mounted) return;
+      const ts = msg?.timestamp || msg?.id;
+      if (!ts) return;
+      if (!lastMsgTsRefLocal) {
+        lastMsgTsRefLocal = ts;
+        lastMsgTsRef.current = ts;
+        return;
+      }
+      if (ts !== lastMsgTsRefLocal) {
+        lastMsgTsRefLocal = ts;
+        lastMsgTsRef.current = ts;
+        playNotificationSound('message');
+      }
+    };
+
+    const fallbackPoll = async () => {
+      if (!mounted || isConnected()) return;
       const prof = await getUserProfile().catch(() => null);
       if (!prof?.email) return;
       try {
@@ -661,23 +725,25 @@ export default function HomeScreen({ navigation }) {
         } finally { clearTimeout(tid); }
         if (!res.ok) return;
         const msgs = await res.json();
-        if (!Array.isArray(msgs) || msgs.length === 0) { initialized = true; return; }
-        const latestTs = msgs[0].timestamp || msgs[0].id;
-        if (!initialized) {
-          // First load — just record the current latest, don't beep
-          lastMsgTsRef.current = latestTs;
-          initialized = true;
-          return;
-        }
-        if (latestTs !== lastMsgTsRef.current) {
-          lastMsgTsRef.current = latestTs;
-          playNotificationSound('message');
-        }
-      } catch (_) { initialized = true; }
+        if (Array.isArray(msgs) && msgs.length > 0) playIfNew(msgs[0]);
+      } catch (_) {}
     };
-    const interval = setInterval(pollMessages, 8000);
-    pollMessages(); // immediate first check (sets baseline, no sound)
-    return () => clearInterval(interval);
+
+    // Setup Socket.io listeners
+    connectSocket();
+    const unsubNew = onSocketEvent('message:new', playIfNew);
+    const unsubReplied = onSocketEvent('message:replied', (payload) => playIfNew(payload?.reply));
+
+    // Baseline fetch + fallback polling
+    fallbackPoll();
+    fallbackInterval = setInterval(fallbackPoll, 15000);
+
+    return () => {
+      mounted = false;
+      unsubNew();
+      unsubReplied();
+      if (fallbackInterval) clearInterval(fallbackInterval);
+    };
   }, []);
 
   // Schedule local push reminders 3 days + 1 day before each upcoming service

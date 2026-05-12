@@ -436,6 +436,8 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   // ── Performance sync — CineStage WebSocket (cloud path) ───────────────────
   useEffect(() => {
     const wsBase = CINESTAGE_URL.replace(/^https/, 'wss').replace(/^http/, 'ws');
+    // TODO: Move auth from query params to a post-connect auth message or
+    //       extraHeaders (requires server support) to prevent credential leakage.
     const ws = new WebSocket(`${wsBase}/ws/sync?orgId=${SYNC_ORG_ID}&secretKey=${SYNC_SECRET_KEY}`);
     perfWsRef.current = ws;
     ws.onmessage = (e) => {
