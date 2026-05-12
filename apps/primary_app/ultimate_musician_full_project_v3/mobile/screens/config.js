@@ -9,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export const SYNC_URL = "https://ultimatelabs.pages.dev";
 
 // CineStage AI REST API — Cloudflare Container (deployed, Railway eliminated)
-export const CINESTAGE_URL = "https://cinestage.studio-cinestage.workers.dev";
+export const CINESTAGE_URL = "https://cinestage.ultimatelabs.co";
 
 // CineStage Data API — use this for all data operations (songs/services/people/plans)
 // Mirrors the /sync/* contract but runs on CineStage Container
