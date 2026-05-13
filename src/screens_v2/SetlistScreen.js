@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, getAssignments } from '../services/storage';
+import { subscribeRoom, unsubscribeRoom, onSocketEvent, offSocketEvent } from '../services/socketClient';
 
 import { ROLE_LABELS } from '../models_v2/models';
 // WaveformBar removed — audio handled in PersonalPractice screen
@@ -598,6 +599,19 @@ export default function SetlistScreen({ navigation, route }) {
     const serviceId = route?.params?.serviceId;
     if (serviceId) fetchSetlist(serviceId);
   }, [route?.params?.serviceId, fetchSetlist]);
+
+  // Subscribe to library updates via socket
+  useEffect(() => {
+    if (!profile?.orgId) return;
+    subscribeRoom(`${profile.orgId}:library`);
+    const unsub = onSocketEvent('library:updated', () => {
+      loadData();
+    });
+    return () => {
+      unsubscribeRoom(`${profile.orgId}:library`);
+      unsub();
+    };
+  }, [profile?.orgId]);
 
   const loadData = async () => {
     const userProfile = await getUserProfile();

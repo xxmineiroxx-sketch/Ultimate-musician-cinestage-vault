@@ -27,3 +27,11 @@ __MACOSX/
 .idea/
 *.mp4
 *.mov
+graphify-out/
+.cache/
+.playwright-mcp/
+.copilot/
+.codex/
+.claude/
+.kimi/
+.gemini/

@@ -8,6 +8,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert,
 import { getUserProfile, saveUserProfile } from '../services/storage';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { subscribeRoom, unsubscribeRoom, onSocketEvent, offSocketEvent } from '../services/socketClient';
 
 async function serverBlockout(method, params = {}, body = null) {
   try {
@@ -86,6 +87,23 @@ export default function BlockoutCalendarScreen({ navigation }) {
   useEffect(() => {
     loadProfile();
   }, []);
+
+  // Subscribe to blockout updates via socket
+  useEffect(() => {
+    if (!profile?.orgId) return;
+    subscribeRoom(`${profile.orgId}:blockouts`);
+    const unsubUpsert = onSocketEvent('blockout:upsert', () => {
+      loadProfile();
+    });
+    const unsubDeleted = onSocketEvent('blockout:deleted', () => {
+      loadProfile();
+    });
+    return () => {
+      unsubscribeRoom(`${profile.orgId}:blockouts`);
+      unsubUpsert();
+      unsubDeleted();
+    };
+  }, [profile?.orgId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

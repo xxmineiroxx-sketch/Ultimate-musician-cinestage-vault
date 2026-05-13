@@ -436,8 +436,13 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   // ── Performance sync — CineStage WebSocket (cloud path) ───────────────────
   useEffect(() => {
     const wsBase = CINESTAGE_URL.replace(/^https/, 'wss').replace(/^http/, 'ws');
-    // TODO: Move auth from query params to a post-connect auth message or
-    //       extraHeaders (requires server support) to prevent credential leakage.
+    // SECURITY: Credentials are passed as query params because React Native
+    // WebSocket does not support custom headers. This exposes orgId and
+    // secretKey in server access logs and proxy logs. The CineStage server
+    // must be updated to accept auth via a post-connect message or cookie
+    // before this can be fixed client-side.
+    // TODO: Migrate to Socket.io (supports auth objects) or a SyncServer proxy
+    //       once CineStage supports message-based auth.
     const ws = new WebSocket(`${wsBase}/ws/sync?orgId=${SYNC_ORG_ID}&secretKey=${SYNC_SECRET_KEY}`);
     perfWsRef.current = ws;
     ws.onmessage = (e) => {

@@ -111,6 +111,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { subscribeRoom, unsubscribeRoom, onSocketEvent, offSocketEvent } from '../services/socketClient';
 const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
@@ -530,6 +531,23 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [pickerSearch, setPickerSearch] = useState('');
 
   React.useEffect(() => { loadAll(); }, []);
+
+  // Subscribe to grant updates via socket
+  React.useEffect(() => {
+    if (!profile?.orgId) return;
+    subscribeRoom(`${profile.orgId}:grants`);
+    const unsubUpdated = onSocketEvent('grant:updated', () => {
+      loadAll();
+    });
+    const unsubRevoked = onSocketEvent('grant:revoked', () => {
+      loadAll();
+    });
+    return () => {
+      unsubscribeRoom(`${profile.orgId}:grants`);
+      unsubUpdated();
+      unsubRevoked();
+    };
+  }, [profile?.orgId]);
 
   React.useEffect(() => {
     if (!showEditMember) {

@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { subscribeRoom, unsubscribeRoom, onSocketEvent, offSocketEvent } from '../services/socketClient';
 
 // ── Inline Calendar ──────────────────────────────────────────────────────────
 const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -170,6 +171,27 @@ export default function LeaderDashboardScreen({ navigation, route }) {
   const [libQuery, setLibQuery] = useState('');
 
   React.useEffect(() => { loadAll(); }, []);
+
+  // Subscribe to proposal updates via socket
+  React.useEffect(() => {
+    if (!profile?.orgId) return;
+    subscribeRoom(`${profile.orgId}:proposals`);
+    const unsubNew = onSocketEvent('proposal:new', () => {
+      loadAll();
+    });
+    const unsubApproved = onSocketEvent('proposal:approved', () => {
+      loadAll();
+    });
+    const unsubRejected = onSocketEvent('proposal:rejected', () => {
+      loadAll();
+    });
+    return () => {
+      unsubscribeRoom(`${profile.orgId}:proposals`);
+      unsubNew();
+      unsubApproved();
+      unsubRejected();
+    };
+  }, [profile?.orgId]);
 
   const leaderEmail = () => profile?.email || paramEmail || '';
   const leaderName  = () => profile?.name  || paramName  || 'Service Planner';
