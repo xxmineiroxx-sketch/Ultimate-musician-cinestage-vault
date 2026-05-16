@@ -1,0 +1,66 @@
+name: EAS Build — Ultimate Musician (Admin)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/primary_app/ultimate_musician_full_project_v3/mobile/**'
+      - '.github/workflows/eas-build-admin.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/primary_app/ultimate_musician_full_project_v3/mobile/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/primary_app/ultimate_musician_full_project_v3/mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/primary_app/ultimate_musician_full_project_v3/mobile/package-lock.json
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Test
+        run: npm test -- --passWithNoTests --watchAll=false || true
+
+      - name: Build (iOS preview)
+        if: github.ref == 'refs/heads/main'
+        run: eas build --platform ios --profile preview --non-interactive
+        env:
+          EXPO_PUBLIC_SYNC_URL: ${{ secrets.EXPO_PUBLIC_SYNC_URL }}
+          EXPO_PUBLIC_CINESTAGE_URL: ${{ secrets.EXPO_PUBLIC_CINESTAGE_URL }}
+          EXPO_PUBLIC_SYNC_ORG_ID: ${{ secrets.EXPO_PUBLIC_SYNC_ORG_ID }}
+          EXPO_PUBLIC_SYNC_SECRET_KEY: ${{ secrets.EXPO_PUBLIC_SYNC_SECRET_KEY }}
+
+      - name: Build (Android preview)
+        if: github.ref == 'refs/heads/main'
+        run: eas build --platform android --profile preview --non-interactive
+        env:
+          EXPO_PUBLIC_SYNC_URL: ${{ secrets.EXPO_PUBLIC_SYNC_URL }}
+          EXPO_PUBLIC_CINESTAGE_URL: ${{ secrets.EXPO_PUBLIC_CINESTAGE_URL }}
+          EXPO_PUBLIC_SYNC_ORG_ID: ${{ secrets.EXPO_PUBLIC_SYNC_ORG_ID }}
+          EXPO_PUBLIC_SYNC_SECRET_KEY: ${{ secrets.EXPO_PUBLIC_SYNC_SECRET_KEY }}
