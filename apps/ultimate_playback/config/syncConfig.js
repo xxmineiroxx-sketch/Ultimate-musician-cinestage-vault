@@ -3,14 +3,19 @@
  *
  * PRODUCTION: https://ultimatelabs.pages.dev  (Cloudflare — global, always-on)
  * LOCAL MIDI:  http://localhost:8099           (local only — for MIDI bridge)
+ *
+ * Credentials are loaded from environment variables (EXPO_PUBLIC_*).
+ * Copy .env.example → .env and fill in real values.
  */
-export const SYNC_URL        = 'https://ultimatelabs.pages.dev';
-export const CINESTAGE_URL   = 'https://cinestage.ultimatelabs.co';
+
+export const SYNC_URL = process.env.EXPO_PUBLIC_SYNC_URL || 'https://ultimatelabs.pages.dev';
+export const CINESTAGE_URL = process.env.EXPO_PUBLIC_CINESTAGE_URL || 'https://cinestage.ultimatelabs.co';
 export const CINESTAGE_WS_URL = CINESTAGE_URL.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:');
 export const CINESTAGE_BRAIN_URL = `${CINESTAGE_URL}/api/brain/capabilities`;
 export const CINESTAGE_BOOTSTRAP_URL = `${CINESTAGE_URL}/api/brain/bootstrap`;
-export const SYNC_ORG_ID     = 'zpneef0a5ov732c0';
-export const SYNC_SECRET_KEY = 'erflpo0e4pg33h85v58v7cfvpd6eoycv';
+
+export const SYNC_ORG_ID = process.env.EXPO_PUBLIC_SYNC_ORG_ID || '';
+export const SYNC_SECRET_KEY = process.env.EXPO_PUBLIC_SYNC_SECRET_KEY || '';
 
 export const syncHeaders = () => ({
   'Content-Type': 'application/json',
