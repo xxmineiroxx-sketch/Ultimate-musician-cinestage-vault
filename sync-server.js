@@ -7,11 +7,12 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DATA_FILE = path.join(__dirname, 'sync-data.json');
 
 // Load persisted data or start fresh
-let store = { services: [], plans: {}, people: [], messages: [], grants: {}, proposals: [], blockouts: [], assignmentResponses: {}, songLibrary: {} };
+let store = { services: [], plans: {}, people: [], messages: [], grants: {}, proposals: [], blockouts: [], assignmentResponses: {}, songLibrary: {}, authUsers: [] };
 try {
   if (fs.existsSync(DATA_FILE)) {
     const loaded = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -22,6 +23,7 @@ try {
     if (!store.blockouts)           store.blockouts           = [];
     if (!store.assignmentResponses) store.assignmentResponses = {};
     if (!store.songLibrary)         store.songLibrary         = {};
+    if (!store.authUsers)           store.authUsers           = [];
     console.log(`[boot] Loaded: ${store.services.length} services, ${store.people.length} people`);
   }
 } catch (e) { console.log('[boot] Fresh start'); }
@@ -34,7 +36,7 @@ function json(res, code, data) {
   res.writeHead(code, {
     'Content-Type':                'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers':'Content-Type',
+    'Access-Control-Allow-Headers':'Content-Type, x-org-id, x-secret-key',
     'Access-Control-Allow-Methods':'GET, POST, DELETE, OPTIONS',
   });
   res.end(JSON.stringify(data));
@@ -63,11 +65,255 @@ function findPerson(email) {
   }) || null;
 }
 
+function normalizeIdentifier(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizePhoneLookup(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function passwordHash(password) {
+  return crypto.createHash('sha256').update(String(password || '')).digest('hex');
+}
+
+function findPersonByIdentifier(identifier) {
+  const id = normalizeIdentifier(identifier);
+  const phone = normalizePhoneLookup(identifier);
+  return (store.people || []).find(p => {
+    const email = normalizeIdentifier(p.email);
+    const name = normalizeIdentifier(p.name);
+    const firstLast = normalizeIdentifier(`${p.name || ''} ${p.lastName || ''}`);
+    const personPhone = normalizePhoneLookup(p.phone);
+    return (
+      (id && (email === id || name === id || firstLast === id)) ||
+      (phone && personPhone && personPhone === phone)
+    );
+  }) || findPerson(id);
+}
+
+function findAuthUser(identifier) {
+  const id = normalizeIdentifier(identifier);
+  const phone = normalizePhoneLookup(identifier);
+  return (store.authUsers || []).find(user => {
+    const userId = normalizeIdentifier(user.identifier);
+    const email = normalizeIdentifier(user.email);
+    const userPhone = normalizePhoneLookup(user.phone);
+    return (
+      (id && (userId === id || email === id)) ||
+      (phone && userPhone && userPhone === phone)
+    );
+  }) || null;
+}
+
+function ensurePersonFromAuth({ identifier, name, phone }) {
+  let person = findPersonByIdentifier(identifier);
+  if (person) return person;
+
+  const email = normalizeIdentifier(identifier).includes('@')
+    ? normalizeIdentifier(identifier)
+    : '';
+  person = {
+    id: `person_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: String(name || email || phone || identifier || 'Team Member').trim(),
+    email,
+    phone: String(phone || '').trim(),
+    playbackRegistered: true,
+    playbackRegisteredAt: new Date().toISOString(),
+    roleAssignments: '',
+    roles: [],
+  };
+  store.people.push(person);
+  return person;
+}
+
+function upsertAuthUser({ identifier, password, person, deviceId }) {
+  if (!store.authUsers) store.authUsers = [];
+  const normalized = normalizeIdentifier(identifier || person?.email || person?.phone);
+  let user = findAuthUser(normalized);
+  if (!user) {
+    user = {
+      id: `auth_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      identifier: normalized,
+      email: normalizeIdentifier(person?.email),
+      phone: String(person?.phone || '').trim(),
+      name: String(person?.name || normalized).trim(),
+      passwordHash: passwordHash(password),
+      deviceIds: [],
+      createdAt: new Date().toISOString(),
+    };
+    store.authUsers.push(user);
+  }
+  user.identifier = user.identifier || normalized;
+  user.email = normalizeIdentifier(user.email || person?.email);
+  user.phone = String(user.phone || person?.phone || '').trim();
+  user.name = String(person?.name || user.name || normalized).trim();
+  user.passwordHash = user.passwordHash || passwordHash(password);
+  user.lastLoginAt = new Date().toISOString();
+  if (deviceId && !user.deviceIds.includes(deviceId)) user.deviceIds.push(deviceId);
+  return user;
+}
+
+function authResponse(user, person) {
+  const roles = Array.isArray(person?.roles) ? person.roles : [];
+  const roleAssignments = person?.roleAssignments || roles.join(', ');
+  return {
+    ok: true,
+    identifier: user.identifier,
+    email: user.email || normalizeIdentifier(person?.email),
+    phone: user.phone || person?.phone || '',
+    name: user.name || person?.name || user.identifier,
+    role: user.role || person?.grantedRole || null,
+    grantedRole: user.grantedRole || person?.grantedRole || null,
+    orgRole: user.orgRole || person?.orgRole || null,
+    orgName: 'Ultimate Musician',
+    roleAssignments,
+    user: {
+      id: user.id,
+      identifier: user.identifier,
+      email: user.email || normalizeIdentifier(person?.email),
+      phone: user.phone || person?.phone || '',
+      name: user.name || person?.name || user.identifier,
+    },
+    profile: person || null,
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { json(res, 200, {}); return; }
 
   const u    = new URL(req.url, 'http://localhost');
   const path = u.pathname;
+
+  // ── POST /sync/auth/login ─────────────────────────────────────────────────
+  if (req.method === 'POST' && path === '/sync/auth/login') {
+    try {
+      const body = await readBody(req);
+      const identifier = normalizeIdentifier(body.identifier);
+      const password = String(body.password || '');
+      if (!identifier || !password) {
+        json(res, 400, { error: 'Email or phone and password are required.' });
+        return;
+      }
+
+      let user = findAuthUser(identifier);
+      let person = findPersonByIdentifier(identifier);
+
+      if (user && user.passwordHash && user.passwordHash !== passwordHash(password)) {
+        json(res, 401, { error: 'Invalid credentials' });
+        return;
+      }
+
+      if (!user) {
+        if (!person) {
+          person = ensurePersonFromAuth({ identifier, name: identifier });
+        }
+        user = upsertAuthUser({ identifier, password, person, deviceId: body.deviceId });
+      } else {
+        if (!person) person = findPersonByIdentifier(user.email || user.phone || user.identifier);
+        user.lastLoginAt = new Date().toISOString();
+        if (body.deviceId && !user.deviceIds.includes(body.deviceId)) user.deviceIds.push(body.deviceId);
+      }
+
+      if (person) {
+        person.playbackRegistered = true;
+        person.playbackRegisteredAt = person.playbackRegisteredAt || new Date().toISOString();
+      }
+      persist();
+      json(res, 200, authResponse(user, person));
+    } catch (e) {
+      json(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // ── POST /sync/auth/register ──────────────────────────────────────────────
+  if (req.method === 'POST' && path === '/sync/auth/register') {
+    try {
+      const body = await readBody(req);
+      const identifier = normalizeIdentifier(body.identifier || body.email);
+      const password = String(body.password || '');
+      if (!identifier || !password) {
+        json(res, 400, { error: 'Email and password are required.' });
+        return;
+      }
+      if (findAuthUser(identifier)) {
+        json(res, 409, { error: 'Account already exists. Please sign in.' });
+        return;
+      }
+      const person = ensurePersonFromAuth({
+        identifier,
+        name: body.name,
+        phone: body.phone,
+      });
+      person.playbackRegistered = true;
+      person.playbackRegisteredAt = person.playbackRegisteredAt || new Date().toISOString();
+      const user = upsertAuthUser({ identifier, password, person, deviceId: body.deviceId });
+      persist();
+      json(res, 200, authResponse(user, person));
+    } catch (e) {
+      json(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // ── POST /sync/auth/verify and /sync/auth/resend ──────────────────────────
+  if (req.method === 'POST' && (path === '/sync/auth/verify' || path === '/sync/auth/resend')) {
+    try {
+      const body = await readBody(req);
+      const identifier = normalizeIdentifier(body.identifier);
+      const user = findAuthUser(identifier);
+      const person = findPersonByIdentifier(identifier);
+      if (path.endsWith('/resend')) {
+        json(res, 200, { ok: true });
+        return;
+      }
+      if (!user && !person) {
+        json(res, 404, { error: 'Account not found' });
+        return;
+      }
+      json(res, 200, authResponse(user || upsertAuthUser({ identifier, password: 'temporary', person, deviceId: body.deviceId }), person));
+    } catch (e) {
+      json(res, 400, { error: e.message });
+    }
+    return;
+  }
+
+  // ── POST /sync/auth/forgot-password ───────────────────────────────────────
+  if (req.method === 'POST' && path === '/sync/auth/forgot-password') {
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  // ── POST /sync/auth/reset-password and /sync/auth/change-password ─────────
+  if (req.method === 'POST' && (path === '/sync/auth/reset-password' || path === '/sync/auth/change-password')) {
+    try {
+      const body = await readBody(req);
+      const identifier = normalizeIdentifier(body.identifier);
+      const newPassword = String(body.newPassword || '');
+      const currentPassword = String(body.currentPassword || '');
+      const user = findAuthUser(identifier);
+      if (!user) {
+        json(res, 404, { error: 'Account not found' });
+        return;
+      }
+      if (path.endsWith('/change-password') && user.passwordHash !== passwordHash(currentPassword)) {
+        json(res, 401, { error: 'Current password is incorrect' });
+        return;
+      }
+      if (!newPassword) {
+        json(res, 400, { error: 'New password is required' });
+        return;
+      }
+      user.passwordHash = passwordHash(newPassword);
+      user.passwordUpdatedAt = new Date().toISOString();
+      persist();
+      json(res, 200, { ok: true });
+    } catch (e) {
+      json(res, 400, { error: e.message });
+    }
+    return;
+  }
 
   // ── POST /sync/publish ─────────────────────────────────────────────────────
   if (req.method === 'POST' && path === '/sync/publish') {
