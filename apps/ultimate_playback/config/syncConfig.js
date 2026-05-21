@@ -1,14 +1,14 @@
 /**
  * Ultimate Playback — Sync Server Configuration
  *
- * TEMP RECOVERY: https://www-shows-beautifully-developed.trycloudflare.com
+ * CLOUD SYNC: https://ultimate-playback-sync.studio-cinestage.workers.dev
  * LOCAL MIDI:  http://localhost:8099           (local only — for MIDI bridge)
  *
  * Credentials are loaded from environment variables (EXPO_PUBLIC_*).
  * Copy .env.example → .env and fill in real values.
  */
 
-const DEFAULT_SYNC_URL = 'https://www-shows-beautifully-developed.trycloudflare.com';
+const DEFAULT_SYNC_URL = 'https://ultimate-playback-sync.studio-cinestage.workers.dev';
 
 export const SYNC_URL = process.env.EXPO_PUBLIC_SYNC_URL || DEFAULT_SYNC_URL;
 export const CINESTAGE_URL = process.env.EXPO_PUBLIC_CINESTAGE_URL || 'https://cinestage.ultimatelabs.co';
