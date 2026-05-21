@@ -13,7 +13,7 @@ The Ultimate Ecosystem is a two-app worship team management platform:
 | **Ultimate Playback** | Team Members | React Native / Expo SDK 54 |
 | **Sync Server** | Central hub connecting both apps | Node.js HTTP server |
 
-All real-time data (services, team assignments, messages, blockouts, proposals, song library) flows through the sync server at `http://10.0.0.34:8099`.
+Cross-app data (services, team assignments, messages, blockouts, proposals, song library) flows through the configured sync API. Local development can use `sync-server.js` on port `8099`; real iOS builds must use a stable HTTPS endpoint.
 
 ---
 
@@ -21,13 +21,13 @@ All real-time data (services, team assignments, messages, blockouts, proposals, 
 
 ### Location
 ```
-/Users/studio/Desktop/sync-server.js
+/Users/studio/Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/sync-server.js
 ```
-Data is persisted to `/Users/studio/Desktop/sync-data.json` automatically on every change.
+Local data is persisted to `sync-data.json` automatically on every change. That file is local runtime state and is ignored by git.
 
 ### Starting the Server
 ```bash
-node /Users/studio/Desktop/sync-server.js
+node sync-server.js
 ```
 The server starts on port **8099**. You should see:
 ```
@@ -65,12 +65,12 @@ Sync server running on port 8099
 
 ### Location
 ```
-/Users/studio/Desktop/UltimateMusician_BEST
+/Users/studio/Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/primary_app/ultimate_musician_full_project_v3/mobile
 ```
 
 ### Starting the App
 ```bash
-cd /Users/studio/Desktop/UltimateMusician_BEST
+cd /Users/studio/Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/primary_app/ultimate_musician_full_project_v3/mobile
 EXPO_NO_TELEMETRY=1 npx expo start --ios --offline
 ```
 Run on the **iPhone 17 Pro Simulator** (UUID: `95F839AC-F11D-4E01-91FF-DE60F903FAB5`).
@@ -221,12 +221,12 @@ All data is stored in **AsyncStorage** under these keys:
 
 ### Location
 ```
-/Users/studio/Desktop/UltimatePlayback_RUN
+/Users/studio/Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/ultimate_playback
 ```
 
 ### Starting the App
 ```bash
-cd /Users/studio/Desktop/UltimatePlayback_RUN
+cd /Users/studio/Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/ultimate_playback
 npx expo start --ios
 ```
 
@@ -457,7 +457,7 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 ```
 ┌─────────────────────────────┐
 │   Ultimate Musician (Admin) │
-│   ~/Desktop/UltimateMusician_BEST   │
+│   apps/primary_app/.../mobile │
 │                             │
 │  PermissionsScreen   ──────────► POST /sync/grant
 │  ProposalsScreen     ──────────► GET  /sync/proposals
@@ -466,11 +466,11 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 │  ServicePlan         ──────────► POST /sync/publish
 └─────────────────────────────┘
               │
-              │  http://10.0.0.34:8099
+              │  configured HTTPS sync API
               ▼
 ┌─────────────────────────────┐
 │       Sync Server           │
-│   sync-server.js (port 8099)│
+│   sync-server.js or Worker   │
 │   sync-data.json (storage)  │
 │                             │
 │  store.services []          │
@@ -484,11 +484,11 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 │  store.songLibrary {}       │
 └─────────────────────────────┘
               │
-              │  http://10.0.0.34:8099
+              │  configured HTTPS sync API
               ▼
 ┌─────────────────────────────┐
 │  Ultimate Playback (Team)   │
-│  ~/Desktop/UltimatePlayback_RUN     │
+│  apps/ultimate_playback       │
 │                             │
 │  HomeScreen (pull refresh) ─────► GET /sync/role?email
 │  AssignmentsScreen ─────────────► POST /sync/assignment/respond
@@ -504,9 +504,9 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 ## Part 6 — Common Issues & Tips
 
 ### Server not reachable
-- Make sure `sync-server.js` is running: `node /Users/studio/Desktop/sync-server.js`
-- Verify the IP: device and server must be on the same Wi-Fi network
-- Server IP is hardcoded as `10.0.0.34` — if your Mac's IP changes, update `SYNC_URL` in both apps
+- For local development, make sure `sync-server.js` is running from the monorepo root: `node sync-server.js`
+- For real iOS/TestFlight, do not use localhost, LAN IPs, or temporary tunnels. Use a stable HTTPS sync URL.
+- Ultimate Playback currently points to `https://ultimate-playback-sync.studio-cinestage.workers.dev` for auth/status recovery.
 
 ### Changes not showing up
 - Pull down to refresh in the Playback app HomeScreen
@@ -532,23 +532,23 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 
 | File | Purpose |
 |------|---------|
-| `/Users/studio/Desktop/sync-server.js` | Sync server (run this first) |
-| `/Users/studio/Desktop/sync-data.json` | Persisted server data |
-| `UltimateMusician_BEST/screens/PermissionsScreen.js` | Role grant management |
-| `UltimateMusician_BEST/screens/ProposalsScreen.js` | Approve/reject content |
-| `UltimateMusician_BEST/screens/HomeScreen.js` | Quick pills + navigation hub |
-| `UltimateMusician_BEST/App.js` | Navigation stack |
-| `UltimatePlayback_RUN/src/screens_v2/HomeScreen.js` | Dashboard + MD banner |
-| `UltimatePlayback_RUN/src/screens_v2/AdminDashboardScreen.js` | MD/Admin control panel |
-| `UltimatePlayback_RUN/src/screens_v2/AssignmentsScreen.js` | Accept/decline assignments |
-| `UltimatePlayback_RUN/src/screens_v2/BlockoutCalendarScreen.js` | Availability management |
-| `UltimatePlayback_RUN/src/screens_v2/MessagesScreen.js` | Team communications |
-| `UltimatePlayback_RUN/src/screens_v2/SetlistScreen.js` | Song list view |
-| `UltimatePlayback_RUN/src/screens_v2/SetlistRunnerScreen.js` | Performance mode |
-| `UltimatePlayback_RUN/src/screens_v2/ContentEditorScreen.js` | Submit lyrics/chord charts |
-| `UltimatePlayback_RUN/App.js` | Navigation stack |
+| `sync-server.js` | Local sync server |
+| `sync-data.json` | Local persisted server data, ignored |
+| `apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PermissionsScreen.js` | Role grant management |
+| `apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ProposalsScreen.js` | Approve/reject content |
+| `apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/HomeScreen.js` | Quick pills + navigation hub |
+| `apps/primary_app/ultimate_musician_full_project_v3/mobile/App.js` | Admin navigation stack |
+| `apps/ultimate_playback/src/screens_v2/HomeScreen.js` | Dashboard + MD banner |
+| `apps/ultimate_playback/src/screens_v2/AdminDashboardScreen.js` | MD/Admin control panel |
+| `apps/ultimate_playback/src/screens_v2/AssignmentsScreen.js` | Accept/decline assignments |
+| `apps/ultimate_playback/src/screens_v2/BlockoutCalendarScreen.js` | Availability management |
+| `apps/ultimate_playback/src/screens_v2/MessagesScreen.js` | Team communications |
+| `apps/ultimate_playback/src/screens_v2/SetlistScreen.js` | Song list view |
+| `apps/ultimate_playback/src/screens_v2/SetlistRunnerScreen.js` | Performance mode |
+| `apps/ultimate_playback/src/screens_v2/ContentEditorScreen.js` | Submit lyrics/chord charts |
+| `apps/ultimate_playback/App.js` | Playback navigation stack |
 
 ---
 
 *Built for Jefferson Nascimento and the worship team.*
-*Both apps require the sync server to be running for any cross-app features to work.*
+*Cross-app features require a reachable configured sync API. Local development can run `sync-server.js`; real device builds must use stable HTTPS.*

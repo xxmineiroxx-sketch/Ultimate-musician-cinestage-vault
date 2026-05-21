@@ -7,7 +7,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 | Secret | Description |
 |--------|-------------|
 | `EXPO_TOKEN` | EAS access token from [expo.dev/settings/access-tokens](https://expo.dev/settings/access-tokens) |
-| `EXPO_PUBLIC_SYNC_URL` | Sync server URL (e.g. `https://ultimatelabs.pages.dev`) |
+| `EXPO_PUBLIC_SYNC_URL` | Sync server URL. Playback currently uses `https://ultimate-playback-sync.studio-cinestage.workers.dev`; Musician may use the full sync backend URL. |
 | `EXPO_PUBLIC_CINESTAGE_URL` | CineStage API URL (e.g. `https://cinestage.ultimatelabs.co`) |
 | `EXPO_PUBLIC_SYNC_ORG_ID` | Organization ID |
 | `EXPO_PUBLIC_SYNC_SECRET_KEY` | Organization secret key |
