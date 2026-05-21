@@ -1,15 +1,17 @@
 /**
  * screens/config.js — shared network config for all Musician screens.
  * Credentials are loaded dynamically from AsyncStorage to support multi-branch.
- * Falls back to the default (root) org credentials if no branch is configured.
+ * Falls back to environment variables if no branch is configured.
+ *
+ * Copy .env.example → .env and fill in real values.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Sync server: Cloudflare Pages (global, always-on, no local server needed)
-export const SYNC_URL = "https://ultimatelabs.pages.dev";
+export const SYNC_URL = process.env.EXPO_PUBLIC_SYNC_URL || "https://ultimatelabs.pages.dev";
 
 // CineStage AI REST API — Cloudflare Container (deployed, Railway eliminated)
-export const CINESTAGE_URL = "https://cinestage.studio-cinestage.workers.dev";
+export const CINESTAGE_URL = process.env.EXPO_PUBLIC_CINESTAGE_URL || "https://cinestage.ultimatelabs.co";
 
 // CineStage Data API — use this for all data operations (songs/services/people/plans)
 // Mirrors the /sync/* contract but runs on CineStage Container
@@ -19,12 +21,20 @@ export const API_URL = CINESTAGE_URL;
 export const WS_URL = CINESTAGE_URL.replace("https://", "wss://").replace("http://", "ws://");
 
 // ── Default (root org) credentials ───────────────────────────────────────────
-export const SYNC_ORG_ID = "zpneef0a5ov732c0";
-export const SYNC_SECRET_KEY = "erflpo0e4pg33h85v58v7cfvpd6eoycv";
+// Build-time env vars take priority; empty string means misconfiguration.
+const DEFAULT_SYNC_ORG_ID = process.env.EXPO_PUBLIC_SYNC_ORG_ID || "";
+const DEFAULT_SYNC_SECRET_KEY = process.env.EXPO_PUBLIC_SYNC_SECRET_KEY || "";
+
+export const SYNC_ORG_ID = DEFAULT_SYNC_ORG_ID;
+export const SYNC_SECRET_KEY = DEFAULT_SYNC_SECRET_KEY;
+
+// Exposed defaults so callers can detect whether a custom branch is active.
+export const SYNC_ORG_ID_DEFAULT = DEFAULT_SYNC_ORG_ID;
+export const SYNC_SECRET_KEY_DEFAULT = DEFAULT_SYNC_SECRET_KEY;
 
 // ── Runtime credentials (may be overridden by loadBranchConfig) ───────────────
-let _orgId = SYNC_ORG_ID;
-let _secKey = SYNC_SECRET_KEY;
+let _orgId = DEFAULT_SYNC_ORG_ID;
+let _secKey = DEFAULT_SYNC_SECRET_KEY;
 
 /**
  * Call once at app startup (LandingScreen useEffect).

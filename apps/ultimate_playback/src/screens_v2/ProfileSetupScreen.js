@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, saveUserProfile } from '../services/storage';
 import { syncProfileToTeamMembers } from '../services/sharedStorage';
 import { logout } from '../services/authAPI';
+import { useAuth } from '../context/AuthContext';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { parseRoleAssignments } from '../models_v2/models';
 
@@ -425,6 +426,8 @@ export default function ProfileSetupScreen({ navigation }) {
     }
   };
 
+  const { signOut } = useAuth();
+
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -432,8 +435,7 @@ export default function ProfileSetupScreen({ navigation }) {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
-          await logout();
-          navigation.getParent()?.reset({ index: 0, routes: [{ name: 'Login' }] });
+          await signOut();
         },
       },
     ]);

@@ -1,11 +1,14 @@
 node_modules/
 .expo/
 .expo-shared/
+**/.expo/
+**/.expo-shared/
 ios/
 android/
 dist/
 build/
 *.log
+sync-data.json
 .env
 .env.local
 .DS_Store
