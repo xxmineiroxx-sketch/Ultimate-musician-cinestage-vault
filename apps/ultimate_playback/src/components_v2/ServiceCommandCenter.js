@@ -87,9 +87,10 @@ function serviceCountdown(service) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ServiceCommandCenter({ nextServiceGroup, userProfile, onNavigate }) {
-  const [songs, setSongs]         = useState([]);
-  const [teamPulse, setTeamPulse] = useState([]);
-  const [expanded, setExpanded]   = useState(true);
+  const [songs, setSongs]               = useState([]);
+  const [teamPulse, setTeamPulse]       = useState([]);
+  const [practiceData, setPracticeData] = useState(null);
+  const [expanded, setExpanded]         = useState(true);
   const barAnims = useRef([]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -102,10 +103,12 @@ export default function ServiceCommandCenter({ nextServiceGroup, userProfile, on
     try {
       const ctrl = new AbortController();
       const tid  = setTimeout(() => ctrl.abort(), 5000);
-      const [setlistRes, pulseRes] = await Promise.all([
+      const [setlistRes, pulseRes, practiceRes] = await Promise.all([
         fetch(`${SYNC_URL}/sync/setlist?serviceId=${encodeURIComponent(serviceId)}`,
               { headers: syncHeaders(), signal: ctrl.signal }),
         fetch(`${SYNC_URL}/sync/team-pulse?serviceId=${encodeURIComponent(serviceId)}`,
+              { headers: syncHeaders(), signal: ctrl.signal }),
+        fetch(`${SYNC_URL}/sync/practice?serviceId=${encodeURIComponent(serviceId)}`,
               { headers: syncHeaders(), signal: ctrl.signal }),
       ]).finally(() => clearTimeout(tid));
 
@@ -116,6 +119,10 @@ export default function ServiceCommandCenter({ nextServiceGroup, userProfile, on
       if (pulseRes.ok) {
         const data = await pulseRes.json();
         if (Array.isArray(data)) setTeamPulse(data);
+      }
+      if (practiceRes.ok) {
+        const data = await practiceRes.json();
+        if (data?.songs || data?.members) setPracticeData(data);
       }
     } catch (_) {}
   }, [serviceId]);
@@ -396,6 +403,64 @@ export default function ServiceCommandCenter({ nextServiceGroup, userProfile, on
               </View>
             ))}
 
+            {/* ── SECTION 4: PRACTICE TRACKER ── */}
+            {practiceData && (practiceData.songs?.length > 0 || practiceData.members?.length > 0) && (
+              <>
+                <View style={[styles.sectionHeader, { marginTop: 18 }]}>
+                  <Text style={styles.sectionLabel}>PRACTICE TRACKER</Text>
+                  <View style={styles.sectionLine} />
+                </View>
+
+                {/* Per-song readiness bars */}
+                {practiceData.songs?.map((s, i) => {
+                  const pct = s.memberCount > 0 ? s.readyCount / s.memberCount : 0;
+                  const color = pct >= 0.8 ? '#10B981' : pct >= 0.5 ? '#F59E0B' : '#EF4444';
+                  const mins = Math.round((s.totalDurationSec || 0) / 60);
+                  return (
+                    <View key={i} style={styles.practiceRow}>
+                      <View style={styles.practiceSongInfo}>
+                        <Text style={styles.practiceSongTitle} numberOfLines={1}>{s.title}</Text>
+                        <Text style={styles.practiceSongMeta}>
+                          {s.readyCount}/{s.memberCount} ready
+                          {mins > 0 ? `  ·  ${mins}m practiced` : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.practiceBarTrack}>
+                        <View style={[styles.practiceBarFill, { width: `${Math.round(pct * 100)}%`, backgroundColor: color }]} />
+                      </View>
+                      <Text style={[styles.practicePct, { color }]}>{Math.round(pct * 100)}%</Text>
+                    </View>
+                  );
+                })}
+
+                {/* Per-member practice summary */}
+                {practiceData.members?.length > 0 && (
+                  <>
+                    <Text style={styles.practiceSubLabel}>MEMBER ACTIVITY</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ marginHorizontal: -4 }}
+                      contentContainerStyle={{ paddingHorizontal: 4, gap: 8 }}
+                    >
+                      {practiceData.members.map((m, i) => {
+                        const mins = Math.round((m.totalDurationSec || 0) / 60);
+                        const allReady = m.songsReady === songs.length && songs.length > 0;
+                        return (
+                          <View key={i} style={[styles.practiceMemberChip, allReady && styles.practiceMemberChipReady]}>
+                            <Text style={styles.practiceMemberName}>{m.name?.split(' ')[0] || '—'}</Text>
+                            <Text style={styles.practiceMemberStats}>
+                              {m.songsReady} ✓  ·  {mins}m
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  </>
+                )}
+              </>
+            )}
+
             {/* ── Footer quick-action ── */}
             {onNavigate && (
               <TouchableOpacity
@@ -659,6 +724,76 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 17,
+  },
+
+  // Practice tracker
+  practiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  practiceSongInfo: { flex: 1 },
+  practiceSongTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#CBD5E1',
+  },
+  practiceSongMeta: {
+    fontSize: 10,
+    color: '#475569',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  practiceBarTrack: {
+    width: 70,
+    height: 5,
+    backgroundColor: 'rgba(51,65,85,0.6)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  practiceBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  practicePct: {
+    fontSize: 11,
+    fontWeight: '800',
+    width: 36,
+    textAlign: 'right',
+  },
+  practiceSubLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#334155',
+    letterSpacing: 1.2,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  practiceMemberChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(30,41,59,0.7)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(71,85,105,0.4)',
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  practiceMemberChipReady: {
+    borderColor: 'rgba(16,185,129,0.4)',
+    backgroundColor: 'rgba(16,185,129,0.06)',
+  },
+  practiceMemberName: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#E2E8F0',
+    marginBottom: 3,
+  },
+  practiceMemberStats: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '600',
   },
 
   // Footer

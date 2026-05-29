@@ -4,6 +4,13 @@
  */
 
 import { CINESTAGE_URL } from '../screens/config';
+import {
+  analyzeWaveform as analyzeWaveformClient,
+  getABStatus as getABStatusClient,
+  getCineStageHealth,
+  getWaveformCues as getWaveformCuesClient,
+  scanDevices as scanDevicesClient,
+} from '../services/cinestage/client';
 const API_BASE_URL = CINESTAGE_URL || 'http://localhost:8000';
 
 /**
@@ -11,18 +18,7 @@ const API_BASE_URL = CINESTAGE_URL || 'http://localhost:8000';
  */
 export const scanDevices = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/devices/scan`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
-    }
-
-    return await response.json();
+    return await scanDevicesClient();
   } catch (error) {
     console.error('Error scanning devices:', error);
     return {
@@ -102,10 +98,8 @@ export const testDeviceRecall = async (deviceType, config) => {
  */
 export const checkBackendHealth = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`, {
-      method: 'GET',
-    });
-    return response.ok;
+    await getCineStageHealth();
+    return true;
   } catch (error) {
     return false;
   }
@@ -116,13 +110,14 @@ export const checkBackendHealth = async () => {
  */
 export const analyzeWaveform = async (songId, resolution = 100) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/waveform/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ songId, resolution }),
+    return await analyzeWaveformClient({
+      song_id: songId,
+      songId,
+      waveform_points: resolution,
+      waveformPoints: resolution,
+      n_bars: resolution,
+      nBars: resolution,
     });
-    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-    return await response.json();
   } catch (error) {
     console.error('Error analyzing waveform:', error);
     return { status: 'error', message: error.message };
@@ -134,9 +129,7 @@ export const analyzeWaveform = async (songId, resolution = 100) => {
  */
 export const getABStatus = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/waveform/ab/status`);
-    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-    return await response.json();
+    return await getABStatusClient();
   } catch (error) {
     return { activeRig: 'A', rigs: { A: { healthy: true, active: true }, B: { healthy: true, active: false } } };
   }
@@ -147,9 +140,7 @@ export const getABStatus = async () => {
  */
 export const getWaveformCues = async (songId) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/waveform/cues/${encodeURIComponent(songId)}`);
-    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-    return await response.json();
+    return await getWaveformCuesClient(songId);
   } catch (error) {
     return { songId, cues: [] };
   }

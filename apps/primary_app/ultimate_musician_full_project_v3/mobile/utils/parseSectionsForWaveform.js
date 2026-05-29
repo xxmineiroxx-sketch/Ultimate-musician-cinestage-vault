@@ -1,45 +1,10 @@
 /**
  * parseSectionsForWaveform(chart, durationSec)
  *
- * Parses a lyrics/chord chart and returns section cue markers for the waveform
- * pipeline.  Handles all common formats:
- *
- *   [Verse 1]              → bracket format
- *   Intro:| C | Am | ...   → label-colon (content on same line)
- *   Verse 1                → bare line (title-case or ALL CAPS)
- *   REPEAT CHORUS          → all-caps with compound name
- *   Alt Chorus             → adjective + section keyword
- *   Channel 2              → named instrument section with number
- *
- * Returns: Array<{ label, timeSec, positionSeconds, color }>
+ * Parses a lyrics/chord chart and returns section cue markers for the waveform.
+ * Delegates vocabulary to sectionUtils — single source of truth for EN + PT-BR.
  */
-
-// ── Vocabulary ─────────────────────────────────────────────────────────────────
-// These keywords (and their prefixes) are recognised as section markers.
-const SECTION_RE =
-  /^(intro|verse|chorus|bridge|outro|pre[\s-]?chorus|channel|vamp|tag|hook|interlude|break|instrumental|solo|turnaround|refrain|coda|ending|repeat|alt(?:ernate)?|vamp|fill|part\s*\d|section\s*\d)/i;
-
-// Color palette per section type
-const COLOR_MAP = [
-  [/intro/i,                '#6B7280'],
-  [/verse/i,                '#6366F1'],
-  [/pre.?chorus/i,          '#8B5CF6'],
-  [/repeat.?chorus|chorus/i,'#EC4899'],
-  [/bridge/i,               '#F59E0B'],
-  [/outro|coda|ending/i,    '#10B981'],
-  [/channel|interlude/i,    '#0EA5E9'],
-  [/vamp|tag|hook|fill/i,   '#F97316'],
-  [/instrumental|break|solo/i, '#6B7280'],
-  [/alt/i,                  '#F472B6'],
-  [/repeat/i,               '#EC4899'],
-];
-
-function colorFor(label) {
-  for (const [re, color] of COLOR_MAP) {
-    if (re.test(label)) return color;
-  }
-  return '#6366F1';
-}
+import { SECTION_RE, colorForSection } from './sectionUtils';
 
 function toTitleCase(str) {
   return str
@@ -50,7 +15,6 @@ function toTitleCase(str) {
     .join(' ');
 }
 
-// ── Main export ────────────────────────────────────────────────────────────────
 export function parseSectionsForWaveform(chart, durationSec) {
   if (!chart || durationSec <= 0) return [];
 
@@ -60,27 +24,27 @@ export function parseSectionsForWaveform(chart, durationSec) {
 
   lines.forEach((line, idx) => {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.length > 60) return;
+    if (!trimmed || trimmed.length > 80) return;
 
-    let rawLabel = null;
+    let rawLabel    = null;
+    let fromBracket = false;
 
-    // ── Format 1: [Section Name] ──────────────────────────────────────────────
+    // Format 1: [Section Name]
     const bracket = trimmed.match(/^\[([^\]]+)\]$/);
     if (bracket) {
-      rawLabel = bracket[1];
+      rawLabel    = bracket[1];
+      fromBracket = true;
     }
 
-    // ── Format 2: "Label:" or "Label:| chords |..." ────────────────────────
+    // Format 2: "Label:" or "Label:| chords |..."
     if (!rawLabel) {
-      const colon = trimmed.match(/^([A-Za-z][A-Za-z0-9\s\-]*?)\s*:/);
+      const colon = trimmed.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-]*?)\s*:/);
       if (colon && SECTION_RE.test(colon[1].trim())) {
         rawLabel = colon[1].trim();
       }
     }
 
-    // ── Format 3: Bare standalone line ───────────────────────────────────────
-    // Accept if: matches SECTION_RE, short, no chord-bar delimiters, not a
-    // single chord letter (C, Am, G#, etc.)
+    // Format 3: Bare standalone section line
     if (!rawLabel) {
       const isChordLine = /^\|/.test(trimmed) || /^[A-G][b#m]?\s*$/.test(trimmed);
       if (!isChordLine && trimmed.length < 50 && SECTION_RE.test(trimmed)) {
@@ -89,18 +53,16 @@ export function parseSectionsForWaveform(chart, durationSec) {
     }
 
     if (!rawLabel) return;
-
     rawLabel = rawLabel.trim();
-    if (!SECTION_RE.test(rawLabel)) return;
+    if (!fromBracket && !SECTION_RE.test(rawLabel)) return;
 
-    const label     = toTitleCase(rawLabel);
-    const timeSec   = (idx / total) * durationSec;
-    const color     = colorFor(label);
+    const label   = toTitleCase(rawLabel);
+    const timeSec = (idx / total) * durationSec;
+    const color   = colorForSection(label);
 
     results.push({ label, timeSec, positionSeconds: timeSec, color });
   });
 
-  // Remove consecutive duplicates (e.g. two lines both saying "Chorus")
   const deduped = results.filter(
     (s, i) => i === 0 || s.label !== results[i - 1].label,
   );

@@ -20,6 +20,7 @@ import {
   useWindowDimensions,
   Image,
   Animated,
+  Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -530,6 +531,60 @@ export default function HomeScreen({ navigation }) {
     } catch (_) {}
   }, []);
 
+  // Schedule local push reminders 3 days + 1 day before each upcoming service
+  const scheduleServiceReminders = useCallback(async (upcomingGroups) => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+      // Cancel old reminders
+      await Promise.all(notifIdsRef.current.map(id =>
+        Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
+      ));
+      notifIdsRef.current = [];
+      const now = Date.now();
+      for (const group of upcomingGroups) {
+        const a = group[0];
+        const serviceDate = a.service_date || a.date;
+        if (!serviceDate) continue;
+        const dateStr = String(serviceDate).includes('T') ? serviceDate : serviceDate + 'T09:00:00';
+        const svcMs = new Date(dateStr).getTime();
+        if (isNaN(svcMs)) continue;
+        const svcName = a.service_name || a.name || 'Service';
+        const roles = [...new Set(group.map(g => ROLE_LABELS[g.role] || g.role).filter(Boolean))];
+        const roleStr = roles.join(', ') || 'team member';
+        // 3-day reminder
+        const threeDayMs = svcMs - (3 * 24 * 60 * 60 * 1000);
+        if (threeDayMs > now + 60000) {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `📅 3-Day Reminder: ${svcName}`,
+              body: `You're serving as ${roleStr}. Service is in 3 days — prepare now!`,
+              sound: true,
+              data: { serviceId: a.service_id, type: 'service_reminder' },
+            },
+            trigger: { type: 'date', date: new Date(threeDayMs) },
+          }).catch(() => null);
+          if (id) notifIdsRef.current.push(id);
+        }
+        // 1-day reminder
+        const oneDayMs = svcMs - (24 * 60 * 60 * 1000);
+        if (oneDayMs > now + 60000) {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `⚡ Tomorrow: ${svcName}`,
+              body: `Don't forget — you're serving as ${roleStr} tomorrow!`,
+              sound: true,
+              data: { serviceId: a.service_id, type: 'service_reminder' },
+            },
+            trigger: { type: 'date', date: new Date(oneDayMs) },
+          }).catch(() => null);
+          if (id) notifIdsRef.current.push(id);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
   const loadDashboardData = useCallback(async () => {
     const userProfile = await getUserProfile();
     let userAssignments = await getAssignments();
@@ -821,60 +876,6 @@ export default function HomeScreen({ navigation }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Schedule local push reminders 3 days + 1 day before each upcoming service
-  const scheduleServiceReminders = useCallback(async (upcomingGroups) => {
-    if (Platform.OS === 'web') return;
-    try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') return;
-      // Cancel old reminders
-      await Promise.all(notifIdsRef.current.map(id =>
-        Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
-      ));
-      notifIdsRef.current = [];
-      const now = Date.now();
-      for (const group of upcomingGroups) {
-        const a = group[0];
-        const serviceDate = a.service_date || a.date;
-        if (!serviceDate) continue;
-        const dateStr = String(serviceDate).includes('T') ? serviceDate : serviceDate + 'T09:00:00';
-        const svcMs = new Date(dateStr).getTime();
-        if (isNaN(svcMs)) continue;
-        const svcName = a.service_name || a.name || 'Service';
-        const roles = [...new Set(group.map(g => ROLE_LABELS[g.role] || g.role).filter(Boolean))];
-        const roleStr = roles.join(', ') || 'team member';
-        // 3-day reminder
-        const threeDayMs = svcMs - (3 * 24 * 60 * 60 * 1000);
-        if (threeDayMs > now + 60000) {
-          const id = await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `📅 3-Day Reminder: ${svcName}`,
-              body: `You're serving as ${roleStr}. Service is in 3 days — prepare now!`,
-              sound: true,
-              data: { serviceId: a.service_id, type: 'service_reminder' },
-            },
-            trigger: { type: 'date', date: new Date(threeDayMs) },
-          }).catch(() => null);
-          if (id) notifIdsRef.current.push(id);
-        }
-        // 1-day reminder
-        const oneDayMs = svcMs - (24 * 60 * 60 * 1000);
-        if (oneDayMs > now + 60000) {
-          const id = await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `⚡ Tomorrow: ${svcName}`,
-              body: `Don't forget — you're serving as ${roleStr} tomorrow!`,
-              sound: true,
-              data: { serviceId: a.service_id, type: 'service_reminder' },
-            },
-            trigger: { type: 'date', date: new Date(oneDayMs) },
-          }).catch(() => null);
-          if (id) notifIdsRef.current.push(id);
-        }
-      }
-    } catch (_) {}
-  }, []);
-
   // Only count upcoming/today assignments (not past services)
   const activeAssignments = assignments.filter(a => !isPastService(a.service_date));
   const serviceGroups = groupByService(activeAssignments);
@@ -960,20 +961,27 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.brandSubtitle}>CINESTAGE™</Text>
             <Text style={styles.brandTitle}>Ultimate Playback</Text>
           </View>
-          <TouchableOpacity 
-            style={styles.headerAvatar}
+          <TouchableOpacity
+            style={{ alignItems: 'center', gap: 4 }}
             onPress={() => navigation.navigate('ProfileTab')}
           >
-            {profile?.photo_url || profile?.photo || profile?.avatar || profile?.image ? (
-              <Image 
-                source={{ uri: profile.photo_url || profile.photo || profile.avatar || profile.image }} 
-                style={styles.avatarImage} 
-              />
-            ) : (
-              <Text style={styles.avatarInitial}>
-                {profile?.name ? profile.name.charAt(0).toUpperCase() : '👤'}
+            <View style={styles.headerAvatar}>
+              {profile?.photo_url || profile?.photo || profile?.avatar || profile?.image ? (
+                <Image
+                  source={{ uri: profile.photo_url || profile.photo || profile.avatar || profile.image }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <Text style={styles.avatarInitial}>
+                  {profile?.name ? profile.name.charAt(0).toUpperCase() : '👤'}
+                </Text>
+              )}
+            </View>
+            {profile?.name ? (
+              <Text style={{ color: '#A5B4FC', fontSize: 11, fontWeight: '600', maxWidth: 90, textAlign: 'center' }} numberOfLines={1}>
+                {profile.name} {profile.lastName || ''}
               </Text>
-            )}
+            ) : null}
           </TouchableOpacity>
         </View>
 
@@ -1023,18 +1031,7 @@ export default function HomeScreen({ navigation }) {
 
       <View style={isTablet && styles.tabletRow}>
         <View style={isTablet && styles.tabletColumn}>
-          {profile ? (
-            <ModernDashboardCard variant="setup">
-              <Text style={styles.welcomeText}>
-                Welcome back, {profile.name} {profile.lastName}!
-              </Text>
-              <Text style={styles.roleText}>
-                {profile.roleAssignments
-                  ? `Roles: ${profile.roleAssignments}`
-                  : 'No roles set yet'}
-              </Text>
-            </ModernDashboardCard>
-          ) : (
+          {!profile && (
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => navigation.navigate('ProfileTab')}
@@ -1050,21 +1047,6 @@ export default function HomeScreen({ navigation }) {
               </ModernDashboardCard>
             </TouchableOpacity>
           )}
-
-          {brainStatus ? (
-            <ModernDashboardCard variant="setup">
-              <View style={{ alignItems: 'center' }}>
-                <Text style={styles.setupIcon}>🧠</Text>
-                <Text style={styles.setupTitle}>CineStage Brain Online</Text>
-                <Text style={styles.setupText}>
-                  v{brainStatus.version} · {brainStatus.summary?.feature_group_count || 0} feature groups
-                </Text>
-                <Text style={styles.setupText}>
-                  Agents: {brainStatus.summary?.internal_agent_count || 0} · Apps: {(brainStatus.apps || []).join(', ')}
-                </Text>
-              </View>
-            </ModernDashboardCard>
-          ) : null}
 
           {/* Admin / Manager / MD Panel card */}
           {mdRole && mdRole !== 'leader' && (
@@ -1209,6 +1191,49 @@ export default function HomeScreen({ navigation }) {
           })}
         </View>
       )}
+
+      {/* CineStage Brain Online */}
+      {brainStatus ? (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('CineStageBrain', { brainStatus })}
+        >
+          <ModernDashboardCard variant="setup">
+            <View style={{ alignItems: 'center' }}>
+              <Text style={styles.setupIcon}>🧠</Text>
+              <Text style={styles.setupTitle}>CineStage Brain Online</Text>
+              <View
+                style={{
+                  marginTop: 10,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: '#0B3B1E',
+                  borderWidth: 1,
+                  borderColor: '#1F7A45',
+                }}
+              >
+                <View style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: '#22C55E' }} />
+                <Text style={[styles.setupText, { color: '#DCFCE7', marginTop: 0, fontWeight: '800' }]}>
+                  Connected to CineStage Cloud
+                </Text>
+              </View>
+              <Text style={styles.setupText}>
+                v{brainStatus.version} · {brainStatus.summary?.feature_group_count || 0} feature groups
+              </Text>
+              <Text style={styles.setupText}>
+                Agents: {brainStatus.summary?.internal_agent_count || 0} · Apps: {(brainStatus.apps || []).join(', ')}
+              </Text>
+              <Text style={[styles.setupText, { color: '#818CF8', marginTop: 8, fontWeight: '700' }]}>
+                Tap to view CineStage cloud status
+              </Text>
+            </View>
+          </ModernDashboardCard>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Service Command Center for worship leaders / admins; Preparation Hub for regular members */}
       {(mdRole === 'md' || mdRole === 'admin' || mdRole === 'worship_leader' || mdRole === 'owner' || mdRole === 'org_owner' || mdRole === 'manager')
@@ -1383,9 +1408,25 @@ export default function HomeScreen({ navigation }) {
       )}
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Ultimate Playback • Team Member App
-        </Text>
+        <Text style={styles.footerText}>Ultimate Playback • Team Member App</Text>
+        <TouchableOpacity
+          onPress={() => Linking.openURL('https://playback.ultimatelabs.co')}
+          style={styles.footerLink}
+        >
+          <Text style={styles.footerLinkLabel}>Web Portal</Text>
+          <Text style={styles.footerLinkUrl}>playback.ultimatelabs.co</Text>
+        </TouchableOpacity>
+        {['owner', 'organizer', 'admin', 'worship_leader', 'worship leader'].includes(
+          String(profile?.grantedRole || '').toLowerCase()
+        ) && (
+          <TouchableOpacity
+            onPress={() => Linking.openURL('https://musician.ultimatelabs.co')}
+            style={[styles.footerLink, { marginTop: 8 }]}
+          >
+            <Text style={styles.footerLinkLabel}>Ultimate Musician</Text>
+            <Text style={styles.footerLinkUrl}>musician.ultimatelabs.co</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
     </View>
@@ -2017,10 +2058,33 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: 'center',
     marginTop: 24,
+    paddingBottom: 8,
   },
   footerText: {
     fontSize: 12,
     color: '#6B7280',
+  },
+  footerLink: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    alignItems: 'center',
+  },
+  footerLinkLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  footerLinkUrl: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#818CF8',
   },
   tabletRow: {
     flexDirection: 'row',

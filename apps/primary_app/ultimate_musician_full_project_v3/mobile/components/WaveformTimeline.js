@@ -4,7 +4,9 @@ import { StyleSheet, Text, TouchableOpacity, View, Animated, Easing } from "reac
 import {
   normalizePeaksRange,
   smoothPeaks,
+  quantizedJumpTarget,
 } from "../services/wavePipelineEngine";
+import predictiveConductor from "../services/predictiveConductor";
 
 /** Strip trailing numbers/spaces so "Verse 1", "Bridge8" → "verse", "bridge". */
 function normLabel(label) {
@@ -172,6 +174,9 @@ export default function WaveformTimeline({
   onMarkerTap = null,
   onMarkerDrag = null,
   compactSectionMarkers = false,
+  // Predictive Conductor / Haptics
+  hapticMap = [],
+  hapticsEnabled = true,
   // Responsive height override
   height: heightProp = null,
   // Role-aware coloring
@@ -179,6 +184,13 @@ export default function WaveformTimeline({
   roleCue = null,
   // Worship Free / Flow state
   worshipFreeActive = false,
+  // ── Cue Engine (Phase 1) ────────────────────────────────────────────────
+  armedCueLabel = null,   // label of the section currently armed for jump
+  armedCuePct   = null,   // 0‑1 position of armed cue on timeline
+  armedCueColor = '#6366F1',
+  beatsToFire   = 0,      // beat countdown (0 = immediate / fired)
+  jumpMode      = 'BEAT', // 'IMMEDIATE' | 'BEAT' | 'BAR'
+  jumpFlashKey  = 0,      // increments every time a jump fires → triggers flash
 }) {
   const total = lengthSeconds || 1;
   const widthRef = useRef(300);
@@ -224,6 +236,59 @@ export default function WaveformTimeline({
       pulseAnim.setValue(0);
     }
   }, [worshipFreeActive, pulseAnim]);
+
+  // ── Armed Cue — breathing glow ──────────────────────────────────────────
+  const armedGlowAnim  = useRef(new Animated.Value(0)).current;
+  const beamShimmer    = useRef(new Animated.Value(0)).current;
+  const flashAnim      = useRef(new Animated.Value(0)).current;
+  const flashKeyRef    = useRef(jumpFlashKey);
+
+  useEffect(() => {
+    if (armedCuePct !== null) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(armedGlowAnim, { toValue: 1, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          Animated.timing(armedGlowAnim, { toValue: 0.3, duration: 500, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        ])
+      ).start();
+      Animated.loop(
+        Animated.timing(beamShimmer, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: false })
+      ).start();
+    } else {
+      armedGlowAnim.stopAnimation();
+      armedGlowAnim.setValue(0);
+      beamShimmer.stopAnimation();
+      beamShimmer.setValue(0);
+    }
+  }, [armedCuePct !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Flash when a jump fires
+  useEffect(() => {
+    if (jumpFlashKey === flashKeyRef.current) return;
+    flashKeyRef.current = jumpFlashKey;
+    flashAnim.setValue(0.85);
+    Animated.timing(flashAnim, { toValue: 0, duration: 350, easing: Easing.out(Easing.quad), useNativeDriver: false }).start();
+  }, [jumpFlashKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Predictive Haptics (iPhone 17 Pro Max 120Hz optimized) ───────────────
+  const lastHapticTimeRef = useRef(-1);
+  useEffect(() => {
+    if (!hapticsEnabled || !hapticMap || hapticMap.length === 0 || playheadPct === null) return;
+    
+    const currentTime = playheadPct * total;
+    // Find the closest haptic event that just passed
+    const event = hapticMap.find(h => currentTime >= h.time && h.time > lastHapticTimeRef.current);
+    
+    if (event) {
+      predictiveConductor.triggerHaptic(event.pattern);
+      lastHapticTimeRef.current = event.time;
+    }
+
+    // Reset ref if playhead jumps back (seek)
+    if (playheadPct === 0 || (lastHapticTimeRef.current > currentTime + 1)) {
+        lastHapticTimeRef.current = currentTime - 0.01;
+    }
+  }, [playheadPct, hapticMap, hapticsEnabled, total]);
 
   // ── Per-marker tap counting (1=jump, 2=loop, 3=worship loop) ─────────────
   const tapCountRef = useRef({}); // { [label]: count }
@@ -473,13 +538,18 @@ export default function WaveformTimeline({
   }
 
   // ── Seek on tap (background waveform area) ───────────────────────────
+  // Applies quantized jump (IMMEDIATE / BEAT / BAR) before calling onSeek.
   function handleSeekPress(e) {
     if (!onSeek) return;
     const frac = Math.max(
       0,
       Math.min(1, e.nativeEvent.locationX / (widthRef.current || 1)),
     );
-    onSeek(frac * total);
+    const rawSec = frac * total;
+    const safeBpm = bpm > 0 ? bpm : 120;
+    const targetSec = quantizedJumpTarget(rawSec, jumpMode, safeBpm);
+    // Pass back as fraction so callers that expect 0–1 still work
+    onSeek(total > 0 ? targetSec / total : frac);
   }
 
   // ── Long press → add marker at that position ─────────────────────────
@@ -561,6 +631,47 @@ export default function WaveformTimeline({
               },
             ]}
           />
+        )}
+
+        {/* ── Armed Cue Beam — laser from playhead to target ──────────────── */}
+        {armedCuePct !== null && clampedPlayhead !== null && (() => {
+          const fromPct = Math.min(clampedPlayhead, armedCuePct);
+          const toPct   = Math.max(clampedPlayhead, armedCuePct);
+          const widthPct = Math.max(0.5, (toPct - fromPct) * 100);
+          const shimmerLeft = beamShimmer.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+          return (
+            <View
+              pointerEvents="none"
+              style={[styles.armedBeamOuter, {
+                left: `${fromPct * 100}%`,
+                width: `${widthPct}%`,
+                borderColor: armedCueColor + '60',
+                backgroundColor: armedCueColor + '12',
+              }]}
+            >
+              {/* Traveling shimmer inside beam */}
+              <Animated.View style={[styles.armedBeamShimmer, { left: shimmerLeft, backgroundColor: armedCueColor + 'AA' }]} />
+            </View>
+          );
+        })()}
+
+        {/* ── Beat countdown dots — top center of waveform ────────────────── */}
+        {armedCuePct !== null && beatsToFire > 0 && (
+          <View pointerEvents="none" style={styles.beatCountRow}>
+            {Array.from({ length: Math.min(beatsToFire, 8) }, (_, i) => (
+              <Animated.View key={i} style={[
+                styles.beatDot,
+                { backgroundColor: armedCueColor,
+                  opacity: armedGlowAnim.interpolate({ inputRange: [0.3, 1], outputRange: [0.4, 1] }),
+                  transform: [{ scale: armedGlowAnim.interpolate({ inputRange: [0.3, 1], outputRange: [0.85, 1.1] }) }] },
+              ]} />
+            ))}
+            <View style={[styles.beatCountLabel, { backgroundColor: armedCueColor + '25', borderColor: armedCueColor + '60' }]}>
+              <Text style={[styles.beatCountText, { color: armedCueColor }]}>
+                {jumpMode === 'BAR' ? `${beatsToFire}b` : `${beatsToFire}♩`}
+              </Text>
+            </View>
+          </View>
         )}
 
         {/* Section boundary lines — subtle vertical dividers at each section start */}
@@ -918,6 +1029,9 @@ export default function WaveformTimeline({
           const isActive =
             activeSectionLabel === sec.label ||
             activeSectionLabel === displayLabel;
+          const isArmed =
+            armedCueLabel === sec.label ||
+            armedCueLabel === displayLabel;
           const secKey = String(
             sec?.markerId || sec?.id || `${sec.label}-${secIdx}`,
           );
@@ -1029,6 +1143,20 @@ export default function WaveformTimeline({
 
           return (
             <React.Fragment key={secKey}>
+              {/* Armed target glow halo — rendered behind the line */}
+              {isArmed && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.armedPinHalo, {
+                    left: `${leftPct}%`,
+                    backgroundColor: color + '22',
+                    borderColor: color + '88',
+                    opacity: armedGlowAnim,
+                    shadowColor: color,
+                    shadowOpacity: armedGlowAnim,
+                  }]}
+                />
+              )}
               {/* Full-height vertical line — DAW region boundary */}
               <View
                 pointerEvents="none"
@@ -1037,38 +1165,50 @@ export default function WaveformTimeline({
                   {
                     top: lineTop,
                     left: `${leftPct}%`,
-                    width: isActive ? 2 : 1,
-                    backgroundColor: isActive ? color : color + "77",
+                    width: isArmed ? 3 : isActive ? 2 : 1,
+                    backgroundColor: isArmed ? color : isActive ? color : color + "77",
+                    shadowColor: isArmed ? color : 'transparent',
+                    shadowOpacity: isArmed ? 0.9 : 0,
+                    shadowRadius: isArmed ? 8 : 0,
                   },
                 ]}
               />
               {/* DAW-style label flag at top — drag handle */}
-              <View
+              <Animated.View
                 style={[
                   styles.markerPin,
                   {
                     left: `${leftPct}%`,
-                    height: pinHeight,
-                    minWidth: pinMinWidth,
+                    height: isArmed ? pinHeight + 6 : pinHeight,
+                    minWidth: isArmed ? pinMinWidth + 12 : pinMinWidth,
                     paddingHorizontal: pinPaddingHorizontal,
                     paddingVertical: pinPaddingVertical,
                     marginLeft: 2,
                     borderRadius: pinRadius,
                     gap: pinGap,
                     borderColor: showEditAccent
-                      ? "#FCD34D"
-                      : isActive
-                        ? "#FFF"
-                        : color + "60",
-                    backgroundColor: showEditAccent
-                      ? "rgba(245, 158, 11, 0.15)"
-                      : isActive
+                      ? '#FCD34D'
+                      : isArmed
                         ? color
-                        : "rgba(10, 15, 30, 0.85)",
-                    borderWidth: isActive ? 2 : 1,
+                        : isActive
+                          ? '#FFF'
+                          : color + '60',
+                    backgroundColor: showEditAccent
+                      ? 'rgba(245,158,11,0.15)'
+                      : isArmed
+                        ? color + 'EE'
+                        : isActive
+                          ? color
+                          : 'rgba(10,15,30,0.85)',
+                    borderWidth: isArmed ? 2 : isActive ? 2 : 1,
                     shadowColor: color,
-                    shadowOpacity: isActive ? 0.6 : 0,
-                    shadowRadius: 10,
+                    shadowOpacity: isArmed
+                      ? armedGlowAnim
+                      : isActive ? 0.6 : 0,
+                    shadowRadius: isArmed ? 18 : 10,
+                    transform: [{ scale: isArmed
+                      ? armedGlowAnim.interpolate({ inputRange: [0.3, 1], outputRange: [1.0, 1.04] })
+                      : 1 }],
                   },
                 ]}
                 onStartShouldSetResponder={() => true}
@@ -1109,7 +1249,7 @@ export default function WaveformTimeline({
                     </Text>
                   </View>
                 )}
-              </View>
+              </Animated.View>
             </React.Fragment>
           );
         })}
@@ -1148,6 +1288,11 @@ export default function WaveformTimeline({
             </View>
           </Animated.View>
         )}
+        {/* ── Jump Flash — brief white sweep on fire ──────────────────────── */}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.jumpFlashOverlay, { opacity: flashAnim, backgroundColor: armedCueColor }]}
+        />
       </TouchableOpacity>
 
       {/* ── Automation lane ─────────────────────────────────────────────── */}
@@ -1514,5 +1659,72 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 16,
     flex: 1,
+  },
+
+  // ── Phase 1: Armed Cue Engine ────────────────────────────────────────────
+  // Laser beam from playhead to armed target
+  armedBeamOuter: {
+    position: 'absolute',
+    top: '30%',
+    height: 4,
+    borderRadius: 2,
+    borderWidth: 1,
+    overflow: 'hidden',
+    zIndex: 12,
+  },
+  // Traveling shimmer inside beam
+  armedBeamShimmer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '30%',
+    borderRadius: 2,
+    opacity: 0.7,
+  },
+  // Beat countdown dots row — centered at top of waveform
+  beatCountRow: {
+    position: 'absolute',
+    top: 6,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+    zIndex: 30,
+  },
+  beatDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  beatCountLabel: {
+    marginLeft: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  beatCountText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  // Halo glow behind the armed pin line
+  armedPinHalo: {
+    position: 'absolute',
+    top: '-10%',
+    bottom: '-10%',
+    width: 32,
+    marginLeft: -16,
+    borderRadius: 6,
+    borderWidth: 1,
+    zIndex: 17,
+  },
+  // Full-waveform flash overlay on jump fire
+  jumpFlashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
+    borderRadius: 12,
   },
 });

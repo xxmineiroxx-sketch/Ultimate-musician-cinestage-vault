@@ -39,6 +39,7 @@ import {
   saveSharedTeamMembers,
   syncProfileToTeamMembers,
 } from "../utils/sharedStorage";
+import { getBlockouts } from "../data/blockoutsStore";
 
 const ORG_ROLE_LABELS = { owner: "Organization Owner", admin: "Admin", worship_leader: "Worship Leader" };
 const ORG_ROLE_COLORS = { owner: "#EAB308", admin: "#F59E0B", worship_leader: "#8B5CF6" };
@@ -155,6 +156,8 @@ function PersonCard({
   servedTotal,
   lastServed,
   myRole,
+  nextSundayDotColor,
+  nextSundayLabel,
 }) {
   const isFromPlayback =
     person._source === "playback" || person._source === "both";
@@ -228,7 +231,16 @@ function PersonCard({
           <Text style={styles.personMeta}>{person.email || person.phone}</Text>
         ) : null}
         <Text style={styles.rolesText}>{roleList}</Text>
-        
+
+        {nextSundayDotColor && (
+          <View style={styles.sundayAvailRow}>
+            <View style={[styles.sundayAvailDot, { backgroundColor: nextSundayDotColor }]} />
+            <Text style={[styles.sundayAvailText, { color: nextSundayDotColor }]}>
+              {nextSundayLabel || "Next Sunday"}
+            </Text>
+          </View>
+        )}
+
         {servedTotal > 0 && (
           <View style={styles.statsRow}>
             <View style={styles.servedBadge}>
@@ -273,11 +285,33 @@ function getPersonCardKey(person, index) {
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
+// ─── Availability helpers (for next-Sunday dot) ───────────────────────────────
+function getNextSundayStr() {
+  const today = new Date();
+  const day = today.getDay();
+  const daysUntil = day === 0 ? 7 : 7 - day;
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() + daysUntil);
+  const y = sunday.getFullYear();
+  const m = String(sunday.getMonth() + 1).padStart(2, "0");
+  const d = String(sunday.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function sundayLabel(ds) {
+  if (!ds) return "Next Sunday";
+  const [y, mo, d] = ds.split("-");
+  const dt = new Date(parseInt(y), parseInt(mo) - 1, parseInt(d));
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function PeopleRolesScreen({ navigation }) {
   const [people, setPeople] = useState([]);
   const [myRole, setMyRole] = useState(null); // current user's org role
   const [orgRoles, setOrgRoles] = useState({}); // { "email": "admin" | "worship_leader" }
   const [brainStats, setBrainStats] = useState({}); // { [personId]: { total, byRole, lastServed } }
+  const [nextSundayBlockedSet, setNextSundayBlockedSet] = useState(new Set()); // emails/ids blocked next Sunday
+  const [nextSundayStr, setNextSundayStr] = useState(getNextSundayStr());
 
   // Add form
   const [addFormOpen, setAddFormOpen] = useState(false);
@@ -362,6 +396,23 @@ export default function PeopleRolesScreen({ navigation }) {
         return local;
       });
       if (changed) setPeople(merged);
+    } catch { /* no-op */ }
+
+    // Load next-Sunday blockouts for availability dots
+    try {
+      const sunday = getNextSundayStr();
+      setNextSundayStr(sunday);
+      const blockouts = await getBlockouts();
+      const blockedOnSunday = blockouts.filter((b) => b.date === sunday);
+      const blockedKeys = new Set(
+        blockedOnSunday.flatMap((b) => {
+          const keys = [];
+          if (b.email) keys.push(b.email.toLowerCase());
+          if (b.userId) keys.push(b.userId.toLowerCase());
+          return keys;
+        })
+      );
+      setNextSundayBlockedSet(blockedKeys);
     } catch { /* no-op */ }
   }, []);
 
@@ -876,6 +927,15 @@ export default function PeopleRolesScreen({ navigation }) {
               myRole={myRole}
               servedTotal={(brainStats[person.id] || {}).total || 0}
               lastServed={(brainStats[person.id] || {}).lastServed || ""}
+              nextSundayDotColor={(() => {
+                const email = String(person.email || "").trim().toLowerCase();
+                const id = String(person.id || person._sharedId || "").trim().toLowerCase();
+                if (!nextSundayBlockedSet.size) return "#334155"; // gray: no data
+                return (nextSundayBlockedSet.has(email) || nextSundayBlockedSet.has(id))
+                  ? "#EF4444"
+                  : "#10B981";
+              })()}
+              nextSundayLabel={`Sun ${sundayLabel(nextSundayStr)}`}
             />
           ))
         )}
@@ -1132,7 +1192,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontWeight: "700",
   },
-  
+  sundayAvailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 6,
+  },
+  sundayAvailDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  sundayAvailText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',

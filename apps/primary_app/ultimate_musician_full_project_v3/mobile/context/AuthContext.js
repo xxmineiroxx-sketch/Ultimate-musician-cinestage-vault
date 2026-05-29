@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-import { SYNC_URL, syncHeaders } from "../screens/config";
+import { SYNC_URL, API_URL, syncHeaders } from "../screens/config";
 
 const AuthContext = createContext(null);
 
@@ -196,7 +196,83 @@ export function AuthProvider({ children }) {
       return { ...data, pendingVerification: verification };
     }
 
+    // Admin 2FA gate — caller must show 2FA modal and call verifyTwoFa
+    if (data.needsTwoFa) {
+      return data;
+    }
+
     await persistSession(data, raw);
+    return data;
+  };
+
+  // ── Password Reset ──────────────────────────────────────────────────────────
+
+  const resetRequestCode = async (email) => {
+    const res = await fetch(`${API_URL}/api/auth/reset-request`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+  };
+
+  const resetVerify = async (email, code) => {
+    const res = await fetch(`${API_URL}/api/auth/reset-verify`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ email: email.trim().toLowerCase(), code: String(code).trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Invalid code");
+    return data; // { resetToken }
+  };
+
+  const resetPassword = async (resetToken, newPassword) => {
+    const res = await fetch(`${API_URL}/api/auth/reset-password`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ resetToken, newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Reset failed");
+    return data;
+  };
+
+  // ── 2FA ────────────────────────────────────────────────────────────────────
+
+  const verifyTwoFa = async (tempToken, code, identifier) => {
+    const res = await fetch(`${API_URL}/api/auth/verify-2fa`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ tempToken, code: String(code).trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "2FA verification failed");
+    await persistSession(data, identifier || data.email || "");
+    return data;
+  };
+
+  const enable2FA = async (personId) => {
+    const res = await fetch(`${API_URL}/api/auth/2fa/enable`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ personId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not enable 2FA");
+    return data; // { secret, qrUrl, backupCode }
+  };
+
+  const disable2FA = async (personId) => {
+    const res = await fetch(`${API_URL}/api/auth/2fa/disable`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ personId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not disable 2FA");
     return data;
   };
 
@@ -324,6 +400,14 @@ export function AuthProvider({ children }) {
     resendVerification,
     clearPendingVerification,
     logout,
+    // Password reset
+    resetRequestCode,
+    resetVerify,
+    resetPassword,
+    // 2FA
+    verifyTwoFa,
+    enable2FA,
+    disable2FA,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -17,8 +17,8 @@ import {
   Alert,
   Dimensions,
   RefreshControl,
-  Linking,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import audioEngine from '../services/audioEngine';
 import { getUserProfile, getAssignments } from '../services/storage';
@@ -372,7 +372,6 @@ function buildPersonalTracks(role, song) {
 
   const stems = song?.stems || {};
   const harmonies = song?.harmonies || {};
-  const mediaUrl = getSongMediaReferenceUrl(song, stems, harmonies);
   const stemEntries = collectPracticeStemEntries(stems, harmonies);
 
   // ── Playback-only roles (sound tech, lighting, media, etc.) ───────────────
@@ -381,12 +380,12 @@ function buildPersonalTracks(role, song) {
     const referenceUri = resolveReferenceAudioUri(song, stems, harmonies);
     const trackA = makeTrackDef({
       id: 'playback',
-      label: referenceUri ? 'Playback' : 'Song Media',
-      sublabel: referenceUri ? `${roleLabel} reference mix` : 'Open media below',
+      label: 'Playback',
+      sublabel: referenceUri ? `${roleLabel} reference mix` : 'Not available yet',
       entries: referenceUri
         ? [{ key: 'playback', type: 'reference', label: 'Playback', uri: referenceUri }]
         : [],
-      externalUrl: referenceUri ? null : mediaUrl,
+      externalUrl: null,
       color: '#3B82F6',
       icon: '🎧',
     });
@@ -536,6 +535,12 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const [muteA, setMuteA] = useState(false);
   const [muteB, setMuteB] = useState(false);
 
+  // Loop section state
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const [loopSection, setLoopSection] = useState(null); // { label, startPct, endPct }
+  const loopEnabledRef = useRef(false);
+  const loopSectionRef = useRef(null);
+
   // Derived tracks definition for the selected song + role
   const [trackDefs, setTrackDefs] = useState([null, null]);
 
@@ -545,6 +550,20 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const trackDefsRef = useRef([null, null]);
   const handleSongFinishedRef = useRef(null);
   const queueAdvanceLockRef = useRef(false);
+  const lastAutoPlayTokenRef = useRef(null);
+
+  function mergeSongIntoLocalState(updatedSong, defs = trackDefsRef.current) {
+    setSongs((prev) => {
+      const next = prev.map((candidate) => (
+        isSamePracticeSong(candidate, updatedSong)
+          ? { ...candidate, ...updatedSong }
+          : candidate
+      ));
+      songsRef.current = next;
+      return next;
+    });
+    applySongSelection(updatedSong, defs);
+  }
 
   // ── Audio engine init (once) ──────────────────────────────────────────────
 
@@ -553,6 +572,15 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     audioEngine.onProgressUpdate = ({ position: pos, duration: dur }) => {
       setPosition(pos || 0);
       if (dur) setDuration(dur);
+      // Loop section: if loop is on and we've reached the end of the loop section, seek back
+      if (loopEnabledRef.current && loopSectionRef.current && dur && dur > 0) {
+        const currentPct = (pos || 0) / dur;
+        const { startPct, endPct } = loopSectionRef.current;
+        if (currentPct >= endPct) {
+          const seekMs = Math.floor(startPct * dur);
+          audioEngine.seek(seekMs).catch(() => {});
+        }
+      }
     };
     audioEngine.onPlaybackStatusChange = ({ isPlaying: p }) => setIsPlaying(!!p);
     audioEngine.onPlaybackEnded = () => {
@@ -564,6 +592,37 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       audioEngine.onProgressUpdate = null;
       audioEngine.onPlaybackStatusChange = null;
       audioEngine.onPlaybackEnded = null;
+    };
+  }, []);
+
+  // ── Practice session history tracking ────────────────────────────────────
+  // Record the time this screen was mounted so we can compute durationMs on unmount.
+  const practiceEnterTimeRef = useRef(Date.now());
+
+  useEffect(() => {
+    practiceEnterTimeRef.current = Date.now();
+    return () => {
+      const durationMs = Date.now() - practiceEnterTimeRef.current;
+      // Only save sessions longer than 10 seconds (intentional practice, not accidental taps)
+      if (durationMs < 10000) return;
+      const song = selectedSongRef.current;
+      const userRole = roleRef.current;
+      const entry = {
+        songId: song?.id || song?.songId || null,
+        title: song?.title || null,
+        role: userRole || null,
+        practiceDate: new Date().toISOString(),
+        durationMs,
+      };
+      // Fire-and-forget: append to history array capped at 100 entries
+      AsyncStorage.getItem('up/history/v1')
+        .then((raw) => {
+          const history = raw ? JSON.parse(raw) : [];
+          history.push(entry);
+          if (history.length > 100) history.splice(0, history.length - 100);
+          return AsyncStorage.setItem('up/history/v1', JSON.stringify(history));
+        })
+        .catch(() => {});
     };
   }, []);
 
@@ -634,10 +693,29 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
       // Auto-select: prefer initSongId param, else first song
       const initSongId = paramsRef.current.songId;
+      const autoPlayToken = paramsRef.current.autoPlayToken;
+      const shouldAutoPlay =
+        !!paramsRef.current.autoPlay
+        && autoPlayToken != null
+        && autoPlayToken !== lastAutoPlayTokenRef.current;
       const init = initSongId
         ? fetchedSongs.find((s) => s.id === initSongId || s.songId === initSongId) || fetchedSongs[0]
         : fetchedSongs[0];
-      if (init) await selectSong(init, r2);
+      if (shouldAutoPlay) {
+        lastAutoPlayTokenRef.current = autoPlayToken;
+      }
+      if (init) {
+        await selectSong(
+          init,
+          r2,
+          shouldAutoPlay
+            ? {
+                autoPlay: true,
+                suppressMissingAlert: true,
+              }
+            : undefined,
+        );
+      }
     } catch (e) {
       console.warn('PersonalPractice init error:', e);
     } finally {
@@ -773,7 +851,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   async function loadPracticeAudio(song, defs, options = {}) {
     const {
-      openExternalOnMissing = false,
       suppressMissingAlert = false,
       resetTransport = true,
     } = options;
@@ -783,16 +860,14 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     const { mediaReferenceUrl } = getSongPlaybackState(song, defs);
 
     if (!trackA?.uri && !trackB?.uri) {
-      if (openExternalOnMissing && mediaReferenceUrl) {
-        await openMediaReference(mediaReferenceUrl);
-        return { loaded: false, openedExternal: true };
-      }
       if (!suppressMissingAlert) {
         Alert.alert(
           playbackOnlyMode ? 'No Playback Available' : 'No Stems Available',
-          playbackOnlyMode
-            ? 'This song does not have playback audio available yet. Ask your admin to upload or publish the song audio.'
-            : 'This song has no playable role stems or audio reference yet.',
+          mediaReferenceUrl
+            ? 'Practice Mode only uses stems. Use Media Player to play this song reference.'
+            : playbackOnlyMode
+              ? 'This song does not have playback stems available yet.'
+              : 'This song has no playable role stems available yet.',
           [{ text: 'OK' }]
         );
       }
@@ -839,7 +914,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     const {
       autoLoad = false,
       autoPlay = false,
-      openExternalOnMissing = false,
       suppressMissingAlert = false,
     } = options;
 
@@ -849,6 +923,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     setDuration(0);
     setMuteA(false);
     setMuteB(false);
+    // Reset loop section when switching songs
+    setLoopSection(null);
+    loopSectionRef.current = null;
     audioEngine.stop().catch(() => {});
     audioEngine.unloadAll().catch(() => {});
 
@@ -874,7 +951,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
     if (autoLoad || autoPlay) {
       const loadResult = await loadPracticeAudio(enriched, defs, {
-        openExternalOnMissing,
         suppressMissingAlert,
       });
       if (loadResult.loaded && autoPlay) {
@@ -885,38 +961,18 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
     return { song: enriched, defs, loaded: false };
   }
-
-  const openMediaReference = useCallback(async (url) => {
-    if (!url) {
-      Alert.alert('No Media Link', 'This song does not have a media reference link yet.');
-      return;
-    }
-
-    try {
-      const supported = await Linking.canOpenURL(url);
-      if (!supported) throw new Error('unsupported');
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert('Open Media Failed', 'Could not open the song media link on this device.');
-    }
-  }, []);
-
   // ── stem loading ──────────────────────────────────────────────────────────
 
   async function handleLoadStems() {
     if (!selectedSong) return;
-    await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current, {
-      openExternalOnMissing: true,
-    });
+    await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current);
   }
 
   // ── playback ──────────────────────────────────────────────────────────────
 
   async function handlePlayPause() {
     if (!stemsReady) {
-      const result = await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current, {
-        openExternalOnMissing: true,
-      });
+      const result = await loadPracticeAudio(selectedSongRef.current, trackDefsRef.current);
       if (result.loaded) {
         await audioEngine.play();
       }
@@ -984,6 +1040,28 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       if (next) setAutoAdvanceEnabled(false);
       return next;
     });
+  }
+
+  function toggleLoopEnabled() {
+    setLoopEnabled((prev) => {
+      const next = !prev;
+      loopEnabledRef.current = next;
+      return next;
+    });
+  }
+
+  function handleSectionPress(label, startPct, startMs, endPct) {
+    if (!stemsReady) return;
+    // Jump to the section start
+    const seekMs = startMs != null ? startMs : (duration > 0 ? Math.floor(startPct * duration) : 0);
+    audioEngine.seek(seekMs).catch(() => {});
+    setPosition(seekMs);
+    // If loop is enabled, set loop boundaries to this section
+    if (loopEnabledRef.current) {
+      const sec = { label, startPct, endPct };
+      setLoopSection(sec);
+      loopSectionRef.current = sec;
+    }
   }
 
   async function toggleMuteA() {
@@ -1145,25 +1223,16 @@ export default function PersonalPracticeScreen({ route, navigation }) {
           <>
             <MasterpieceWaveform
               song={selectedSong}
-              userRole={role}
-              positionMs={position}
-              durationMs={duration}
-              onSeek={(ms) => {
+              peaks={selectedSong?.waveformPeaks?.peaks || selectedSong?.waveformPeaks || null}
+              progress={duration > 0 ? position / duration : 0}
+              duration={duration / 1000}
+              onSeek={(pct) => {
                 if (!stemsReady) return;
+                const ms = Math.floor(pct * duration);
                 audioEngine.seek(ms).catch(() => {});
                 setPosition(ms);
               }}
-              onSectionPress={(startMs) => {
-                if (!stemsReady) return;
-                audioEngine.seek(startMs).catch(() => {});
-                setPosition(startMs);
-              }}
-              stemsData={{
-                drums: Array.from({ length: 60 }, (_, i) => Math.abs(Math.sin(i / 2)) * 0.8 + 0.1),
-                bass: Array.from({ length: 60 }, (_, i) => Math.abs(Math.cos(i / 3)) * 0.6 + 0.2),
-                keys: Array.from({ length: 60 }, (_, i) => Math.abs(Math.sin(i / 5)) * 0.7 + 0.1),
-                vocals: Array.from({ length: 60 }, (_, i) => Math.abs(Math.cos(i / 4)) * 0.5 + 0.3),
-              }}
+              onSectionPress={handleSectionPress}
               activeStems={{
                 full_song: !muteA,
                 my_part: !muteB,
@@ -1209,18 +1278,18 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                     : <Text style={styles.loadBigBtnText}>{playbackOnlyMode ? '📥 Load Playback' : '📥 Load My Tracks'}</Text>}
                 </TouchableOpacity>
               ) : hasExternalMediaOnly ? (
-                <TouchableOpacity style={styles.loadBigBtn} onPress={() => openMediaReference(mediaReferenceUrl)}>
-                  <Text style={styles.loadBigBtnText}>
-                    {isYouTubeUrl(mediaReferenceUrl) ? '▶ Open Song Media' : '▶ Play Song Audio'}
+                <View style={styles.tipBox}>
+                  <Text style={styles.tipText}>
+                    ▶ This song is Media Player only. Practice Mode stays stems-only.
                   </Text>
-                </TouchableOpacity>
+                </View>
               ) : null}
 
               {playbackOnlyMode ? (
                 <View style={styles.tipBox}>
                   <Text style={styles.tipText}>
                     {hasExternalMediaOnly
-                      ? '🎧 Playback-only mode. Open the song media while stems are being repaired.'
+                      ? '🎧 Playback-only roles should use Media Player for song references.'
                       : '🎧 Playback-only mode for non-performing roles.'}
                   </Text>
                 </View>
@@ -1228,12 +1297,20 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                 <View style={styles.tipBox}>
                   <Text style={styles.tipText}>
                     {hasExternalMediaOnly
-                      ? '💡 Use the song media as a temporary reference until the role stems are fixed.'
+                      ? '💡 Use Media Player for song references until the stems are ready.'
                       : '💡 Mute your track to practice along with the rest of the band.'}
                   </Text>
                 </View>
               )}
+
             </ModernDashboardCard>
+
+            {/* Loop indicator — shown when loop is active */}
+            {loopEnabled && loopSection ? (
+              <View style={styles.loopIndicator}>
+                <Text style={styles.loopIndicatorText}>↻ {loopSection.label}</Text>
+              </View>
+            ) : null}
 
             {/* Transport */}
             <View style={styles.transport}>
@@ -1258,15 +1335,10 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                 <Text style={[styles.transpSkipText, !stemsReady && styles.transpDisabled]}>+15</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.transpBtn, stemsReady && styles.transpBtnDone]}
-                onPress={hasDirectPracticeAudio ? handleLoadStems : () => openMediaReference(mediaReferenceUrl)}
-                disabled={loadingStems || (!hasDirectPracticeAudio && !mediaReferenceUrl)}
+                style={[styles.transpBtn, loopEnabled && styles.transpBtnLoopActive]}
+                onPress={toggleLoopEnabled}
               >
-                {loadingStems
-                  ? <ActivityIndicator color="#8B5CF6" size="small" />
-                  : <Text style={styles.transpBtnText}>
-                      {stemsReady ? '✓' : hasExternalMediaOnly ? '🌐' : '📥'}
-                    </Text>}
+                <Text style={[styles.transpBtnText, loopEnabled && styles.transpBtnLoopText]}>⇄</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.transpBtn} onPress={() => jumpSong(1)} disabled={!hasNextSong || loadingStems}>
                 <Text style={[styles.transpBtnText, (!hasNextSong || loadingStems) && styles.transpDisabled]}>♫⏭︎</Text>
@@ -1298,7 +1370,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
                 : autoAdvanceEnabled
                   ? 'The next playable song in this setlist will start automatically when the current song finishes.'
                   : 'Manual song selection mode.'}
-              {hasExternalMediaOnly ? ' External media links still open outside the app.' : ''}
+              {hasExternalMediaOnly
+                  ? ' YouTube references now live in Media Player instead of Practice.'
+                  : ''}
             </Text>
           </>
         )}
@@ -1451,8 +1525,6 @@ const styles = StyleSheet.create({
   },
   tipText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
   tipBold: { color: '#C4B5FD', fontWeight: '700' },
-
-
   // Transport
   transport: {
     flexDirection: 'row',
@@ -1548,4 +1620,36 @@ const styles = StyleSheet.create({
     backgroundColor: '#4F46E5', borderRadius: 14, padding: 16, alignItems: 'center',
   },
   loadBigBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+
+  // YouTube inline player
+  ytPlayer: { marginTop: 8, marginBottom: 4 },
+
+  // Loop indicator badge
+  loopIndicator: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E1B4B',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#6366F1',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  loopIndicatorText: {
+    color: '#A5B4FC',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+
+  // Loop toggle button (active state)
+  transpBtnLoopActive: {
+    backgroundColor: '#312E81',
+    borderColor: '#6366F1',
+  },
+  transpBtnLoopText: {
+    color: '#A5B4FC',
+  },
 });

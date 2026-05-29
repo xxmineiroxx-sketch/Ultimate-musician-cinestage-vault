@@ -13,6 +13,7 @@ import {
 import { SERVICE_TYPES, defaultServiceTypeId } from "../data/serviceTemplates";
 import { createService } from "../data/servicesStore";
 import { getSettings } from "../data/storage";
+import { SYNC_URL, syncHeaders } from "./config";
 
 const CUSTOM_TYPES_KEY = "um/custom_service_types/v1";
 
@@ -178,7 +179,7 @@ export default function NewServiceScreen({ navigation, route }) {
     }
 
     const settings = await getSettings().catch(() => ({}));
-    await createService({
+    const svc = await createService({
       title: finalTitle,
       date: toISO(d),
       time: t,
@@ -186,6 +187,14 @@ export default function NewServiceScreen({ navigation, route }) {
       created_by_name: settings?.adminName || settings?.name || "Admin",
       created_by_email: settings?.adminEmail || settings?.email || "",
     });
+
+    // Push to cloud so Playback and other devices pick it up — fire and forget
+    fetch(`${SYNC_URL}/sync/library-push`, {
+      method: "POST",
+      headers: syncHeaders(),
+      body: JSON.stringify({ services: [{ ...svc, name: svc.title }] }),
+    }).catch(() => {});
+
     navigation.goBack();
   }
 

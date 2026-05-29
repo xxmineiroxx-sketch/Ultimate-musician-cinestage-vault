@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
+import { useAuth } from "../context/AuthContext";
 import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -135,7 +140,39 @@ function RoutingPicker({ label, value, options, onChange, isOverride }) {
 export default function SettingsScreen({ navigation }) {
   const [s, setS] = useState(null);
   const { isDark, setDarkMode } = useTheme();
+  const { userRole, userId, enable2FA, disable2FA } = useAuth();
   const [pcoCreds, setPcoCreds] = useState(null);
+
+  // ── 2FA state ─────────────────────────────────────────────────────────────
+  const isAdmin = userRole === "admin" || userRole === "central_admin";
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaLoading, setTwoFaLoading] = useState(false);
+  const [twoFaQrModal, setTwoFaQrModal] = useState(false);
+  const [twoFaSetupData, setTwoFaSetupData] = useState(null); // { qrUrl, secret, backupCode }
+
+  async function handleToggle2FA() {
+    if (!userId) {
+      Alert.alert("Not signed in", "Sign in as an admin to manage 2FA.");
+      return;
+    }
+    setTwoFaLoading(true);
+    try {
+      if (twoFaEnabled) {
+        await disable2FA(userId);
+        setTwoFaEnabled(false);
+        Alert.alert("2FA Disabled", "Two-factor authentication has been turned off.");
+      } else {
+        const data = await enable2FA(userId);
+        setTwoFaSetupData(data);
+        setTwoFaEnabled(true);
+        setTwoFaQrModal(true);
+      }
+    } catch (err) {
+      Alert.alert("Error", String(err.message || err));
+    } finally {
+      setTwoFaLoading(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -404,15 +441,54 @@ export default function SettingsScreen({ navigation }) {
           </Pressable>
         </Section>
 
+        {/* ── Security (Admin only) ─────────────────────────── */}
+        {isAdmin && (
+          <Section title="Security">
+            <Text style={styles.routingNote}>
+              Two-factor authentication adds an extra layer of security for admin sign-ins.
+              When enabled, a 6-digit code will be required every time you log in.
+            </Text>
+            <Pressable
+              onPress={twoFaLoading ? undefined : handleToggle2FA}
+              style={styles.row}
+            >
+              <Text style={styles.rowTitle}>Two-Factor Authentication</Text>
+              {twoFaLoading ? (
+                <ActivityIndicator color="#818CF8" size="small" />
+              ) : (
+                <View style={[styles.togglePill, twoFaEnabled && styles.togglePillOn]}>
+                  <Text style={[styles.toggleText, twoFaEnabled && styles.toggleTextOn]}>
+                    {twoFaEnabled ? "ON" : "OFF"}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          </Section>
+        )}
+
         {/* ── General ───────────────────────────────────────── */}
         <Section title="General">
-          <Pressable
-            style={styles.row}
-            onPress={() => setDarkMode(!isDark)}
-          >
+          <View style={styles.row}>
             <Text style={styles.rowTitle}>Theme</Text>
-            <Text style={styles.rowValue}>{isDark ? "Dark" : "Light"}</Text>
-          </Pressable>
+            <View style={styles.themeSeg}>
+              <Pressable
+                style={[styles.themeSegBtn, isDark && styles.themeSegBtnActive]}
+                onPress={() => setDarkMode(true)}
+              >
+                <Text style={[styles.themeSegText, isDark && styles.themeSegTextActive]}>
+                  DARK
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.themeSegBtn, !isDark && styles.themeSegBtnActiveLight]}
+                onPress={() => setDarkMode(false)}
+              >
+                <Text style={[styles.themeSegText, !isDark && styles.themeSegTextActiveLight]}>
+                  LIGHT
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           <Pressable
             onPress={async () => {
               await resetAll();
@@ -424,8 +500,77 @@ export default function SettingsScreen({ navigation }) {
           </Pressable>
         </Section>
 
+        <Section label="Web Portals">
+          <TouchableOpacity
+            style={styles.portalRow}
+            onPress={() => Linking.openURL('https://musician.ultimatelabs.co/portal')}
+          >
+            <View style={styles.portalInfo}>
+              <Text style={styles.portalTitle}>Ultimate Musician</Text>
+              <Text style={styles.portalUrl}>musician.ultimatelabs.co</Text>
+            </View>
+            <Text style={styles.portalArrow}>→</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.portalRow, { marginTop: 10 }]}
+            onPress={() => Linking.openURL('https://playback.ultimatelabs.co')}
+          >
+            <View style={styles.portalInfo}>
+              <Text style={styles.portalTitle}>Ultimate Playback</Text>
+              <Text style={styles.portalUrl}>playback.ultimatelabs.co</Text>
+            </View>
+            <Text style={styles.portalArrow}>→</Text>
+          </TouchableOpacity>
+        </Section>
+
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* ── 2FA Setup Modal ─────────────────────────────────── */}
+      <Modal
+        visible={twoFaQrModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTwoFaQrModal(false)}
+      >
+        <View style={styles2fa.overlay}>
+          <View style={styles2fa.card}>
+            <Text style={styles2fa.title}>2FA Enabled</Text>
+            <Text style={styles2fa.subtitle}>
+              Scan this QR code with an authenticator app (e.g. Google Authenticator or Authy).
+            </Text>
+            {twoFaSetupData?.qrUrl ? (
+              <Image
+                source={{ uri: twoFaSetupData.qrUrl }}
+                style={styles2fa.qr}
+                resizeMode="contain"
+              />
+            ) : null}
+            {twoFaSetupData?.secret ? (
+              <View style={styles2fa.secretRow}>
+                <Text style={styles2fa.secretLabel}>Manual key</Text>
+                <Text style={styles2fa.secretValue} selectable>
+                  {twoFaSetupData.secret}
+                </Text>
+              </View>
+            ) : null}
+            {twoFaSetupData?.backupCode ? (
+              <View style={styles2fa.secretRow}>
+                <Text style={styles2fa.secretLabel}>Backup code (save this!)</Text>
+                <Text style={styles2fa.secretValue} selectable>
+                  {twoFaSetupData.backupCode}
+                </Text>
+              </View>
+            ) : null}
+            <TouchableOpacity
+              style={styles2fa.doneBtn}
+              onPress={() => setTwoFaQrModal(false)}
+            >
+              <Text style={styles2fa.doneBtnText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -631,6 +776,46 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
+  // Theme segmented control
+  themeSeg: {
+    flexDirection: "row",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    backgroundColor: "#060D1A",
+    overflow: "hidden",
+  },
+  themeSegBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+  },
+  themeSegBtnActive: {
+    backgroundColor: "#1E1B4B",
+    borderWidth: 1,
+    borderColor: "#4F46E5",
+    borderRadius: 9,
+    margin: 2,
+  },
+  themeSegBtnActiveLight: {
+    backgroundColor: "#FEF9C3",
+    borderWidth: 1,
+    borderColor: "#CA8A04",
+    borderRadius: 9,
+    margin: 2,
+  },
+  themeSegText: {
+    color: "#4B5563",
+    fontWeight: "800",
+    fontSize: 12,
+    letterSpacing: 0.5,
+  },
+  themeSegTextActive: {
+    color: "#818CF8",
+  },
+  themeSegTextActiveLight: {
+    color: "#854D0E",
+  },
+
   // Reset
   resetBtn: {
     marginTop: 8,
@@ -641,6 +826,22 @@ const styles = StyleSheet.create({
     borderColor: "#EF4444",
   },
   resetBtnText: { color: "#FCA5A5", fontWeight: "900", textAlign: "center" },
+
+  portalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0B1220',
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  portalInfo: { flex: 1 },
+  portalTitle: { color: '#E5E7EB', fontSize: 14, fontWeight: '700' },
+  portalUrl: { color: '#818CF8', fontSize: 12, fontWeight: '600', marginTop: 3 },
+  portalArrow: { color: '#818CF8', fontSize: 18, fontWeight: '700', marginLeft: 12 },
 
   integrationCard: {
     padding: 16,
@@ -697,5 +898,80 @@ const styles = StyleSheet.create({
   },
   integrationStatusTextDisconnected: {
     color: "#F59E0B",
+  },
+});
+
+const styles2fa = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "#0B1120",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    padding: 24,
+    alignItems: "center",
+  },
+  title: {
+    color: "#F9FAFB",
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  subtitle: {
+    color: "#6B7280",
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  qr: {
+    width: 180,
+    height: 180,
+    marginBottom: 16,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+  },
+  secretRow: {
+    width: "100%",
+    backgroundColor: "#060D1A",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    padding: 12,
+    marginBottom: 10,
+  },
+  secretLabel: {
+    color: "#6B7280",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  secretValue: {
+    color: "#F9FAFB",
+    fontSize: 13,
+    fontFamily: "monospace",
+    letterSpacing: 1,
+  },
+  doneBtn: {
+    backgroundColor: "#4F46E5",
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    marginTop: 8,
+  },
+  doneBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 15,
   },
 });

@@ -27,6 +27,7 @@ import {
 
 import * as SA from "../services/studioAudio";
 import { CINESTAGE_URL } from "./config";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ function fmtTime(s) {
 }
 
 function openFilePicker(cb) {
+  if (Platform.OS !== "web" || typeof document === "undefined") return;
   const input = document.createElement("input");
   input.type = "file";
   input.accept = "audio/*";
@@ -306,7 +308,7 @@ function TransportBar({ state, dispatch }) {
           style={ts.bpmInput}
           value={String(state.bpm)}
           onChangeText={(v) =>
-            dispatch({ type: "BPM", bpm: parseInt(v) || 120 })
+            dispatch({ type: "BPM", bpm: Math.max(20, Math.min(300, parseInt(v, 10) || 120)) })
           }
           keyboardType="number-pad"
           selectTextOnFocus
@@ -1128,7 +1130,7 @@ const mc = StyleSheet.create({
 // ─── Hardware Mixer Bridge ─────────────────────────────────────────────────────
 
 async function syncToHardware(tracks, ip, port) {
-  const p = parseInt(port) || 10023;
+  const p = parseInt(port, 10) || 10023;
   for (let i = 0; i < Math.min(tracks.length, 32); i++) {
     const ch = String(i + 1).padStart(2, "0");
     const t = tracks[i];

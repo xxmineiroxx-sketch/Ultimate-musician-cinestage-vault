@@ -2,6 +2,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system"; // kept as fallback only
 import React, { useCallback, useEffect, useState } from "react";
+import MiniWaveform from "../components/MiniWaveform";
+import { prefetchWaveforms } from "../services/waveformService";
 import {
   ActivityIndicator,
   Alert,
@@ -38,6 +40,7 @@ import {
   submitStemJob,
 } from "../services/stemJobService";
 import { SYNC_URL, syncHeaders } from "./config";
+import { getPCOCredentials, batchGetSongHistory } from '../services/planningCenterService';
 
 const CINESTAGE_STEPS = [
   "Establishing Cloud Sync",
@@ -74,9 +77,9 @@ function StemBadges({ song }) {
   if (!keys.length) return null;
   return (
     <View style={styles.badgeRow}>
-      {keys.slice(0, 6).map((k) => (
+      {keys.slice(0, 6).map((k, idx) => (
         <View
-          key={k}
+          key={`stem-${idx}-${k}`}
           style={[styles.stemDot, { backgroundColor: stemDotColor(k) }]}
         />
       ))}
@@ -275,6 +278,12 @@ export default function LibraryScreen({ navigation }) {
     );
   }
 
+  // Song history / analytics (PCO)
+  const [songHistory, setSongHistory] = useState({}); // songId → { lastScheduledAt, timesUsed }
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('all'); // 'all' | 'recent' | 'old' | 'never'
+  const [showHistory, setShowHistory] = useState(true);
+
   // Import modal
   const [importModal, setImportModal] = useState(false);
   const [importTab, setImportTab] = useState("paste"); // 'paste' | 'file'
@@ -320,10 +329,35 @@ export default function LibraryScreen({ navigation }) {
       const mergedSongs = Object.values(localMap);
       await saveSongs(mergedSongs);
       setSongs(mergedSongs);
+      // Load PCO song history after songs are available (best-effort, non-blocking)
+      loadSongHistory(mergedSongs);
     } catch {
       /* ignore */
     }
     setLoading(false);
+  }, [loadSongHistory]);
+
+  const loadSongHistory = useCallback(async (currentSongs) => {
+    try {
+      const creds = await getPCOCredentials();
+      if (!creds) return; // PCO not connected — silently skip
+      const songsToQuery = (currentSongs || []).filter((s) => s.pcoSongId);
+      if (songsToQuery.length === 0) return;
+      setHistoryLoading(true);
+      const historyMap = await batchGetSongHistory(songsToQuery.map((s) => s.pcoSongId));
+      // Re-key by local song.id for easy lookup
+      const byId = {};
+      for (const song of songsToQuery) {
+        if (historyMap && historyMap[song.pcoSongId]) {
+          byId[song.id] = historyMap[song.pcoSongId];
+        }
+      }
+      setSongHistory(byId);
+    } catch {
+      /* history is best-effort — never crash the screen */
+    } finally {
+      setHistoryLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -345,13 +379,84 @@ export default function LibraryScreen({ navigation }) {
     }, [loadSongs]),
   );
 
-  const filtered = query.trim()
+  // Prefetch waveforms for the first 20 songs in the background after library loads
+  useEffect(() => {
+    if (songs && songs.length > 0) {
+      prefetchWaveforms(
+        songs.slice(0, 20),
+        (song) =>
+          song?.audioUrl ||
+          song?.url ||
+          song?.audio_url ||
+          song?.sourceUrl ||
+          song?.youtubeLink ||
+          null,
+      );
+    }
+  }, [songs]);
+
+  const NOW_MS = Date.now();
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
+  // Helper: format relative time for display
+  function relativeTime(isoString) {
+    if (!isoString) return null;
+    const diff = NOW_MS - new Date(isoString).getTime();
+    const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+    if (days < 1) return 'today';
+    if (days < 7) return `${days}d ago`;
+    if (days < 30) return `${Math.floor(days / 7)}w ago`;
+    return `${Math.floor(days / 30)}mo ago`;
+  }
+
+  // Helper: determine if a song was used in last 14 days (warn for reuse)
+  function isRecentlyUsed(song) {
+    const h = songHistory[song.id];
+    if (!h || !h.lastScheduledAt) return false;
+    return NOW_MS - new Date(h.lastScheduledAt).getTime() < FOURTEEN_DAYS_MS;
+  }
+
+  // Apply text search
+  let searchFiltered = query.trim()
     ? songs.filter(
         (s) =>
           (s.title || "").toLowerCase().includes(query.toLowerCase()) ||
           (s.artist || "").toLowerCase().includes(query.toLowerCase()),
       )
     : songs;
+
+  // Apply history filter
+  const hasPCOHistory = Object.keys(songHistory).length > 0;
+  let filtered;
+  if (!hasPCOHistory || historyFilter === 'all') {
+    filtered = searchFiltered;
+  } else if (historyFilter === 'old') {
+    filtered = searchFiltered.filter((s) => {
+      const h = songHistory[s.id];
+      if (!h || !h.lastScheduledAt) return true; // no data = include
+      return NOW_MS - new Date(h.lastScheduledAt).getTime() > THIRTY_DAYS_MS;
+    });
+  } else if (historyFilter === 'never') {
+    filtered = searchFiltered.filter((s) => {
+      const h = songHistory[s.id];
+      return !h || !h.timesUsed || h.timesUsed === 0;
+    });
+  } else if (historyFilter === 'most') {
+    filtered = [...searchFiltered].sort((a, b) => {
+      const aUsed = songHistory[a.id]?.timesUsed || 0;
+      const bUsed = songHistory[b.id]?.timesUsed || 0;
+      return bUsed - aUsed;
+    });
+  } else {
+    filtered = searchFiltered;
+  }
+
+  // Summary stats for the history card
+  const pcoSongs = songs.filter((s) => s.pcoSongId && songHistory[s.id]);
+  const recentCount = pcoSongs.filter((s) => isRecentlyUsed(s)).length;
+  const neverCount = pcoSongs.filter((s) => !songHistory[s.id]?.timesUsed || songHistory[s.id]?.timesUsed === 0).length;
+  const historyCardVisible = hasPCOHistory && !historyLoading;
 
   // ── CineStage modal ───────────────────────────────────────────────────────
   function openCineStageModal(song) {
@@ -494,7 +599,15 @@ export default function LibraryScreen({ navigation }) {
         setImportBusy(false);
         return;
       }
-      const { uri, name } = res.assets[0];
+      const { uri, name, size: fileSize } = res.assets[0];
+
+      // Guard against unexpectedly large files (e.g. accidentally picking a ZIP/binary)
+      const MAX_ZIP_SIZE = 500 * 1024 * 1024; // 500 MB
+      if (fileSize && fileSize > MAX_ZIP_SIZE) {
+        setImportBusy(false);
+        Alert.alert('File Too Large', 'ZIP files must be under 500 MB. Please split your files and try again.');
+        return;
+      }
 
       // xlsx / xls are binary ZIP archives — can't be read as text
       const ext = (name || "").split(".").pop().toLowerCase();
@@ -610,8 +723,25 @@ export default function LibraryScreen({ navigation }) {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteSong(song.id);
-            await loadSongs();
+            try {
+              await deleteSong(song.id);
+              const nextSongs = await getSongs();
+              setSongs(nextSongs);
+              setSongHistory((prev) => {
+                const next = { ...prev };
+                delete next[song.id];
+                return next;
+              });
+              loadSongHistory(nextSongs);
+
+              fetch(`${SYNC_URL}/sync/library-push`, {
+                method: "POST",
+                headers: syncHeaders(),
+                body: JSON.stringify({ songs: nextSongs }),
+              }).catch(() => {});
+            } catch (error) {
+              Alert.alert("Delete failed", String(error?.message || error));
+            }
           },
         },
       ],
@@ -660,6 +790,50 @@ export default function LibraryScreen({ navigation }) {
         placeholderTextColor="#4B5563"
         returnKeyType="search"
       />
+
+      {/* ── PCO Song Usage summary card ───────────────────────────────────── */}
+      {historyCardVisible && (
+        <View style={styles.historyCard}>
+          <View style={styles.historyCardRow}>
+            <Text style={styles.historyCardTitle}>Song Usage (from PCO)</Text>
+            <TouchableOpacity onPress={() => setShowHistory((v) => !v)}>
+              <Text style={styles.historyCardToggle}>{showHistory ? 'Hide' : 'Show'} {showHistory ? '\u2191' : '\u2193'}</Text>
+            </TouchableOpacity>
+          </View>
+          {showHistory && (
+            <Text style={styles.historyCardSub}>
+              {pcoSongs.length} songs\u00b7{recentCount} used recently\u00b7{neverCount} never used
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* ── History filter pills ───────────────────────────────────────────── */}
+      {hasPCOHistory && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterRow}
+          contentContainerStyle={styles.filterRowContent}
+        >
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'old', label: 'Not Recent' },
+            { key: 'never', label: 'Never Used' },
+            { key: 'most', label: 'Most Used' },
+          ].map((f) => (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.filterPill, historyFilter === f.key && styles.filterPillActive]}
+              onPress={() => setHistoryFilter(f.key)}
+            >
+              <Text style={[styles.filterPillText, historyFilter === f.key && styles.filterPillTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       {loading ? (
         <ActivityIndicator color="#6366F1" style={{ marginTop: 40 }} />
@@ -725,8 +899,29 @@ export default function LibraryScreen({ navigation }) {
                     ) : null}
                     {meta ? <Text style={styles.cardMeta}>{meta}</Text> : null}
                     <StemBadges song={item} />
+                    {/* PCO history badge — only shown when PCO is connected */}
+                    {item.pcoSongId && hasPCOHistory && (() => {
+                      const h = songHistory[item.id];
+                      if (isRecentlyUsed(item)) {
+                        return (
+                          <Text style={styles.historyBadgeWarn}>\u26a0 Recent</Text>
+                        );
+                      }
+                      if (!h || !h.timesUsed || h.timesUsed === 0) {
+                        return <Text style={styles.historyBadgeNever}>Never</Text>;
+                      }
+                      const rel = relativeTime(h.lastScheduledAt);
+                      return rel ? <Text style={styles.historyBadge}>Last: {rel}</Text> : null;
+                    })()}
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                    <MiniWaveform
+                      songId={item.id}
+                      width={80}
+                      height={28}
+                      color="#6366f1"
+                      style={{ marginLeft: 8 }}
+                    />
                     {hasStemsDone && (
                       <View style={styles.stemsReadyBadge}>
                         <Text style={styles.stemsReadyText}>Stems ✓</Text>
@@ -1327,4 +1522,47 @@ const styles = StyleSheet.create({
     borderColor: "#2563EB",
   },
   filePickBtnText: { color: "#93C5FD", fontSize: 14, fontWeight: "700" },
+
+  // History card
+  historyCard: {
+    marginHorizontal: 24,
+    marginBottom: 10,
+    backgroundColor: "#0D1B2A",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#1E3A5F",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  historyCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  historyCardTitle: { color: "#93C5FD", fontSize: 13, fontWeight: "800" },
+  historyCardToggle: { color: "#475569", fontSize: 12, fontWeight: "600" },
+  historyCardSub: { color: "#64748B", fontSize: 12, marginTop: 4, fontWeight: "500" },
+
+  // Filter pills
+  filterRow: { marginBottom: 8 },
+  filterRowContent: { paddingHorizontal: 24, gap: 8, flexDirection: "row" },
+  filterPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    backgroundColor: "#0B1120",
+  },
+  filterPillActive: {
+    backgroundColor: "#1E1B4B",
+    borderColor: "#6366F1",
+  },
+  filterPillText: { color: "#475569", fontSize: 12, fontWeight: "700" },
+  filterPillTextActive: { color: "#A5B4FC" },
+
+  // Per-song history badges
+  historyBadge: { color: "#64748B", fontSize: 10, fontWeight: "600", marginTop: 4 },
+  historyBadgeNever: { color: "#64748B", fontSize: 10, fontWeight: "600", marginTop: 4 },
+  historyBadgeWarn: { color: "#F59E0B", fontSize: 10, fontWeight: "700", marginTop: 4 },
 });

@@ -15,7 +15,10 @@ import {
   Dimensions,
   PanResponder,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
+import { Audio } from 'expo-av';
+import YouTubePlayer from '../components_v2/YouTubePlayer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -270,6 +273,24 @@ const GUITAR_CAPO_OPTIONS = [0, 1, 2, 3, 4, 5, 7];
 // ── Convert http:// SYNC_URL to ws:// for WebSocket ──────────────────────────
 const WS_MIDI_URL = SYNC_URL.replace(/^http/, 'ws') + '/midi/ws';
 
+// ── Media helpers ─────────────────────────────────────────────────────────────
+function isYouTubeUrl(url) {
+  return /youtu\.be\/|youtube\.com\/(watch|embed|shorts)/i.test(url || '');
+}
+function getSongMediaUrl(song) {
+  if (!song) return null;
+  return song.youtubeLink || song.youtubeUrl || song.youtube || song.sourceUrl || song.audioUrl || null;
+}
+function hasSongMedia(song) {
+  return Boolean(getSongMediaUrl(song));
+}
+function findPlayableSongIndex(songList, fromIndex, step = 1) {
+  for (let index = fromIndex + step; index >= 0 && index < songList.length; index += step) {
+    if (hasSongMedia(songList[index])) return index;
+  }
+  return -1;
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function SetlistRunnerScreen({ navigation, route }) {
@@ -282,7 +303,9 @@ export default function SetlistRunnerScreen({ navigation, route }) {
     userRoles,
     vocalAssignments = {},
     userProfile = null,
+    autoStartMedia = false,
   } = route.params || {};
+  const mediaModeEnabled = !!autoStartMedia;
 
   // Deduplicate and prepare role list
   const allRoles = userRoles?.length
@@ -336,6 +359,23 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const [isLiveSession, setIsLiveSession] = useState(false);
   const perfWsRef = useRef(null);
 
+  // ── In-app media player ───────────────────────────────────────────────────
+  const [playerActive, setPlayerActive]       = useState(false);
+  const [playerIsPlaying, setPlayerIsPlaying] = useState(false);
+  const [playerLoading, setPlayerLoading]     = useState(false);
+  const [continuousMediaPlay, setContinuousMediaPlay] = useState(Boolean(autoStartMedia));
+  const [repeatCurrentMedia, setRepeatCurrentMedia] = useState(false);
+  const [playerReplayNonce, setPlayerReplayNonce] = useState(0);
+  const [playerNeedsRestart, setPlayerNeedsRestart] = useState(false);
+  const [mediaControlHint, setMediaControlHint] = useState('');
+  const audioSoundRef   = useRef(null);
+  const playerActiveRef = useRef(false);
+  const goToRef         = useRef(null);
+  const mediaEndedRef   = useRef(null);
+  const mediaBackTapTimerRef = useRef(null);
+  const mediaNextTapTimerRef = useRef(null);
+  const mediaHintTimerRef = useRef(null);
+
   // ── "We're Live" — Go Live broadcast ──────────────────────────────────────
   const [goLiveToast, setGoLiveToast] = useState(false);
   const goLiveToastTimer = useRef(null);
@@ -371,8 +411,172 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const currentIndexRef = useRef(startIndex);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
   useEffect(() => { transitionModeRef.current = transitionMode; }, [transitionMode]);
+  useEffect(() => {
+    if (!mediaModeEnabled) return;
+    setAutoScroll(false);
+    setHapticMode(HAPTIC_MODES.OFF);
+  }, [mediaModeEnabled]);
 
   const song           = songs[currentIndex] || null;
+
+  // Unmount cleanup
+  useEffect(() => {
+    return () => {
+      if (audioSoundRef.current) {
+        audioSoundRef.current.stopAsync().catch(() => {});
+        audioSoundRef.current.unloadAsync().catch(() => {});
+        audioSoundRef.current = null;
+      }
+      clearTimeout(mediaBackTapTimerRef.current);
+      clearTimeout(mediaNextTapTimerRef.current);
+      clearTimeout(mediaHintTimerRef.current);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep goToRef current so callbacks can navigate without stale closures
+  useEffect(() => { goToRef.current = goTo; }, [goTo]);
+
+  const stopAudio = useCallback(async () => {
+    if (audioSoundRef.current) {
+      await audioSoundRef.current.stopAsync().catch(() => {});
+      await audioSoundRef.current.unloadAsync().catch(() => {});
+      audioSoundRef.current = null;
+    }
+  }, []);
+
+  const playDirectAudio = useCallback(async (url) => {
+    await stopAudio();
+    setPlayerLoading(true);
+    setPlayerIsPlaying(false);
+    setPlayerNeedsRestart(false);
+    try {
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: false });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true },
+        (status) => {
+          if (!status.isLoaded) return;
+          setPlayerIsPlaying(status.isPlaying);
+          if (status.didJustFinish) {
+            mediaEndedRef.current?.();
+          }
+        }
+      );
+      audioSoundRef.current = sound;
+      setPlayerIsPlaying(true);
+    } catch (_) {}
+    setPlayerLoading(false);
+  }, [stopAudio, songs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const restartCurrentMedia = useCallback(async () => {
+    const currentSong = songs[currentIndexRef.current];
+    const url = getSongMediaUrl(currentSong);
+    if (!url) return;
+
+    setPlayerActive(true);
+    playerActiveRef.current = true;
+
+    if (isYouTubeUrl(url)) {
+      await stopAudio();
+      setPlayerLoading(false);
+      setPlayerIsPlaying(false);
+      setPlayerNeedsRestart(false);
+      setPlayerReplayNonce((prev) => prev + 1);
+      setPlayerIsPlaying(true);
+      return;
+    }
+
+    await playDirectAudio(url);
+  }, [playDirectAudio, songs, stopAudio]);
+
+  const handleMediaEnded = useCallback(async () => {
+    if (repeatCurrentMedia) {
+      await restartCurrentMedia();
+      return;
+    }
+
+    if (continuousMediaPlay) {
+      const next = findPlayableSongIndex(songs, currentIndexRef.current, 1);
+      if (next >= 0) {
+        goToRef.current?.(next);
+        return;
+      }
+    }
+
+    setPlayerIsPlaying(false);
+    if (!isYouTubeUrl(getSongMediaUrl(songs[currentIndexRef.current]))) {
+      await stopAudio();
+    } else {
+      setPlayerNeedsRestart(true);
+    }
+  }, [continuousMediaPlay, repeatCurrentMedia, restartCurrentMedia, songs, stopAudio]);
+
+  useEffect(() => {
+    mediaEndedRef.current = handleMediaEnded;
+  }, [handleMediaEnded]);
+
+  // Keep media mode active across the setlist when requested.
+  useEffect(() => {
+    if (!playerActiveRef.current && !autoStartMedia) return;
+    const s = songs[currentIndex];
+    const url = s ? getSongMediaUrl(s) : null;
+    if (!url) { setPlayerActive(false); playerActiveRef.current = false; stopAudio(); return; }
+    if (!playerActiveRef.current) {
+      setPlayerActive(true);
+      playerActiveRef.current = true;
+    }
+    if (!isYouTubeUrl(url)) {
+      playDirectAudio(url);
+    } else {
+      stopAudio();
+      setPlayerLoading(false);
+      setPlayerNeedsRestart(false);
+      setPlayerIsPlaying(true);
+    }
+  }, [autoStartMedia, currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTogglePlayer = useCallback(async () => {
+    const url = getSongMediaUrl(song);
+    if (!url) return;
+    if (!playerActiveRef.current) {
+      setPlayerActive(true);
+      playerActiveRef.current = true;
+      if (!isYouTubeUrl(url)) {
+        playDirectAudio(url);
+      } else {
+        setPlayerIsPlaying(true);
+      }
+      return;
+    }
+    if (isYouTubeUrl(url)) {
+      if (!playerIsPlaying && playerNeedsRestart) {
+        setPlayerReplayNonce((prev) => prev + 1);
+        setPlayerNeedsRestart(false);
+      }
+      setPlayerIsPlaying((prev) => !prev);
+      return;
+    }
+    if (playerIsPlaying) {
+      await audioSoundRef.current?.pauseAsync().catch(() => {});
+      setPlayerIsPlaying(false);
+    } else {
+      if (!audioSoundRef.current) {
+        await playDirectAudio(url);
+        return;
+      }
+      await audioSoundRef.current.playAsync().catch(() => {});
+      setPlayerIsPlaying(true);
+    }
+  }, [playerIsPlaying, playerNeedsRestart, song, playDirectAudio]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleStopPlayer = useCallback(async () => {
+    setPlayerActive(false);
+    playerActiveRef.current = false;
+    setPlayerIsPlaying(false);
+    setPlayerLoading(false);
+    setPlayerNeedsRestart(false);
+    await stopAudio();
+  }, [stopAudio]);
   const activeRoleType = detectRoleType(activeRole);
 
   // ── Navigation ──────────────────────────────────────────────────────────────
@@ -497,8 +701,15 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   }, [songs, goTo, countdownScale]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goNext = useCallback(() => {
-    if (currentIndex >= songs.length - 1) return;
-    const nextIdx = currentIndex + 1;
+    const nextIdx = mediaModeEnabled
+      ? findPlayableSongIndex(songs, currentIndex, 1)
+      : (currentIndex < songs.length - 1 ? currentIndex + 1 : -1);
+    if (nextIdx < 0) return;
+    if (mediaModeEnabled) {
+      if (countdownActive) cancelCountdown();
+      goTo(nextIdx);
+      return;
+    }
     if (countdownActive) {
       // Second press while counting down → skip immediately
       cancelCountdown();
@@ -506,12 +717,15 @@ export default function SetlistRunnerScreen({ navigation, route }) {
       return;
     }
     startCountdown(nextIdx);
-  }, [currentIndex, songs.length, goTo, countdownActive, cancelCountdown, startCountdown]);
+  }, [currentIndex, songs, goTo, countdownActive, cancelCountdown, startCountdown, mediaModeEnabled]);
 
   const goPrev = useCallback(() => {
     if (countdownActive) cancelCountdown();
-    if (currentIndex > 0) goTo(currentIndex - 1);
-  }, [currentIndex, goTo, countdownActive, cancelCountdown]);
+    const prevIdx = mediaModeEnabled
+      ? findPlayableSongIndex(songs, currentIndex, -1)
+      : (currentIndex > 0 ? currentIndex - 1 : -1);
+    if (prevIdx >= 0) goTo(prevIdx);
+  }, [currentIndex, songs, goTo, countdownActive, cancelCountdown, mediaModeEnabled]);
 
   // ── Cleanup on unmount ──────────────────────────────────────────────────────
 
@@ -992,6 +1206,59 @@ export default function SetlistRunnerScreen({ navigation, route }) {
   const myPart         = song && activeRoleType === 'vocal' ? getMyPartForSong(songLookupId, vocalAssignments, userProfile) : null;
   const vocalLineup    = song && (isSoundTech || isMediaTech) ? getSongVocalLineup(songLookupId, vocalAssignments) : [];
   const songSections   = song ? parseSections(song.lyrics || song.chordChart || '') : [];
+  const currentMediaUrl = getSongMediaUrl(song);
+  const hasCurrentMedia = Boolean(currentMediaUrl);
+  const currentMediaIsYouTube = isYouTubeUrl(currentMediaUrl);
+  const mediaSongEntries = songs
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => hasSongMedia(item));
+  const currentMediaQueuePosition = mediaSongEntries.findIndex((entry) => entry.index === currentIndex);
+  const previousMediaIndex = mediaModeEnabled
+    ? findPlayableSongIndex(songs, currentIndex, -1)
+    : (currentIndex > 0 ? currentIndex - 1 : -1);
+  const nextMediaIndex = mediaModeEnabled
+    ? findPlayableSongIndex(songs, currentIndex, 1)
+    : (currentIndex < songs.length - 1 ? currentIndex + 1 : -1);
+
+  const flashMediaControlHint = useCallback((message) => {
+    clearTimeout(mediaHintTimerRef.current);
+    setMediaControlHint(message);
+    mediaHintTimerRef.current = setTimeout(() => setMediaControlHint(''), 1500);
+  }, []);
+
+  const handleMediaBackPress = useCallback(() => {
+    if (mediaBackTapTimerRef.current) {
+      clearTimeout(mediaBackTapTimerRef.current);
+      mediaBackTapTimerRef.current = null;
+      setRepeatCurrentMedia((prev) => {
+        const next = !prev;
+        flashMediaControlHint(next ? 'Repeat on' : 'Repeat off');
+        return next;
+      });
+      return;
+    }
+    mediaBackTapTimerRef.current = setTimeout(() => {
+      mediaBackTapTimerRef.current = null;
+      if (previousMediaIndex >= 0) goPrev();
+    }, 220);
+  }, [flashMediaControlHint, goPrev, previousMediaIndex]);
+
+  const handleMediaNextPress = useCallback(() => {
+    if (mediaNextTapTimerRef.current) {
+      clearTimeout(mediaNextTapTimerRef.current);
+      mediaNextTapTimerRef.current = null;
+      setContinuousMediaPlay((prev) => {
+        const next = !prev;
+        flashMediaControlHint(next ? 'Continuous on' : 'Continuous off');
+        return next;
+      });
+      return;
+    }
+    mediaNextTapTimerRef.current = setTimeout(() => {
+      mediaNextTapTimerRef.current = null;
+      if (nextMediaIndex >= 0) goNext();
+    }, 220);
+  }, [flashMediaControlHint, goNext, nextMediaIndex]);
 
   // ── Empty state ─────────────────────────────────────────────────────────────
 
@@ -1004,6 +1271,189 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Text style={styles.backLink}>← Go Back</Text>
           </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (mediaModeEnabled) {
+    return (
+      <View style={styles.container} {...panResponder.panHandlers}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+
+        <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+            <Text style={styles.closeBtnText}>✕</Text>
+          </TouchableOpacity>
+
+          <View style={styles.topCenter}>
+            <Text style={styles.songCounter}>
+              {currentMediaQueuePosition >= 0
+                ? `${currentMediaQueuePosition + 1} / ${mediaSongEntries.length || 1}`
+                : `${currentIndex + 1} / ${songs.length}`}
+            </Text>
+            <View style={styles.dotsRow}>
+              {(mediaSongEntries.length ? mediaSongEntries : songs.map((item, index) => ({ item, index }))).map(({ index }) => (
+                <TouchableOpacity key={index} onPress={() => goTo(index)}>
+                  <View style={[
+                    styles.dot,
+                    readySongs.has(index) && styles.dotReady,
+                    index === currentIndex && styles.dotActive,
+                  ]} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.topBarSpacer} />
+        </View>
+
+        <View style={styles.songHeader}>
+          <View style={styles.titleRow}>
+            <Text style={styles.songTitle} numberOfLines={2}>{song.title}</Text>
+            <View style={styles.badgesCol}>
+              {song.key ? (
+                <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>{song.key}</Text></View>
+              ) : null}
+              {song.tempo ? (
+                <View style={styles.tempoBadge}><Text style={styles.tempoBadgeText}>{song.tempo} BPM</Text></View>
+              ) : null}
+            </View>
+          </View>
+          {song.artist ? <Text style={styles.artistText}>{song.artist}</Text> : null}
+
+          <View style={styles.mediaHeaderPills}>
+            <View style={[styles.mediaHeaderPill, styles.mediaHeaderPillPrimary]}>
+              <Text style={[styles.mediaHeaderPillText, styles.mediaHeaderPillTextPrimary]}>Media Player</Text>
+            </View>
+            <View style={[styles.mediaHeaderPill, hasCurrentMedia && styles.mediaHeaderPillPrimary]}>
+              <Text style={[styles.mediaHeaderPillText, hasCurrentMedia && styles.mediaHeaderPillTextPrimary]}>
+                {hasCurrentMedia ? (currentMediaIsYouTube ? 'YouTube' : 'Audio') : 'No Media'}
+              </Text>
+            </View>
+            {mediaSongEntries.length ? (
+              <View style={styles.mediaHeaderPill}>
+                <Text style={styles.mediaHeaderPillText}>{mediaSongEntries.length} queued</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.mediaModeBody}>
+          {hasCurrentMedia ? (
+            currentMediaIsYouTube ? (
+              <YouTubePlayer
+                url={currentMediaUrl}
+                height={Math.round((SCREEN_W - 24) * 0.5625)}
+                style={styles.mediaModePlayer}
+                autoPlay={playerIsPlaying}
+                playing={playerIsPlaying}
+                nonce={playerReplayNonce}
+                onPlaybackStateChange={setPlayerIsPlaying}
+                onEnded={() => mediaEndedRef.current?.()}
+              />
+            ) : (
+              <View style={styles.mediaModeAudioCard}>
+                <Text style={styles.mediaModeAudioIcon}>🎵</Text>
+                <Text style={styles.mediaModeAudioTitle}>{song.title}</Text>
+                {song.artist ? <Text style={styles.mediaModeAudioArtist}>{song.artist}</Text> : null}
+                <Text style={styles.mediaModeAudioStatus}>
+                  {playerLoading
+                    ? 'Loading audio...'
+                    : playerIsPlaying
+                      ? 'Playing inside Ultimate Playback'
+                      : 'Ready to play inside Ultimate Playback'}
+                </Text>
+              </View>
+            )
+          ) : (
+            <View style={styles.mediaModeEmptyCard}>
+              <Text style={styles.mediaModeEmptyTitle}>No media linked for this song</Text>
+              <Text style={styles.mediaModeEmptyText}>
+                Use Next to jump to the next queued media track in this setlist.
+              </Text>
+            </View>
+          )}
+
+        </View>
+
+        <View style={[styles.mediaTransportDeck, { paddingBottom: insets.bottom + 6 }]}>
+          <View style={styles.mediaTransportStatusRow}>
+            <View style={[styles.mediaTransportStatusPill, repeatCurrentMedia && styles.mediaTransportStatusPillActive]}>
+              <Text style={[styles.mediaTransportStatusText, repeatCurrentMedia && styles.mediaTransportStatusTextActive]}>
+                Repeat
+              </Text>
+            </View>
+            <Text style={styles.mediaTransportHintText}>
+              {mediaControlHint || '2x Back = Repeat  •  2x Next = Continuous'}
+            </Text>
+            <View style={[styles.mediaTransportStatusPill, continuousMediaPlay && styles.mediaTransportStatusPillActive]}>
+              <Text style={[styles.mediaTransportStatusText, continuousMediaPlay && styles.mediaTransportStatusTextActive]}>
+                Continuous
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.mediaTransportRow}>
+            <TouchableOpacity
+              style={[
+                styles.mediaTransportBtn,
+                repeatCurrentMedia && styles.mediaTransportBtnActive,
+              ]}
+              onPress={handleMediaBackPress}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.mediaTransportIcon}>⏮</Text>
+              <Text style={styles.mediaTransportLabel}>Back</Text>
+              <Text style={[
+                styles.mediaTransportMeta,
+                repeatCurrentMedia && styles.mediaTransportMetaActive,
+              ]}>
+                {previousMediaIndex >= 0 ? '1x Prev  •  2x Repeat' : '2x Repeat'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.mediaTransportPlayBtn,
+                playerActive && playerIsPlaying && styles.mediaTransportPlayBtnActive,
+                !hasCurrentMedia && styles.mediaTransportPlayBtnDisabled,
+              ]}
+              onPress={() => {
+                if (!hasCurrentMedia) return;
+                handleTogglePlayer();
+              }}
+              activeOpacity={0.86}
+            >
+              {playerLoading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Text style={styles.mediaTransportPlayIcon}>{(playerActive && playerIsPlaying) ? '⏸' : '▶'}</Text>
+                  <Text style={styles.mediaTransportPlayLabel}>{(playerActive && playerIsPlaying) ? 'Pause' : 'Play'}</Text>
+                  <Text style={styles.mediaTransportPlayMeta}>Single tap</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.mediaTransportBtn,
+                continuousMediaPlay && styles.mediaTransportBtnActive,
+              ]}
+              onPress={handleMediaNextPress}
+              activeOpacity={0.82}
+            >
+              <Text style={styles.mediaTransportIcon}>⏭</Text>
+              <Text style={styles.mediaTransportLabel}>Next</Text>
+              <Text style={[
+                styles.mediaTransportMeta,
+                continuousMediaPlay && styles.mediaTransportMetaActive,
+              ]}>
+                {nextMediaIndex >= 0 ? '1x Next  •  2x Continuous' : '2x Continuous'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -1083,6 +1533,21 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </View>
         </View>
         {song.artist ? <Text style={styles.artistText}>{song.artist}</Text> : null}
+
+        {/* ── Listen button — shown when song has a media URL ── */}
+        {getSongMediaUrl(song) ? (
+          <TouchableOpacity
+            style={[styles.listenBtn, playerActive && styles.listenBtnActive]}
+            onPress={handleTogglePlayer}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.listenBtnText}>
+              {playerActive
+                ? (playerIsPlaying ? '⏸ Pause Media' : '▶ Play Media')
+                : '▶ Media Player'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         {/* Your Part badge — vocalists & instrumentalists with a BGV part */}
         {myPart && !isSoundTech ? (
@@ -1240,6 +1705,20 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── Inline YouTube Player (Media Mode) ── */}
+      {mediaModeEnabled && isYouTubeUrl(getSongMediaUrl(song)) ? (
+        <YouTubePlayer
+          url={getSongMediaUrl(song)}
+          height={220}
+          style={{ marginHorizontal: 12, marginTop: 6, marginBottom: 4, borderRadius: 12 }}
+          autoPlay={playerIsPlaying}
+          playing={playerIsPlaying}
+          nonce={playerReplayNonce}
+          onPlaybackStateChange={setPlayerIsPlaying}
+          onEnded={() => mediaEndedRef.current?.()}
+        />
+      ) : null}
 
       {/* ── Content Area ─────────────────────── */}
       <Animated.View style={{ flex: 1, opacity: contentOpacity }}>
@@ -1506,37 +1985,7 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         ) : null}
 
         {/* ── NO CONTENT ── */}
-        {content.type === 'no_content' ? (
-          <View style={styles.noContentState}>
-            <Text style={styles.noContentIcon}>
-              {activeRoleType === 'vocal' ? '🎤' : activeRoleType === 'instrument' ? '🎼' : activeRoleType === 'sound_tech' ? '🎚' : activeRoleType === 'media' ? '📺' : '🎵'}
-            </Text>
-            <Text style={styles.noContentTitle}>{song.title}</Text>
-            {song.key ? (
-              <Text style={styles.noContentSub}>
-                Key of {song.key}{song.tempo ? ` • ${song.tempo} BPM` : ''}
-              </Text>
-            ) : null}
-            <Text style={styles.noContentHint}>{content.label}</Text>
-            {activeRoleType !== 'sound_tech' && activeRoleType !== 'media' ? (
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => navigation.navigate('ContentEditor', {
-                  song,
-                  serviceId: '',
-                  type: activeRoleType === 'vocal' ? 'lyrics' : 'chord_chart',
-                  existing: '',
-                  instrument: activeRoleType === 'vocal' ? 'Vocals' : (selectedInstrument || ''),
-                  isAdmin: false,
-                })}
-              >
-                <Text style={styles.editBtnText}>
-                  ✏️ Add {activeRoleType === 'vocal' ? 'Lyrics' : (selectedInstrument ? selectedInstrument + ' Chart' : 'Chart')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ) : null}
+        {/* no_content: title/key/hint hidden in runner — already shown in header above */}
 
         {/* End-of-song → next song prompt */}
         {reachedEnd && currentIndex < songs.length - 1 ? (
@@ -1608,10 +2057,17 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         <TouchableOpacity
           style={[
             styles.transportPlayBtn,
-            autoScroll && styles.transportPlayBtnActive,
-            !canAutoScroll && styles.transportPlayBtnDisabled,
+            ((mediaModeEnabled && playerActive && playerIsPlaying) || (!mediaModeEnabled && autoScroll))
+              && styles.transportPlayBtnActive,
+            ((mediaModeEnabled && !getSongMediaUrl(song)) || (!mediaModeEnabled && !canAutoScroll))
+              && styles.transportPlayBtnDisabled,
           ]}
           onPress={() => {
+            if (mediaModeEnabled) {
+              if (!getSongMediaUrl(song)) return;
+              handleTogglePlayer();
+              return;
+            }
             if (!canAutoScroll) return;
             setReachedEnd(false);
             clearTimeout(autoAdvanceTimer.current);
@@ -1620,8 +2076,16 @@ export default function SetlistRunnerScreen({ navigation, route }) {
             setAutoScroll((v) => !v);
           }}
         >
-          <Text style={styles.transportPlayIcon}>{autoScroll ? '⏸' : '▶'}</Text>
-          <Text style={styles.transportPlayLabel}>{autoScroll ? 'Stop' : 'Play'}</Text>
+          <Text style={styles.transportPlayIcon}>
+            {mediaModeEnabled
+              ? ((playerActive && playerIsPlaying) ? '⏸' : '▶')
+              : (autoScroll ? '⏸' : '▶')}
+          </Text>
+          <Text style={styles.transportPlayLabel}>
+            {mediaModeEnabled
+              ? ((playerActive && playerIsPlaying) ? 'Pause' : 'Play')
+              : (autoScroll ? 'Stop' : 'Play')}
+          </Text>
         </TouchableOpacity>
 
         {/* Next */}
@@ -1644,21 +2108,43 @@ export default function SetlistRunnerScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* ── Haptic click track toggle ──── */}
-      <View style={styles.hapticRow}>
-        <Text style={styles.hapticRowLabel}>Click</Text>
-        {[HAPTIC_MODES.OFF, HAPTIC_MODES.DOWNBEAT_ONLY, HAPTIC_MODES.CLICK].map((mode) => (
+      {mediaModeEnabled ? (
+        <View style={styles.mediaOptionsRow}>
           <TouchableOpacity
-            key={mode}
-            style={[styles.hapticBtn, hapticMode === mode && styles.hapticBtnActive]}
-            onPress={() => setHapticMode(mode)}
+            style={[styles.mediaOptionChip, continuousMediaPlay && styles.mediaOptionChipActive]}
+            onPress={() => setContinuousMediaPlay((prev) => !prev)}
+            activeOpacity={0.75}
           >
-            <Text style={[styles.hapticBtnText, hapticMode === mode && styles.hapticBtnTextActive]}>
-              {mode === HAPTIC_MODES.OFF ? 'Off' : mode === HAPTIC_MODES.DOWNBEAT_ONLY ? '1 only' : 'All'}
+            <Text style={[styles.mediaOptionText, continuousMediaPlay && styles.mediaOptionTextActive]}>
+              {continuousMediaPlay ? 'Continuous On' : 'Continuous Off'}
             </Text>
           </TouchableOpacity>
-        ))}
-      </View>
+          <TouchableOpacity
+            style={[styles.mediaOptionChip, repeatCurrentMedia && styles.mediaOptionChipActive]}
+            onPress={() => setRepeatCurrentMedia((prev) => !prev)}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.mediaOptionText, repeatCurrentMedia && styles.mediaOptionTextActive]}>
+              {repeatCurrentMedia ? 'Repeat On' : 'Repeat Off'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.hapticRow}>
+          <Text style={styles.hapticRowLabel}>Click</Text>
+          {[HAPTIC_MODES.OFF, HAPTIC_MODES.DOWNBEAT_ONLY, HAPTIC_MODES.CLICK].map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[styles.hapticBtn, hapticMode === mode && styles.hapticBtnActive]}
+              onPress={() => setHapticMode(mode)}
+            >
+              <Text style={[styles.hapticBtnText, hapticMode === mode && styles.hapticBtnTextActive]}>
+                {mode === HAPTIC_MODES.OFF ? 'Off' : mode === HAPTIC_MODES.DOWNBEAT_ONLY ? '1 only' : 'All'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* ── Congregation energy (leader only) ─── */}
       {isLeaderRole && energyLevel != null && (
@@ -1698,6 +2184,39 @@ export default function SetlistRunnerScreen({ navigation, route }) {
           ) : null}
         </View>
       ) : null}
+
+      {/* ── In-app media player (audio-only tracks; YouTube shown inline above) ─── */}
+      {playerActive && !(mediaModeEnabled && isYouTubeUrl(getSongMediaUrl(song))) ? (
+        <View style={styles.miniPlayer}>
+          {isYouTubeUrl(getSongMediaUrl(song)) ? (
+            <YouTubePlayer
+              url={getSongMediaUrl(song)}
+              height={200}
+              style={styles.miniPlayerYT}
+              autoPlay={playerIsPlaying}
+              playing={playerIsPlaying}
+              nonce={playerReplayNonce}
+              onPlaybackStateChange={setPlayerIsPlaying}
+              onEnded={() => mediaEndedRef.current?.()}
+            />
+          ) : (
+            <View style={styles.miniPlayerAudioCard}>
+              <View style={styles.miniPlayerInfo}>
+                <Text style={styles.miniPlayerTitle} numberOfLines={1}>{song?.title || ''}</Text>
+                {song?.artist ? <Text style={styles.miniPlayerArtist} numberOfLines={1}>{song.artist}</Text> : null}
+              </View>
+              <TouchableOpacity style={styles.miniPlayerBtn} onPress={handleTogglePlayer} activeOpacity={0.7}>
+                {playerLoading
+                  ? <ActivityIndicator color="#A78BFA" size="small" />
+                  : <Text style={styles.miniPlayerBtnIcon}>{playerIsPlaying ? '⏸' : '▶'}</Text>}
+              </TouchableOpacity>
+            </View>
+          )}
+          <TouchableOpacity style={styles.miniPlayerClose} onPress={handleStopPlayer} activeOpacity={0.7}>
+            <Text style={styles.miniPlayerCloseText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1723,6 +2242,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   closeBtnText: { fontSize: 14, color: '#9CA3AF', fontWeight: '700' },
+  topBarSpacer: { width: 34, height: 34 },
   topCenter: { flex: 1, alignItems: 'center' },
   songCounter: { fontSize: 13, fontWeight: '700', color: '#E5E7EB', marginBottom: 5 },
   dotsRow: {
@@ -1809,7 +2329,104 @@ const styles = StyleSheet.create({
   },
   tempoBadgeText: { fontSize: 10, color: '#9CA3AF', fontWeight: '600' },
   artistText: { fontSize: 13, color: '#9CA3AF', marginBottom: 10 },
+  mediaHeaderPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  mediaHeaderPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#0F172A',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  mediaHeaderPillPrimary: {
+    backgroundColor: '#312E81',
+    borderColor: '#6366F1',
+  },
+  mediaHeaderPillText: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  mediaHeaderPillTextPrimary: {
+    color: '#EDE9FE',
+  },
 
+  // Media player mode
+  mediaModeBody: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 12,
+  },
+  mediaModePlayer: {
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  mediaModeAudioCard: {
+    minHeight: 240,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#312E81',
+    backgroundColor: '#080C14',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+  },
+  mediaModeAudioIcon: {
+    fontSize: 44,
+    marginBottom: 14,
+  },
+  mediaModeAudioTitle: {
+    fontSize: 22,
+    lineHeight: 28,
+    color: '#F9FAFB',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  mediaModeAudioArtist: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#94A3B8',
+    textAlign: 'center',
+  },
+  mediaModeAudioStatus: {
+    marginTop: 18,
+    fontSize: 13,
+    color: '#C4B5FD',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  mediaModeEmptyCard: {
+    minHeight: 240,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: '#080C14',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+  },
+  mediaModeEmptyTitle: {
+    fontSize: 20,
+    color: '#F9FAFB',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  mediaModeEmptyText: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#94A3B8',
+    textAlign: 'center',
+  },
   // Capo picker
   capoRow: { marginTop: 8, marginBottom: 4 },
   capoLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -1940,6 +2557,134 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
     paddingHorizontal: 20, paddingTop: 10,
     backgroundColor: '#0A0A0A', borderTopWidth: 1, borderTopColor: '#1F2937',
+  },
+  mediaTransportDeck: {
+    backgroundColor: '#050913',
+    borderTopWidth: 1,
+    borderTopColor: '#151B2D',
+    paddingTop: 12,
+    paddingHorizontal: 14,
+  },
+  mediaTransportStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 12,
+  },
+  mediaTransportStatusPill: {
+    minWidth: 88,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#0D1422',
+    borderWidth: 1,
+    borderColor: '#243046',
+    alignItems: 'center',
+  },
+  mediaTransportStatusPillActive: {
+    backgroundColor: 'rgba(79, 70, 229, 0.24)',
+    borderColor: '#818CF8',
+  },
+  mediaTransportStatusText: {
+    color: '#7C8AA5',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  mediaTransportStatusTextActive: {
+    color: '#E0E7FF',
+  },
+  mediaTransportHintText: {
+    flex: 1,
+    color: '#8EA0BC',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  mediaTransportRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  mediaTransportBtn: {
+    flex: 1,
+    minHeight: 88,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 14,
+    backgroundColor: '#0B1220',
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaTransportBtnActive: {
+    backgroundColor: 'rgba(49, 46, 129, 0.72)',
+    borderColor: '#818CF8',
+  },
+  mediaTransportIcon: {
+    fontSize: 22,
+    color: '#C7D2FE',
+  },
+  mediaTransportLabel: {
+    marginTop: 6,
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  mediaTransportMeta: {
+    marginTop: 6,
+    color: '#73839C',
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  mediaTransportMetaActive: {
+    color: '#C4B5FD',
+  },
+  mediaTransportPlayBtn: {
+    width: 116,
+    minHeight: 104,
+    borderRadius: 26,
+    paddingHorizontal: 10,
+    paddingVertical: 14,
+    backgroundColor: '#4F46E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  mediaTransportPlayBtnActive: {
+    backgroundColor: '#7C3AED',
+    shadowColor: '#7C3AED',
+  },
+  mediaTransportPlayBtnDisabled: {
+    backgroundColor: '#1F2937',
+    shadowOpacity: 0,
+  },
+  mediaTransportPlayIcon: {
+    fontSize: 28,
+    color: '#FFFFFF',
+  },
+  mediaTransportPlayLabel: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  mediaTransportPlayMeta: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 10,
+    fontWeight: '700',
   },
   transportBtn: {
     width: 72, height: 64, borderRadius: 14,
@@ -2097,6 +2842,35 @@ const styles = StyleSheet.create({
   hapticBtnActive: { backgroundColor: '#4F46E5', borderColor: '#6366F1' },
   hapticBtnText: { color: '#6B7280', fontSize: 11 },
   hapticBtnTextActive: { color: '#FFF', fontWeight: '600' },
+  mediaOptionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  mediaOptionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#1C2432',
+    borderWidth: 1,
+    borderColor: '#2D3748',
+  },
+  mediaOptionChipActive: {
+    backgroundColor: '#312E81',
+    borderColor: '#6366F1',
+  },
+  mediaOptionText: {
+    color: '#94A3B8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  mediaOptionTextActive: {
+    color: '#EDE9FE',
+  },
 
   // Congregation energy
   energyRow: { marginHorizontal: 12, marginBottom: 4, height: 20, backgroundColor: '#1C2432', borderRadius: 4, overflow: 'hidden', flexDirection: 'row', alignItems: 'center' },
@@ -2125,4 +2899,41 @@ const styles = StyleSheet.create({
     marginTop: 24, fontSize: 15, fontWeight: '600',
     color: '#9CA3AF', textAlign: 'center', paddingHorizontal: 32,
   },
+
+  // Listen button
+  listenBtn: {
+    alignSelf: 'flex-start', marginTop: 8,
+    paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: '#1E1B4B', borderRadius: 20,
+    borderWidth: 1, borderColor: '#6366F1',
+  },
+  listenBtnActive: { backgroundColor: '#312E81', borderColor: '#818CF8' },
+  listenBtnText: { fontSize: 13, fontWeight: '700', color: '#A78BFA' },
+
+  // Mini-player (YouTube or audio)
+  miniPlayer: {
+    backgroundColor: '#080C14',
+    borderTopWidth: 1, borderTopColor: '#312E81',
+  },
+  miniPlayerYT: { width: '100%' },
+  miniPlayerAudioCard: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 10, gap: 10,
+  },
+  miniPlayerInfo: { flex: 1 },
+  miniPlayerTitle: { fontSize: 13, fontWeight: '700', color: '#E5E7EB' },
+  miniPlayerArtist: { fontSize: 11, color: '#6B7280', marginTop: 1 },
+  miniPlayerBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#1E1B4B', borderWidth: 1, borderColor: '#6366F1',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  miniPlayerBtnIcon: { fontSize: 16, color: '#A78BFA' },
+  miniPlayerClose: {
+    position: 'absolute', top: 6, right: 6,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  miniPlayerCloseText: { fontSize: 11, color: '#9CA3AF', fontWeight: '700' },
 });

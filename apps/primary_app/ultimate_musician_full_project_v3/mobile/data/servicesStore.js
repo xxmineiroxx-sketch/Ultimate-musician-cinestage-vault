@@ -1,5 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import { getScopedItem, setScopedItem } from "./orgScopedStorage";
 import { getServiceTypeMeta } from "./serviceTemplates";
 
 /**
@@ -16,9 +15,42 @@ const KEYS = {
   DELETED_SERVICES: "um/services/deleted/v1",
 };
 
+function toDayTs(dateStr) {
+  const raw = String(dateStr || "").trim();
+  if (!raw) return 0;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0).getTime();
+  }
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, month, day, year] = slashMatch;
+    return new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0).getTime();
+  }
+
+  const parsed = new Date(raw);
+  const ts = parsed.getTime();
+  if (!Number.isFinite(ts)) return 0;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed.getTime();
+}
+
+function todayStartTs() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today.getTime();
+}
+
+function isTodayOrFutureService(service, minDayTs = todayStartTs()) {
+  return toDayTs(service?.date) >= minDayTs;
+}
+
 async function getJSON(key, fallback) {
   try {
-    const raw = await AsyncStorage.getItem(key);
+    const raw = await getScopedItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw);
   } catch {
@@ -27,7 +59,7 @@ async function getJSON(key, fallback) {
 }
 
 async function setJSON(key, value) {
-  await AsyncStorage.setItem(key, JSON.stringify(value));
+  await setScopedItem(key, JSON.stringify(value));
 }
 
 export async function getServices() {
@@ -40,11 +72,28 @@ export async function saveServices(services) {
 }
 
 export async function getActiveServiceId() {
-  return (await AsyncStorage.getItem(KEYS.ACTIVE_SERVICE_ID)) || "";
+  const savedId = (await getScopedItem(KEYS.ACTIVE_SERVICE_ID)) || "";
+  const services = [...(await getServices())].sort(sortByDateTimeAsc);
+  const minDayTs = todayStartTs();
+
+  const savedService = services.find((service) => service.id === savedId);
+  if (savedService && isTodayOrFutureService(savedService, minDayTs)) {
+    return savedId;
+  }
+
+  const fallbackService =
+    services.find((service) => isTodayOrFutureService(service, minDayTs)) || null;
+  const nextId = fallbackService?.id || "";
+
+  if (nextId !== savedId) {
+    await setScopedItem(KEYS.ACTIVE_SERVICE_ID, nextId);
+  }
+
+  return nextId;
 }
 
 export async function setActiveServiceId(serviceId) {
-  await AsyncStorage.setItem(KEYS.ACTIVE_SERVICE_ID, serviceId || "");
+  await setScopedItem(KEYS.ACTIVE_SERVICE_ID, serviceId || "");
 }
 
 export function makeServiceId() {

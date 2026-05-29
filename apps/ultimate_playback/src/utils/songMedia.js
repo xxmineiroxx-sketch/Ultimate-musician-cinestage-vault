@@ -37,6 +37,9 @@ const SONG_LIBRARY_FALLBACK_FIELDS = [
   'harmonies',
   'patches',
   'role_content',
+  'analysis',
+  'waveformPeaks',
+  'structure',
   'keyboard',
   'routing',
 ];
@@ -118,6 +121,7 @@ export function getPlayableMediaUrl(value) {
       || path.includes('/uploads/')
       || host.endsWith('workers.dev')
       || host.endsWith('pages.dev')
+      || host.endsWith('ultimatelabs.co')
       || host.endsWith('r2.dev')
     ) {
       return url;

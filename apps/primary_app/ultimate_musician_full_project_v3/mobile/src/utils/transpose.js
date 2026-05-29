@@ -309,6 +309,80 @@ export const transposeMidiNote = (midiNote, semitones) => {
   return Math.max(0, Math.min(127, transposed));
 };
 
+/**
+ * getCapoSuggestion(fromKey, toKey)
+ *
+ * Given a song's original key and a target guitar-friendly key,
+ * suggests a capo position so the guitarist can use open chord shapes.
+ *
+ * Guitar-friendly keys (open shapes): E, A, D, G, C, Em, Am
+ *
+ * Returns: { capo: number, playKey: string, guitarKey: string }
+ * Example: fromKey="Bb", toKey="C" → { capo: 3, playKey: "A", guitarKey: "C" }
+ *
+ * Logic:
+ * 1. Calculate semitones from fromKey to toKey
+ * 2. Try capo positions 0-7, for each: effectiveKey = transposeNote(playKey, -capo)
+ *    Find the capo where effectiveKey matches toKey
+ * 3. Return the smallest capo that works, preferring guitar-friendly playKeys
+ */
+const GUITAR_FRIENDLY_KEYS = ["E", "A", "D", "G", "C", "Em", "Am"];
+
+export function getCapoSuggestion(fromKey, toKey) {
+  if (!fromKey || !toKey) return { capo: 0, playKey: toKey || fromKey, guitarKey: toKey || fromKey };
+
+  // If already the same key, no capo needed
+  if (fromKey === toKey) return { capo: 0, playKey: toKey, guitarKey: toKey };
+
+  // Try each guitar-friendly play key and capo 0-7
+  // For a given playKey + capo, the sounding key = transposeNote(playKey, -capo)
+  // We want: sounding key === toKey
+  let bestResult = null;
+
+  for (const playKey of GUITAR_FRIENDLY_KEYS) {
+    // Strip minor suffix for transposition purposes
+    const playRoot = playKey.replace(/m$/, "");
+    for (let capo = 0; capo <= 7; capo++) {
+      // The sounding (concert) key when playing playKey with capo at position `capo`
+      const soundingKey = transposeNote(playRoot, -capo);
+      // Normalize toKey for comparison (handle flats vs sharps)
+      const toKeyRoot = toKey.replace(/m$/, "");
+      const toKeyIdx = FLATS.indexOf(toKeyRoot) !== -1
+        ? FLATS.indexOf(toKeyRoot)
+        : NOTES.indexOf(toKeyRoot);
+      const soundingIdx = FLATS.indexOf(soundingKey) !== -1
+        ? FLATS.indexOf(soundingKey)
+        : NOTES.indexOf(soundingKey);
+
+      if (toKeyIdx !== -1 && soundingIdx !== -1 && toKeyIdx === soundingIdx) {
+        if (!bestResult || capo < bestResult.capo) {
+          bestResult = { capo, playKey, guitarKey: toKey };
+        }
+        break; // No need to try higher capo for this playKey
+      }
+    }
+  }
+
+  // Fallback: if no guitar-friendly match found, return direct transposition with capo 0
+  if (!bestResult) {
+    bestResult = { capo: 0, playKey: toKey, guitarKey: toKey };
+  }
+
+  return bestResult;
+}
+
+/**
+ * formatCapoLabel(capoResult)
+ * Returns a display string like "Capo 3 → play A shapes"
+ * Returns "No capo needed" if capo === 0
+ */
+export function formatCapoLabel(capoResult) {
+  if (!capoResult) return "No capo needed";
+  const { capo, playKey } = capoResult;
+  if (!capo || capo === 0) return "No capo needed";
+  return `Capo ${capo} \u2192 play ${playKey} shapes`;
+}
+
 export default {
   calculateSemitoneShift,
   transposeNote,
@@ -319,4 +393,6 @@ export default {
   autoTransposeSong,
   resetToOriginalKey,
   transposeMidiNote,
+  getCapoSuggestion,
+  formatCapoLabel,
 };

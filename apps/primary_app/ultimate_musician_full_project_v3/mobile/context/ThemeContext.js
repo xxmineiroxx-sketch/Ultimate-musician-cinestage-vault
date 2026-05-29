@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { Appearance } from "react-native";
 
 import {
   loadSession,
@@ -58,12 +59,14 @@ export function ThemeProvider({ children }) {
       const session = await loadSession();
       if (typeof session?.darkMode === "boolean") {
         setIsDark(session.darkMode);
+        Appearance.setColorScheme(session.darkMode ? "dark" : "light");
       }
     })();
   }, []);
 
   async function setDarkMode(value) {
     setIsDark(value);
+    Appearance.setColorScheme(value ? "dark" : "light");
     const current = (await loadSession()) || defaultSession();
     await saveSession({
       ...current,

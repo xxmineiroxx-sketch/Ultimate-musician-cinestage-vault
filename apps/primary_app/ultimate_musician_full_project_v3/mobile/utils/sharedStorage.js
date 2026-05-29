@@ -1,9 +1,9 @@
 /**
  * Shared Storage - Ultimate Playback & Ultimate Musician Integration
- * Provides shared AsyncStorage access for cross-app communication
+ * Keeps cross-screen shared data isolated per active org/branch.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getScopedItem, setScopedItem } from "../data/orgScopedStorage";
 
 // Storage Keys
 export const KEYS = {
@@ -20,7 +20,7 @@ export const KEYS = {
 
 export const getSharedTeamMembers = async () => {
   try {
-    const data = await AsyncStorage.getItem(KEYS.TEAM_MEMBERS);
+    const data = await getScopedItem(KEYS.TEAM_MEMBERS);
     return data ? JSON.parse(data) : [];
   } catch (error) {
     console.error("Error loading shared team members:", error);
@@ -30,7 +30,7 @@ export const getSharedTeamMembers = async () => {
 
 export const saveSharedTeamMembers = async (members) => {
   try {
-    await AsyncStorage.setItem(KEYS.TEAM_MEMBERS, JSON.stringify(members));
+    await setScopedItem(KEYS.TEAM_MEMBERS, JSON.stringify(members));
     return true;
   } catch (error) {
     console.error("Error saving shared team members:", error);
@@ -153,7 +153,7 @@ export const updateTeamMember = async (memberId, updates) => {
 
 export const getSharedAssignments = async () => {
   try {
-    const data = await AsyncStorage.getItem(KEYS.ASSIGNMENTS);
+    const data = await getScopedItem(KEYS.ASSIGNMENTS);
     return data ? JSON.parse(data) : [];
   } catch (error) {
     console.error("Error loading shared assignments:", error);
@@ -163,7 +163,7 @@ export const getSharedAssignments = async () => {
 
 export const saveSharedAssignments = async (assignments) => {
   try {
-    await AsyncStorage.setItem(KEYS.ASSIGNMENTS, JSON.stringify(assignments));
+    await setScopedItem(KEYS.ASSIGNMENTS, JSON.stringify(assignments));
     return true;
   } catch (error) {
     console.error("Error saving shared assignments:", error);
@@ -213,7 +213,7 @@ export const declineAssignment = async (assignmentId) => {
 
 export const getSharedMessages = async () => {
   try {
-    const data = await AsyncStorage.getItem(KEYS.MESSAGES);
+    const data = await getScopedItem(KEYS.MESSAGES);
     return data ? JSON.parse(data) : [];
   } catch (error) {
     console.error("Error loading shared messages:", error);
@@ -223,7 +223,7 @@ export const getSharedMessages = async () => {
 
 export const saveSharedMessages = async (messages) => {
   try {
-    await AsyncStorage.setItem(KEYS.MESSAGES, JSON.stringify(messages));
+    await setScopedItem(KEYS.MESSAGES, JSON.stringify(messages));
     return true;
   } catch (error) {
     console.error("Error saving shared messages:", error);
@@ -275,7 +275,7 @@ export const markMessageAsRead = async (messageId) => {
 
 export const getSharedServices = async () => {
   try {
-    const data = await AsyncStorage.getItem(KEYS.SERVICES);
+    const data = await getScopedItem(KEYS.SERVICES);
     return data ? JSON.parse(data) : [];
   } catch (error) {
     console.error("Error loading shared services:", error);
@@ -285,7 +285,7 @@ export const getSharedServices = async () => {
 
 export const saveSharedServices = async (services) => {
   try {
-    await AsyncStorage.setItem(KEYS.SERVICES, JSON.stringify(services));
+    await setScopedItem(KEYS.SERVICES, JSON.stringify(services));
     return true;
   } catch (error) {
     console.error("Error saving shared services:", error);
@@ -304,7 +304,7 @@ export const getServiceById = async (serviceId) => {
 
 export const getSharedSongs = async () => {
   try {
-    const data = await AsyncStorage.getItem(KEYS.SONGS);
+    const data = await getScopedItem(KEYS.SONGS);
     return data ? JSON.parse(data) : [];
   } catch (error) {
     console.error("Error loading shared songs:", error);
@@ -314,7 +314,7 @@ export const getSharedSongs = async () => {
 
 export const saveSharedSongs = async (songs) => {
   try {
-    await AsyncStorage.setItem(KEYS.SONGS, JSON.stringify(songs));
+    await setScopedItem(KEYS.SONGS, JSON.stringify(songs));
     return true;
   } catch (error) {
     console.error("Error saving shared songs:", error);

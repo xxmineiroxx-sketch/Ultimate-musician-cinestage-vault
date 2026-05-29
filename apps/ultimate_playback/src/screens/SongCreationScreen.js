@@ -12,9 +12,11 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { createSongPreset } from '../data/models';
 import { addOrUpdateSong } from '../data/storage';
+import { analyzeAudio } from '../services/cinestage';
 
 export default function SongCreationScreen({ navigation }) {
   const [title, setTitle] = useState('');
@@ -22,6 +24,39 @@ export default function SongCreationScreen({ navigation }) {
   const [originalKey, setOriginalKey] = useState('');
   const [tempo, setTempo] = useState('');
   const [timeSignature, setTimeSignature] = useState('4/4');
+  
+  // Magic Import state
+  const [importUrl, setImportUrl] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  const handleMagicImport = async () => {
+    if (!importUrl.trim()) {
+      Alert.alert('Error', 'Please enter a URL to analyze');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const result = await analyzeAudio({
+        file_url: importUrl.trim(),
+        title: title || 'Magic Import',
+      });
+
+      if (result) {
+        if (result.title) setTitle(result.title);
+        if (result.metadata?.artist) setArtist(result.metadata.artist);
+        if (result.key) setOriginalKey(result.key);
+        if (result.bpm) setTempo(String(Math.round(result.bpm)));
+        
+        Alert.alert('Success', 'Song details imported automatically!');
+      }
+    } catch (error) {
+      console.error('Magic Import failed:', error);
+      Alert.alert('Import Failed', 'Could not analyze audio. Please check the URL or enter details manually.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   const handleSave = async () => {
     // Validation
@@ -67,6 +102,29 @@ export default function SongCreationScreen({ navigation }) {
       <Text style={styles.subtitle}>
         Enter basic song information, then set up your devices
       </Text>
+
+      {/* Magic Import Section */}
+      <View style={[styles.infoBox, { marginTop: 0, marginBottom: 24, borderColor: '#4F46E5', backgroundColor: 'rgba(79, 70, 229, 0.05)' }]}>
+        <Text style={[styles.infoTitle, { color: '#818CF8' }]}>✨ Magic Import</Text>
+        <Text style={[styles.infoText, { marginBottom: 12 }]}>Paste a YouTube or audio URL to auto-fill song details.</Text>
+        <View style={styles.importRow}>
+          <TextInput
+            style={[styles.input, { flex: 1, marginTop: 0 }]}
+            value={importUrl}
+            onChangeText={setImportUrl}
+            placeholder="YouTube or Audio URL"
+            placeholderTextColor="#6B7280"
+            autoCapitalize="none"
+          />
+          <TouchableOpacity 
+            style={[styles.analyzeButton, isImporting && { opacity: 0.7 }]}
+            onPress={handleMagicImport}
+            disabled={isImporting}
+          >
+            {isImporting ? <ActivityIndicator size="small" color="#FFF" /> : <Text style={styles.analyzeButtonText}>Analyze</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <View style={styles.form}>
         <Text style={styles.label}>Song Title *</Text>
@@ -240,6 +298,24 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     gap: 12,
+  },
+  importRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  analyzeButton: {
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    justifyContent: 'center',
+    height: 48,
+  },
+  analyzeButtonText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
   halfWidth: {
     flex: 1,

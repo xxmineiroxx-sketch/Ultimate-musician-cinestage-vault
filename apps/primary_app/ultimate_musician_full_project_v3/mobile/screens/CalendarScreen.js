@@ -13,6 +13,8 @@ import {
 import { getBlockedDateSet, getBlockoutsForDate } from "../data/blockoutsStore";
 import {
   getServices,
+  saveServices,
+  sortByDateTimeAsc,
   createService,
   deleteService,
   setActiveServiceId,
@@ -116,8 +118,42 @@ export default function CalendarScreen({ navigation }) {
       getServices(),
       getBlockedDateSet(),
     ]);
+    // Render local data immediately
     setAllServices(svcs);
     setBlockedDates(blocked);
+
+    // Pull cloud services and merge any new ones into local storage
+    try {
+      const res = await fetch(`${SYNC_URL}/sync/library-pull`, { headers: syncHeaders() });
+      if (!res.ok) return;
+      const lib = await res.json();
+      const cloudSvcs = Array.isArray(lib.services) ? lib.services : [];
+      if (cloudSvcs.length === 0) return;
+      const localIds = new Set(svcs.map((s) => s.id));
+      const newFromCloud = cloudSvcs
+        .filter((cs) => cs?.id && !localIds.has(cs.id))
+        .map((cs) => ({
+          id: cs.id,
+          title: cs.title || cs.name || "Service",
+          date: cs.date || "",
+          time: cs.time || "09:00",
+          status: cs.status || "draft",
+          servicePlanId: cs.servicePlanId || `plan_${cs.id}`,
+          serviceType: cs.serviceType || cs.type || "standard",
+          isSpecial: cs.isSpecial || false,
+          leadDays: cs.leadDays || 21,
+          createdAt: typeof cs.createdAt === "number" ? cs.createdAt : Date.now(),
+          updatedAt: typeof cs.updatedAt === "number" ? cs.updatedAt : Date.now(),
+          created_by_name: cs.created_by_name || "",
+          created_by_email: cs.created_by_email || "",
+        }));
+      if (newFromCloud.length === 0) return;
+      const merged = [...svcs, ...newFromCloud].sort(sortByDateTimeAsc);
+      await saveServices(merged);
+      setAllServices(merged);
+    } catch {
+      // Network unavailable — local data already shown
+    }
   }, []);
 
   useEffect(() => {
@@ -393,6 +429,13 @@ export default function CalendarScreen({ navigation }) {
               <Text style={styles.legendText}>Team Conflict</Text>
             </View>
             <TouchableOpacity
+              style={styles.teamAvailBtn}
+              onPress={() => navigation.navigate("AvailabilityHeatmap")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.teamAvailBtnText}>Team Availability</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.newServiceBtn}
               onPress={() => goToNewService(selectedDate || "")}
             >
@@ -648,6 +691,19 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     fontSize: 13,
     fontWeight: "600",
+  },
+  teamAvailBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#0B1120",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#10B981",
+  },
+  teamAvailBtnText: {
+    color: "#10B981",
+    fontSize: 13,
+    fontWeight: "800",
   },
   newServiceBtn: {
     paddingHorizontal: 20,

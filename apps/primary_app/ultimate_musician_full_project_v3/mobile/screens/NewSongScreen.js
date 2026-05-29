@@ -389,7 +389,7 @@ export default function NewSongScreen({ navigation }) {
               style={styles.toolButton}
               onPress={() => navigation.navigate("CineStage")}
             >
-              <Text style={styles.toolButtonText}>CineStage</Text>
+              <Text style={styles.toolButtonText}>CineStage Status</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.toolButton}

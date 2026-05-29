@@ -4,6 +4,11 @@ import { CINESTAGE_URL, SYNC_URL, WS_URL, syncHeaders } from "../screens/config"
 
 import { ensureCifrasSeeded } from "./cifrasSeed";
 import {
+  getScopedItem,
+  multiRemoveScopedItems,
+  setScopedItem,
+} from "./orgScopedStorage";
+import {
   demoSongs,
   demoRoles,
   demoSettings,
@@ -17,7 +22,8 @@ import {
 } from "./models";
 
 const SONGS_KEY = "um.songs.v2";
-const SERVICES_KEY = "um.services.v1";
+const DELETED_SONGS_KEY = "um.songs.deleted.v1";
+const SERVICES_KEY = "um/services/v1";
 const PEOPLE_KEY = "um.people.v1";
 const SETTINGS_KEY = "um.settings.v1";
 const ROLES_KEY = "um.roles.v1";
@@ -36,20 +42,33 @@ const safeJsonParse = (value, fallback) => {
 
 const nowIso = () => new Date().toISOString();
 const trimLeadingSlashes = (value = "") => String(value || "").replace(/^\/+/, "");
-const LEGACY_CINESTAGE_HOSTS = [
-  "http://localhost:8000",
-  "https://localhost:8000",
-  "http://127.0.0.1:8000",
-  "https://127.0.0.1:8000",
-  "https://railway.ultimatemusician",
-];
+const LEGACY_CINESTAGE_HOSTS = new Set([
+  "localhost:8000",
+  "127.0.0.1:8000",
+  "railway.ultimatemusician",
+]);
+
+const isLegacyCineStageBaseUrl = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+
+  try {
+    const url = new URL(raw);
+    if (!LEGACY_CINESTAGE_HOSTS.has(url.host)) {
+      return false;
+    }
+    return !url.pathname || url.pathname === "/" || url.pathname === "/cinestage";
+  } catch {
+    return false;
+  }
+};
 
 const sanitizeSettings = (settings = {}) => {
   const next = { ...(settings || {}) };
   const rawApiBase = String(next.apiBase || "").trim();
   const normalizedApiBase = rawApiBase.replace(/\/+$/, "");
 
-  if (!normalizedApiBase || LEGACY_CINESTAGE_HOSTS.includes(normalizedApiBase)) {
+  if (isLegacyCineStageBaseUrl(normalizedApiBase)) {
     next.apiBase = CINESTAGE_URL;
   } else {
     next.apiBase = normalizedApiBase;
@@ -153,15 +172,107 @@ const normalizeSongLocalStems = (song) => {
   };
 };
 
+const normalizeSongServiceHistory = (song) => {
+  if (!song || typeof song !== "object") {
+    return { nextSong: song, changed: false };
+  }
+
+  const rawHistory = Array.isArray(song.serviceHistory) ? song.serviceHistory : [];
+  const seen = new Set();
+  const nextHistory = rawHistory
+    .map((entry) => ({
+      serviceId: String(entry?.serviceId || "").trim(),
+      serviceDate: String(entry?.serviceDate || "").trim(),
+      serviceTitle: String(entry?.serviceTitle || "").trim(),
+      addedAt: String(entry?.addedAt || "").trim() || nowIso(),
+    }))
+    .filter((entry) => {
+      if (!entry.serviceId || seen.has(entry.serviceId)) return false;
+      seen.add(entry.serviceId);
+      return true;
+    })
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.serviceDate || left.addedAt || "") || 0;
+      const rightTime = Date.parse(right.serviceDate || right.addedAt || "") || 0;
+      return rightTime - leftTime;
+    });
+
+  const nextTimesUsed = nextHistory.length;
+  const nextLastUsedAt =
+    nextHistory[0]?.serviceDate ||
+    nextHistory[0]?.addedAt ||
+    null;
+
+  const changed =
+    !Array.isArray(song.serviceHistory) ||
+    rawHistory.length !== nextHistory.length ||
+    rawHistory.some((entry, index) => {
+      const normalized = nextHistory[index];
+      return (
+        String(entry?.serviceId || "") !== normalized?.serviceId ||
+        String(entry?.serviceDate || "") !== normalized?.serviceDate ||
+        String(entry?.serviceTitle || "") !== normalized?.serviceTitle ||
+        String(entry?.addedAt || "") !== normalized?.addedAt
+      );
+    }) ||
+    Number(song?.timesUsed || 0) !== nextTimesUsed ||
+    String(song?.lastUsedAt || "") !== String(nextLastUsedAt || "");
+
+  if (!changed) {
+    return { nextSong: song, changed: false };
+  }
+
+  return {
+    nextSong: {
+      ...song,
+      serviceHistory: nextHistory,
+      timesUsed: nextTimesUsed,
+      lastUsedAt: nextLastUsedAt,
+    },
+    changed: true,
+  };
+};
+
 const normalizeSongsSnapshot = (songs) => {
   let changed = false;
   const nextSongs = (Array.isArray(songs) ? songs : []).map((song) => {
-    const normalized = normalizeSongLocalStems(song);
-    changed = changed || normalized.changed;
-    return normalized.nextSong;
+    const normalizedStems = normalizeSongLocalStems(song);
+    const normalizedUsage = normalizeSongServiceHistory(normalizedStems.nextSong);
+    changed = changed || normalizedStems.changed || normalizedUsage.changed;
+    return normalizedUsage.nextSong;
   });
 
   return { nextSongs, changed };
+};
+
+export const buildSongUsageLookupKey = (song = {}) =>
+  `${String(song?.title || "").trim().toLowerCase()}::${String(song?.artist || "")
+    .trim()
+    .toLowerCase()}`;
+
+const getDeletedSongIds = async () => {
+  try {
+    const raw = await getScopedItem(DELETED_SONGS_KEY);
+    return safeJsonParse(raw, []).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+const saveDeletedSongIds = async (songIds) => {
+  try {
+    const nextIds = [...new Set((Array.isArray(songIds) ? songIds : []).filter(Boolean))];
+    await setScopedItem(DELETED_SONGS_KEY, JSON.stringify(nextIds));
+  } catch (err) {
+    console.warn("[storage] saveDeletedSongIds failed:", err);
+  }
+};
+
+const filterDeletedSongs = (songs, deletedSongIds) => {
+  const deletedIds = new Set(Array.isArray(deletedSongIds) ? deletedSongIds : []);
+  return (Array.isArray(songs) ? songs : []).filter(
+    (song) => !(song?.id && deletedIds.has(song.id)),
+  );
 };
 const normalizeLookupPhone = (value) =>
   String(value || "").replace(/\D+/g, "");
@@ -269,7 +380,7 @@ const mergePersonSource = (leftSource, rightSource) => {
 
 const getLocalPeople = async () => {
   try {
-    const raw = await AsyncStorage.getItem(PEOPLE_KEY);
+    const raw = await getScopedItem(PEOPLE_KEY);
     return safeJsonParse(raw, []);
   } catch {
     return [];
@@ -291,7 +402,7 @@ const syncPeopleFromCloud = async () => {
     if (!res.ok) return null;
     const remote = await res.json();
     if (Array.isArray(remote) && remote.length > 0) {
-      await AsyncStorage.setItem(SHARED_TEAM_MEMBERS_KEY, JSON.stringify(remote));
+      await setScopedItem(SHARED_TEAM_MEMBERS_KEY, JSON.stringify(remote));
       return remote;
     }
     return null;
@@ -305,7 +416,7 @@ const getSharedTeamMembersSnapshot = async () => {
   const fresh = await syncPeopleFromCloud();
   if (fresh) return fresh;
   try {
-    const raw = await AsyncStorage.getItem(SHARED_TEAM_MEMBERS_KEY);
+    const raw = await getScopedItem(SHARED_TEAM_MEMBERS_KEY);
     return safeJsonParse(raw, []);
   } catch {
     return [];
@@ -561,13 +672,15 @@ export const saveSettings = async (next) => {
 
 export const getSongs = async () => {
   try {
-    const raw = await AsyncStorage.getItem(SONGS_KEY);
+    const raw = await getScopedItem(SONGS_KEY);
     const parsed = safeJsonParse(raw, []);
+    const deletedSongIds = await getDeletedSongIds();
     const { nextSongs, changed } = normalizeSongsSnapshot(parsed);
-    if (changed) {
-      await AsyncStorage.setItem(SONGS_KEY, JSON.stringify(nextSongs));
+    const visibleSongs = filterDeletedSongs(nextSongs, deletedSongIds);
+    if (changed || visibleSongs.length !== nextSongs.length) {
+      await setScopedItem(SONGS_KEY, JSON.stringify(visibleSongs));
     }
-    return nextSongs;
+    return visibleSongs;
   } catch {
     return [];
   }
@@ -575,14 +688,22 @@ export const getSongs = async () => {
 
 export const saveSongs = async (songs) => {
   try {
+    const deletedSongIds = await getDeletedSongIds();
     const { nextSongs } = normalizeSongsSnapshot(songs);
-    await AsyncStorage.setItem(SONGS_KEY, JSON.stringify(nextSongs));
+    const visibleSongs = filterDeletedSongs(nextSongs, deletedSongIds);
+    await setScopedItem(SONGS_KEY, JSON.stringify(visibleSongs));
   } catch (err) {
     console.warn("[storage] saveSongs failed:", err);
   }
 };
 
 export const addOrUpdateSong = async (song) => {
+  if (song?.id) {
+    const deletedSongIds = await getDeletedSongIds();
+    if (deletedSongIds.includes(song.id)) {
+      await saveDeletedSongIds(deletedSongIds.filter((id) => id !== song.id));
+    }
+  }
   const songs = await getSongs();
   const index = songs.findIndex((s) => s.id === song.id);
   const normalizedSong = normalizeSongLocalStems(song).nextSong;
@@ -600,9 +721,105 @@ export const addOrUpdateSong = async (song) => {
   return next;
 };
 
+export const recordSongServiceUsage = async (songId, serviceMeta = {}) => {
+  const normalizedSongId = String(songId || "").trim();
+  const normalizedServiceId = String(serviceMeta?.serviceId || "").trim();
+  if (!normalizedSongId || !normalizedServiceId) return null;
+
+  const songs = await getSongs();
+  const index = songs.findIndex(
+    (song) =>
+      String(song?.id || "").trim() === normalizedSongId ||
+      String(song?.songId || "").trim() === normalizedSongId,
+  );
+  if (index < 0) return null;
+
+  const currentSong = songs[index];
+  const baseHistory = Array.isArray(currentSong?.serviceHistory)
+    ? currentSong.serviceHistory.filter(
+        (entry) => String(entry?.serviceId || "").trim() !== normalizedServiceId,
+      )
+    : [];
+
+  const nextEntry = {
+    serviceId: normalizedServiceId,
+    serviceDate: String(serviceMeta?.serviceDate || serviceMeta?.date || "").trim(),
+    serviceTitle: String(serviceMeta?.serviceTitle || serviceMeta?.title || "").trim(),
+    addedAt: nowIso(),
+  };
+
+  const normalizedSong = normalizeSongServiceHistory({
+    ...currentSong,
+    serviceHistory: [nextEntry, ...baseHistory].slice(0, 64),
+  }).nextSong;
+
+  songs[index] = {
+    ...normalizedSong,
+    updatedAt: nowIso(),
+  };
+  await saveSongs(songs);
+  return songs[index];
+};
+
+export const removeSongServiceUsage = async (songId, serviceId) => {
+  const normalizedSongId = String(songId || "").trim();
+  const normalizedServiceId = String(serviceId || "").trim();
+  if (!normalizedSongId || !normalizedServiceId) return null;
+
+  const songs = await getSongs();
+  const index = songs.findIndex(
+    (song) =>
+      String(song?.id || "").trim() === normalizedSongId ||
+      String(song?.songId || "").trim() === normalizedSongId,
+  );
+  if (index < 0) return null;
+
+  const currentSong = songs[index];
+  const nextHistory = (Array.isArray(currentSong?.serviceHistory) ? currentSong.serviceHistory : [])
+    .filter((entry) => String(entry?.serviceId || "").trim() !== normalizedServiceId);
+
+  const normalizedSong = normalizeSongServiceHistory({
+    ...currentSong,
+    serviceHistory: nextHistory,
+  }).nextSong;
+
+  songs[index] = {
+    ...normalizedSong,
+    updatedAt: nowIso(),
+  };
+  await saveSongs(songs);
+  return songs[index];
+};
+
+export const getSongUsageStats = async () => {
+  const songs = await getSongs();
+  const byId = {};
+  const byLookupKey = {};
+
+  songs.forEach((song) => {
+    const normalizedSong = normalizeSongServiceHistory(song).nextSong || song;
+    const stats = {
+      timesUsed: Number(normalizedSong?.timesUsed || 0),
+      lastUsedAt: normalizedSong?.lastUsedAt || null,
+      serviceHistory: Array.isArray(normalizedSong?.serviceHistory)
+        ? normalizedSong.serviceHistory
+        : [],
+    };
+    const id = String(normalizedSong?.id || normalizedSong?.songId || "").trim();
+    const lookupKey = buildSongUsageLookupKey(normalizedSong);
+
+    if (id) byId[id] = stats;
+    if (lookupKey) byLookupKey[lookupKey] = stats;
+  });
+
+  return { byId, byLookupKey };
+};
+
 export const deleteSong = async (songId) => {
   const songs = await getSongs();
   const next = songs.filter((s) => s.id !== songId);
+  const deletedSongIds = await getDeletedSongIds();
+  await saveDeletedSongIds([...deletedSongIds, songId]);
   await saveSongs(next);
   return next;
 };
@@ -622,7 +839,7 @@ export const findSongDuplicate = (songs, title, artist) => {
 
 export const getServices = async () => {
   try {
-    const raw = await AsyncStorage.getItem(SERVICES_KEY);
+    const raw = await getScopedItem(SERVICES_KEY);
     return safeJsonParse(raw, []);
   } catch {
     return [];
@@ -631,7 +848,7 @@ export const getServices = async () => {
 
 export const saveServices = async (services) => {
   try {
-    await AsyncStorage.setItem(SERVICES_KEY, JSON.stringify(services));
+    await setScopedItem(SERVICES_KEY, JSON.stringify(services));
   } catch (err) {
     console.warn("[storage] saveServices failed:", err);
   }
@@ -734,7 +951,7 @@ export const deletePersonFromCloud = async (person) => {
 
 export const savePeople = async (people) => {
   try {
-    await AsyncStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
+    await setScopedItem(PEOPLE_KEY, JSON.stringify(people));
   } catch (err) {
     console.warn("[storage] savePeople failed:", err);
   }
@@ -767,7 +984,7 @@ export const deletePerson = async (personId) => {
 // ROLES
 export const getRoles = async () => {
   try {
-    const raw = await AsyncStorage.getItem(ROLES_KEY);
+    const raw = await getScopedItem(ROLES_KEY);
     return safeJsonParse(raw, []);
   } catch {
     return [];
@@ -776,7 +993,7 @@ export const getRoles = async () => {
 
 export const saveRoles = async (roles) => {
   try {
-    await AsyncStorage.setItem(ROLES_KEY, JSON.stringify(roles));
+    await setScopedItem(ROLES_KEY, JSON.stringify(roles));
   } catch (err) {
     console.warn("[storage] saveRoles failed:", err);
   }
@@ -785,7 +1002,7 @@ export const saveRoles = async (roles) => {
 // SERVICE PLAN
 export const getServicePlan = async () => {
   try {
-    const raw = await AsyncStorage.getItem(SERVICE_PLAN_KEY);
+    const raw = await getScopedItem(SERVICE_PLAN_KEY);
     return safeJsonParse(raw, makeEmptyServicePlan());
   } catch {
     return makeEmptyServicePlan();
@@ -794,7 +1011,7 @@ export const getServicePlan = async () => {
 
 export const saveServicePlan = async (plan) => {
   try {
-    await AsyncStorage.setItem(SERVICE_PLAN_KEY, JSON.stringify(plan));
+    await setScopedItem(SERVICE_PLAN_KEY, JSON.stringify(plan));
   } catch (err) {
     console.warn("[storage] saveServicePlan failed:", err);
   }
@@ -826,7 +1043,7 @@ export const toggleServiceLock = async (locked) => {
 
 // SEEDING
 export const ensureSeeded = async () => {
-  const seeded = await AsyncStorage.getItem(SEEDED_KEY);
+  const seeded = await getScopedItem(SEEDED_KEY);
   if (seeded === "true") {
     // Still seed Cifras in background on every cold start (no-op if already done)
     ensureCifrasSeeded().catch(() => {});
@@ -839,18 +1056,32 @@ export const ensureSeeded = async () => {
     JSON.stringify(demoSettings() || makeDefaultSettings()),
   );
   await saveServicePlan(demoServicePlan() || makeEmptyServicePlan());
-  await AsyncStorage.setItem(SEEDED_KEY, "true");
+  await setScopedItem(SEEDED_KEY, "true");
   // Seed Cifras church library in background after demo seed completes
   ensureCifrasSeeded().catch(() => {});
 };
 
 export const resetAll = async () => {
-  await AsyncStorage.multiRemove([
+  await multiRemoveScopedItems([
     SEEDED_KEY,
     SONGS_KEY,
+    DELETED_SONGS_KEY,
+    PEOPLE_KEY,
+    SERVICES_KEY,
     ROLES_KEY,
-    SETTINGS_KEY,
     SERVICE_PLAN_KEY,
+    SHARED_TEAM_MEMBERS_KEY,
+  ]);
+  await AsyncStorage.multiRemove([
+    SETTINGS_KEY,
+    SEEDED_KEY,
+    SONGS_KEY,
+    DELETED_SONGS_KEY,
+    PEOPLE_KEY,
+    SERVICES_KEY,
+    ROLES_KEY,
+    SERVICE_PLAN_KEY,
+    SHARED_TEAM_MEMBERS_KEY,
   ]);
   await ensureSeeded();
 };

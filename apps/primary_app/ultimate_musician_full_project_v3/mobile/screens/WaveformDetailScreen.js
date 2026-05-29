@@ -3,7 +3,7 @@
  * Shows waveform timeline, playhead, stem track list, and playback controls.
  * Receives { song, apiBase } from route params.
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -18,7 +18,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import WaveformView from "../components/WaveformView";
 import StemWaveformView from "../components/StemWaveformView";
 import { normalizeWaveformPeaks } from "../services/wavePipelineEngine";
-import { CINESTAGE_URL } from "./config";
+import { getWaveformAnalysis } from "../services/waveformService";
+import { getStemWaveformData } from "../services/stemWaveformService";
+import { parseSectionsForWaveform } from "../utils/parseSectionsForWaveform";
 
 const STEM_COLORS = {
   vocals: "#F472B6",
@@ -57,7 +59,7 @@ function StemRow({ name, color, active, onPress }) {
 
 export default function WaveformDetailScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { song, apiBase = CINESTAGE_URL || "http://localhost:8000" } = route.params || {};
+  const { song } = route.params || {};
 
   const [loading, setLoading] = useState(true);
   const [stems, setStems] = useState([]);
@@ -66,11 +68,22 @@ export default function WaveformDetailScreen({ navigation, route }) {
   const [playing, setPlaying] = useState(false);
   const [liveWaveformPeaks, setLiveWaveformPeaks] = useState([]);
   const [waveformAnalyzing, setWaveformAnalyzing] = useState(false);
+  const [duration, setDuration] = useState(
+    song?.analysis?.duration_ms
+      ? Math.round(Number(song.analysis.duration_ms) / 1000)
+      : song?.duration || 0,
+  );
   const animRef = useRef(null);
   const posAnim = useRef(new Animated.Value(0)).current;
 
   // Track active state of each stem for the visualizer
   const [activeStemsMap, setActiveStemsMap] = useState({});
+
+  // ── Sections derived from song lyrics/chord chart ────────────────────────
+  const sections = useMemo(() => {
+    const songText = song?.lyricsChordChart || song?.lyrics || song?.chordChart || '';
+    return parseSectionsForWaveform(songText, duration);
+  }, [song, duration]);
 
   const loadStems = useCallback(async () => {
     setLoading(true);
@@ -115,21 +128,24 @@ export default function WaveformDetailScreen({ navigation, route }) {
       const audioUrl =
         song?.audioUrl || song?.url || song?.audio_url || song?.sourceUrl || "";
       if (!hasPeaks && audioUrl) {
-        try {
-          setWaveformAnalyzing(true);
-          const { analyzeWaveform } = await import("../services/cinestage/client");
-          const result = await analyzeWaveform({
-            file_url: audioUrl,
-            song_id: song?.id || song?.songId,
-            title: song?.title,
-            n_bars: 100,
-          });
-          if (result?.peaks?.length > 0) setLiveWaveformPeaks(result.peaks);
-        } catch {
-          /* non-fatal — falls back to synthetic peaks */
-        } finally {
-          setWaveformAnalyzing(false);
+        setWaveformAnalyzing(true);
+        const waveform = await getWaveformAnalysis(
+          song?.id || song?.songId || null,
+          audioUrl,
+          {
+            title: song?.title || "Untitled Song",
+            waveformPoints: 1800,
+            nSections: 6,
+            includeCues: true
+          }
+        );
+        if (waveform?.peaks?.length > 0) {
+          setLiveWaveformPeaks(waveform.peaks);
         }
+        if (waveform?.duration_ms) {
+          setDuration(Math.max(1, Math.round(Number(waveform.duration_ms) / 1000)));
+        }
+        setWaveformAnalyzing(false);
       }
     } catch {
       setStems([]);
@@ -178,41 +194,34 @@ export default function WaveformDetailScreen({ navigation, route }) {
       
       try {
         const { processPeaksForDisplay } = await import("../services/wavePipelineEngine");
-        const { analyzeWaveform } = await import("../services/cinestage/client");
+        const fetchedStemPeaks = await getStemWaveformData(
+          song?.id || song?.songId || "",
+          song,
+        );
 
-        // We map each stem asynchronously to fetch its waveform peaks
-        const promises = stems.map(async (stem) => {
-          if (!stem.uri) return;
-          try {
-            // First attempt to fetch pre-computed peaks from the backend API if available
-            // If the stem URL is a valid remote URL, we use the CineStage AI analysis tool
-            if (stem.uri.startsWith('http')) {
-              const res = await analyzeWaveform({
-                file_url: stem.uri,
-                song_id: `${song?.id}_${stem.name}`,
-                n_bars: 100
-              });
-              if (res?.peaks?.length > 0) {
-                newStemData[stem.name] = processPeaksForDisplay(res.peaks, 100);
-                return;
-              }
-            }
-            
-            // Fallback for local URIs or failed API calls:
-            // Process the peaks visually (we generate a deterministic pattern based on stem type for immediate display if processing fails)
-            const baseTypeNoise = stem.name.includes("drum") ? 0.6 : stem.name.includes("vocal") ? 0.4 : 0.3;
-            newStemData[stem.name] = Array.from({ length: 100 }, (_, i) => {
-               const base = Math.sin(i / (5 + stems.findIndex(s => s.name === stem.name))) * 0.3 + baseTypeNoise;
-               const noise = Math.random() * 0.2;
-               return Math.max(0.05, Math.min(0.95, base + noise));
-            });
-
-          } catch (err) {
-            console.warn(`Failed to process peaks for stem ${stem.name}`, err);
+        Object.entries(fetchedStemPeaks || {}).forEach(([name, peaks]) => {
+          if (Array.isArray(peaks) && peaks.length > 0) {
+            newStemData[name] = processPeaksForDisplay(peaks, 100);
           }
         });
 
-        await Promise.all(promises);
+        stems.forEach((stem, index) => {
+          const alreadyMapped = Object.keys(newStemData).some(
+            (name) => name.toLowerCase() === stem.name.toLowerCase(),
+          );
+          if (alreadyMapped) return;
+
+          const baseTypeNoise = stem.name.includes("drum")
+            ? 0.6
+            : stem.name.includes("vocal")
+              ? 0.4
+              : 0.3;
+          newStemData[stem.name] = Array.from({ length: 100 }, (_, i) => {
+            const base = Math.sin(i / (5 + index)) * 0.3 + baseTypeNoise;
+            const noise = Math.random() * 0.2;
+            return Math.max(0.05, Math.min(0.95, base + noise));
+          });
+        });
         
         if (isMounted) {
           setStemData(newStemData);
@@ -300,7 +309,32 @@ export default function WaveformDetailScreen({ navigation, route }) {
                 </Text>
               )}
             </View>
-            
+
+            {/* Full-song overview waveform with section markers + beat grid */}
+            {(liveWaveformPeaks.length > 0 ||
+              song?.analysis?.waveformPeaks?.length > 0 ||
+              song?.waveformPeaks?.length > 0) && (
+              <WaveformView
+                peaks={
+                  liveWaveformPeaks.length > 0
+                    ? liveWaveformPeaks
+                    : song?.analysis?.waveformPeaks || song?.waveformPeaks || []
+                }
+                duration={duration}
+                currentTime={playhead * duration}
+                onSeek={(t) => {
+                  const pct = duration > 0 ? Math.max(0, Math.min(1, t / duration)) : 0;
+                  setPlayhead(pct);
+                  posAnim.setValue(pct);
+                }}
+                sections={sections}
+                bpm={song?.bpm || 0}
+                height={56}
+                accentColor="#6366F1"
+                style={{ marginBottom: 10, borderRadius: 8 }}
+              />
+            )}
+
             <StemWaveformView
               stemsData={stemData}
               activeStems={activeStemsMap}

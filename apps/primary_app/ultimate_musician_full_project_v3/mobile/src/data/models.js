@@ -34,7 +34,11 @@ export const SONG_SECTIONS = [
   "Chorus",
   "Bridge",
   "Solo",
+  "Interlude",
+  "Tag",
   "Outro",
+  "Ending",
+  "Vocal",
   "All",
 ];
 

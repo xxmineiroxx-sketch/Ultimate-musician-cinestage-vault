@@ -4,14 +4,97 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, RefreshControl, Platform } from 'react-native';
+import { promptCrossPlatform } from '../utils/promptCrossPlatform';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+
+// ─── Assignment reminder scheduling ────────────────────────────────────────────
+
+const REMINDER_STORAGE_KEY = '@up_assignment_reminders_v1';
+
+async function cancelRemindersForService(serviceId) {
+  if (Platform.OS === 'web') return;
+  try {
+    const raw = await AsyncStorage.getItem(REMINDER_STORAGE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    const ids = map[serviceId] || [];
+    await Promise.all(ids.map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})));
+    delete map[serviceId];
+    await AsyncStorage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+async function scheduleServiceReminders(group) {
+  if (Platform.OS === 'web') return;
+  const first = group[0];
+  if (!first?.service_date) return;
+
+  const serviceId = first.service_id || first.id;
+  const serviceName = first.service_name || 'your service';
+
+  // Parse service date (assume 10:00am local time if no time given)
+  const dateStr = String(first.service_date);
+  const serviceDate = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T10:00:00');
+  if (isNaN(serviceDate.getTime())) return;
+
+  const now = Date.now();
+
+  // Cancel any existing reminders for this service first
+  await cancelRemindersForService(serviceId);
+
+  const scheduledIds = [];
+
+  // Evening-before reminder at 7pm
+  const eveningBefore = new Date(serviceDate);
+  eveningBefore.setDate(eveningBefore.getDate() - 1);
+  eveningBefore.setHours(19, 0, 0, 0);
+
+  if (eveningBefore.getTime() > now + 60000) {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '🎵 Service Tomorrow',
+        body: `You're serving at "${serviceName}" tomorrow. You've got this!`,
+        sound: true,
+        data: { type: 'assignment', serviceId },
+      },
+      trigger: { date: eveningBefore },
+    }).catch(() => null);
+    if (id) scheduledIds.push(id);
+  }
+
+  // Morning-of reminder at 7am
+  const morningOf = new Date(serviceDate);
+  morningOf.setHours(7, 0, 0, 0);
+
+  if (morningOf.getTime() > now + 60000) {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '⏰ Service Today',
+        body: `"${serviceName}" is today — you're confirmed and ready!`,
+        sound: true,
+        data: { type: 'assignment', serviceId },
+      },
+      trigger: { date: morningOf },
+    }).catch(() => null);
+    if (id) scheduledIds.push(id);
+  }
+
+  if (scheduledIds.length > 0) {
+    try {
+      const raw = await AsyncStorage.getItem(REMINDER_STORAGE_KEY);
+      const map = raw ? JSON.parse(raw) : {};
+      map[serviceId] = scheduledIds;
+      await AsyncStorage.setItem(REMINDER_STORAGE_KEY, JSON.stringify(map));
+    } catch {}
+  }
+}
 
 const normalizeRoleKey = (r) => {
   const s = String(r || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -309,6 +392,8 @@ export default function AssignmentsScreen({ navigation, route }) {
       // Persist so sync can never reset this decision
       const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
       await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'accepted')));
+      // Schedule local reminders for the service date
+      scheduleServiceReminders(group).catch(() => {});
     } catch (error) {
       applyStatusToGroup(group, 'pending');
       await Promise.all(
@@ -344,20 +429,13 @@ export default function AssignmentsScreen({ navigation, route }) {
       doDecline(group, prefilledReason);
       return;
     }
-    Alert.prompt(
-      'Reason for Declining',
-      'Optional — will be sent to the admin.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Decline',
-          style: 'destructive',
-          onPress: (reason) => doDecline(group, reason || ''),
-        },
-      ],
-      'plain-text',
-      '',
-    );
+    promptCrossPlatform({
+      title: 'Reason for Declining',
+      message: 'Optional — will be sent to the admin.',
+      onSubmit: (reason) => doDecline(group, reason || ''),
+      onCancel: () => {},
+      androidSkipReason: true,
+    });
   };
 
   const doDecline = async (group, declineReason = '') => {
@@ -368,6 +446,9 @@ export default function AssignmentsScreen({ navigation, route }) {
       // Persist so sync can never reset this decision
       const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
       await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'declined')));
+      // Cancel any scheduled reminders for this service
+      const first = group[0];
+      if (first?.service_id) cancelRemindersForService(first.service_id).catch(() => {});
     } catch {
       applyStatusToGroup(group, 'pending');
       await Promise.all(

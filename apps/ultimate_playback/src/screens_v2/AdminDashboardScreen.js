@@ -10,7 +10,6 @@ import {
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
   Keyboard, Platform, Share,
 } from 'react-native';
-import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 // ── Inline Calendar (pure RN, no external package) ──────────────────────────
 const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -175,6 +174,55 @@ const ASSIGNMENT_STATUS_ORDER = {
   declined: 2,
   accepted: 2,
 };
+
+function normalizeObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function normalizeArrayOrObjectValues(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+
+function normalizePlan(value) {
+  const plan = normalizeObject(value);
+  return {
+    ...plan,
+    songs: normalizeArrayOrObjectValues(plan.songs),
+    team: normalizeArrayOrObjectValues(plan.team),
+  };
+}
+
+function normalizePlansMap(value) {
+  const plansMap = {};
+  Object.entries(normalizeObject(value)).forEach(([svcId, plan]) => {
+    plansMap[svcId] = normalizePlan(plan);
+  });
+  return plansMap;
+}
+
+function planSongs(plan) {
+  return normalizeArrayOrObjectValues(normalizeObject(plan).songs);
+}
+
+function planTeam(plan) {
+  return normalizeArrayOrObjectValues(normalizeObject(plan).team);
+}
+
+function personRoles(person) {
+  const roles = normalizeArrayOrObjectValues(person?.roles);
+  if (roles.length > 0) return roles;
+  return person?.role ? [person.role] : [];
+}
+
+function firstPersonRole(person) {
+  return personRoles(person)[0] || '';
+}
+
+function messageReplies(message) {
+  return normalizeArrayOrObjectValues(message?.replies);
+}
 
 function normalizeTeamStatus(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -417,7 +465,7 @@ function isPastService(svc, today = todayDateStr()) {
   return !!svc?.date && svc.date < today;
 }
 
-export default function AdminDashboardScreen({ navigation, route }) {
+export default function AdminDashboardScreen({ navigation, route = {} }) {
   const insets = useSafeAreaInsets();
   const { mdRole } = route.params || {};
   // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
@@ -459,8 +507,6 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [calSelectedDate, setCalSelectedDate] = useState(null); // date selected on main calendar
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState(null);
-  const serviceSwipeRefs = useRef({});
-  const openServiceSwipeIdRef = useRef(null);
 
   // Expanded service plan (both Calendar + Services tabs share this)
   const [expandedSvc, setExpandedSvc] = useState(null);
@@ -597,18 +643,22 @@ export default function AdminDashboardScreen({ navigation, route }) {
     try {
       const cached = await AsyncStorage.getItem(ADMIN_LIBRARY_CACHE_KEY);
       if (cached) {
-        const lib = JSON.parse(cached);
-        if (lib.services?.length || lib.people?.length || lib.songs?.length) {
-          setServices(lib.services || []);
-          setPlans(lib.plans     || {});
-          setSongs(lib.songs     || []);
+        const lib = normalizeObject(JSON.parse(cached));
+        const cachedPlans = normalizePlansMap(lib.plans);
+        const cachedSongs = normalizeArrayOrObjectValues(lib.songs);
+        const cachedPeople = normalizeArrayOrObjectValues(lib.people);
+        const cachedServices = normalizeArrayOrObjectValues(lib.services);
+        if (cachedServices.length || cachedPeople.length || cachedSongs.length) {
+          setServices(cachedServices);
+          setPlans(cachedPlans);
+          setSongs(cachedSongs);
           setVocalAssignments(lib.vocalAssignments || {});
           // Include orphaned team members (assigned in plans but not in people[])
-          const cacheEmails = new Set((lib.people||[]).map(p=>(p.email||'').toLowerCase()).filter(Boolean));
-          const cacheNames  = new Set((lib.people||[]).map(p=>(p.name||'').toLowerCase().trim()).filter(Boolean));
+          const cacheEmails = new Set(cachedPeople.map(p=>(p.email||'').toLowerCase()).filter(Boolean));
+          const cacheNames  = new Set(cachedPeople.map(p=>(p.name||'').toLowerCase().trim()).filter(Boolean));
           const cacheOrphans = [];
-          Object.values(lib.plans||{}).forEach(plan=>{
-            (plan.team||[]).forEach(tm=>{
+          Object.values(cachedPlans).forEach(plan=>{
+            planTeam(plan).forEach(tm=>{
               const em=(tm.email||'').toLowerCase(), nm=(tm.name||'').toLowerCase().trim();
               if(!nm) return;
               if((em&&cacheEmails.has(em))||cacheNames.has(nm)) return;
@@ -616,14 +666,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
               if(em) cacheEmails.add(em); cacheNames.add(nm);
             });
           });
-          setPeople([...(lib.people||[]), ...cacheOrphans]);
+          setPeople([...cachedPeople, ...cacheOrphans]);
         }
       }
     } catch (_) {}
 
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, lib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
+      const [prof, msgs, rawLib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }).catch(() => ({})),
@@ -632,33 +682,38 @@ export default function AdminDashboardScreen({ navigation, route }) {
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/setlist/pending`,         { headers: hdrs }).catch(() => []),
       ]);
+      const lib = normalizeObject(rawLib);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
 
       // Only update state + cache if server returned real data (non-empty arrays).
       // An empty server response (e.g. network error → catch → {}) must never
       // override the local cache we already restored above.
+      const serverSongs = normalizeArrayOrObjectValues(lib.songs);
+      const serverPeople = normalizeArrayOrObjectValues(lib.people);
+      const serverServices = normalizeArrayOrObjectValues(lib.services);
+      const serverPlans = normalizePlansMap(lib.plans);
       const serverHasData =
-        (lib.people?.length > 0) ||
-        (lib.services?.length > 0) ||
-        (lib.songs?.length > 0);
+        (serverPeople.length > 0) ||
+        (serverServices.length > 0) ||
+        (serverSongs.length > 0);
       if (serverHasData) {
-        setServices(lib.services || []);
-        setPlans(lib.plans     || {});
-        setSongs(lib.songs     || []);
+        setServices(serverServices);
+        setPlans(serverPlans);
+        setSongs(serverSongs);
         setVocalAssignments(lib.vocalAssignments || {});
 
         // Surface team members who appear in plan.team but not in people[] —
         // they were assigned from UM without being added to the people list.
         const knownEmails = new Set(
-          (lib.people || []).map(p => (p.email || '').toLowerCase()).filter(Boolean)
+          serverPeople.map(p => (p.email || '').toLowerCase()).filter(Boolean)
         );
         const knownNames = new Set(
-          (lib.people || []).map(p => (p.name || '').toLowerCase().trim()).filter(Boolean)
+          serverPeople.map(p => (p.name || '').toLowerCase().trim()).filter(Boolean)
         );
         const orphans = [];
-        Object.values(lib.plans || {}).forEach(plan => {
-          (plan.team || []).forEach(tm => {
+        Object.values(serverPlans).forEach(plan => {
+          planTeam(plan).forEach(tm => {
             const email = (tm.email || '').toLowerCase();
             const name  = (tm.name  || '').toLowerCase().trim();
             if (!name) return;
@@ -674,9 +729,18 @@ export default function AdminDashboardScreen({ navigation, route }) {
             knownNames.add(name);
           });
         });
-        setPeople([...(lib.people || []), ...orphans]);
+        setPeople([...serverPeople, ...orphans]);
 
-        AsyncStorage.setItem(ADMIN_LIBRARY_CACHE_KEY, JSON.stringify(lib)).catch(() => {});
+        AsyncStorage.setItem(
+          ADMIN_LIBRARY_CACHE_KEY,
+          JSON.stringify({
+            ...lib,
+            services: serverServices,
+            people: serverPeople,
+            songs: serverSongs,
+            plans: serverPlans,
+          }),
+        ).catch(() => {});
       }
 
       setProposals(Array.isArray(props) ? props : []);
@@ -686,7 +750,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
-      for (const b of (lib.blockouts || [])) {
+      for (const b of normalizeArrayOrObjectValues(lib.blockouts)) {
         if (!bDict[b.date]) bDict[b.date] = [];
         bDict[b.date].push((b.email || '').toLowerCase());
       }
@@ -696,8 +760,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
       const rDict = {};
 
       // Source 1: plan.team[].status — stored by UUID and email (if present)
-      Object.entries(lib.plans || {}).forEach(([svcId, plan]) => {
-        (plan.team || []).forEach(tm => {
+      Object.entries(serverPlans).forEach(([svcId, plan]) => {
+        planTeam(plan).forEach(tm => {
           if (tm.status && tm.status !== 'pending') {
             const obj = {
               status: tm.status,
@@ -715,10 +779,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
       try {
         const hdrs = syncHeaders();
         const emailToPid = {};
-        (lib.people || []).forEach(p => {
+        serverPeople.forEach(p => {
           if (p.email) emailToPid[p.email.toLowerCase()] = p.id;
         });
-        const svcIds = Object.keys(lib.plans || {});
+        const svcIds = Object.keys(serverPlans);
         await Promise.all(svcIds.map(async svcId => {
           const res = await fetchJson(`${SYNC_URL}/sync/assignment/responses?serviceId=${svcId}`, { headers: hdrs }).catch(() => null);
           if (!res || typeof res !== 'object') return;
@@ -748,12 +812,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Publish helper ──────────────────────────────────────────────────────
   const publishUpdate = async (updatedPlans, updatedServices, updatedPeople) => {
     const hdrs = syncHeaders();
-    const nextServices = Array.isArray(updatedServices) ? updatedServices : services;
-    const nextPeople = Array.isArray(updatedPeople) ? updatedPeople : people;
-    const nextPlans =
-      updatedPlans && typeof updatedPlans === 'object'
-        ? updatedPlans
-        : plans;
+    const nextServices = normalizeArrayOrObjectValues(updatedServices ?? services);
+    const nextPeople = normalizeArrayOrObjectValues(updatedPeople ?? people);
+    const nextPlans = normalizePlansMap(updatedPlans ?? plans);
+    const nextSongs = normalizeArrayOrObjectValues(songs);
     const nextVocalAssignments =
       vocalAssignments && typeof vocalAssignments === 'object'
         ? vocalAssignments
@@ -762,7 +824,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       services: nextServices,
       people: nextPeople,
       plans: nextPlans,
-      songs: songs || [],
+      songs: nextSongs,
       vocalAssignments: nextVocalAssignments,
       replaceServicesSnapshot: true,
       replacePlansSnapshot: true,
@@ -781,27 +843,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
         services: nextServices,
         people: nextPeople,
         plans: nextPlans,
-        songs: songs || [],
+        songs: nextSongs,
         vocalAssignments: nextVocalAssignments,
       }),
     ).catch(() => {});
   };
-
-  const closeServiceSwipe = useCallback((serviceId) => {
-    if (!serviceId) return;
-    serviceSwipeRefs.current[serviceId]?.close?.();
-    if (openServiceSwipeIdRef.current === serviceId) {
-      openServiceSwipeIdRef.current = null;
-    }
-  }, []);
-
-  const handleServiceSwipeOpen = useCallback((serviceId) => {
-    const previousId = openServiceSwipeIdRef.current;
-    if (previousId && previousId !== serviceId) {
-      serviceSwipeRefs.current[previousId]?.close?.();
-    }
-    openServiceSwipeIdRef.current = serviceId;
-  }, []);
 
   // ── Reply to message ────────────────────────────────────────────────────
   const handleReply = async () => {
@@ -939,18 +985,16 @@ export default function AdminDashboardScreen({ navigation, route }) {
         delete next[svc.id];
         return next;
       });
-      closeServiceSwipe(svc.id);
       await loadAll();
     } catch (e) {
       Alert.alert('Error', e.message);
     } finally {
       setDeletingServiceId(null);
     }
-  }, [closeServiceSwipe, loadAll]);
+  }, [loadAll]);
 
   const confirmDeleteService = useCallback((svc) => {
     if (!svc?.id) return;
-    closeServiceSwipe(svc.id);
     Alert.alert(
       'Delete service?',
       `Delete "${svc.name || svc.title || 'this service'}"? This removes the service plan and team assignments from Ultimate Playback.`,
@@ -965,18 +1009,19 @@ export default function AdminDashboardScreen({ navigation, route }) {
         },
       ],
     );
-  }, [closeServiceSwipe, handleDeleteService]);
+  }, [handleDeleteService]);
 
   // ── Add song to service ─────────────────────────────────────────────────
   const handleAddSong = async (song) => {
     const target = svcForSong || expandedSvc;
     if (!target) return;
     try {
-      const plan = { ...(plans[target.id] || { songs: [], team: [], notes: '' }) };
-      if ((plan.songs || []).some(s => s.id === song.id || (s.title === song.title && s.artist === song.artist))) {
+      const plan = normalizePlan(plans[target.id] || { songs: [], team: [], notes: '' });
+      const existingSongs = planSongs(plan);
+      if (existingSongs.some(s => s.id === song.id || (s.title === song.title && s.artist === song.artist))) {
         Alert.alert('Already added', `"${song.title}" is already in this setlist.`); return;
       }
-      plan.songs = [...(plan.songs || []), { ...song, id: song.id || `song_${Date.now()}` }];
+      plan.songs = [...existingSongs, { ...song, id: song.id || `song_${Date.now()}` }];
       await publishUpdate({ ...plans, [target.id]: plan }, null, null);
       setShowSongPicker(false); setSongQuery(''); setSvcForSong(null);
       Alert.alert('Added ✓', `"${song.title}" added.`);
@@ -987,8 +1032,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Remove song ─────────────────────────────────────────────────────────
   const handleRemoveSong = async (svcId, songId) => {
     try {
-      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
-      plan.songs = (plan.songs || []).filter(s => s.id !== songId);
+      const plan = normalizePlan(plans[svcId] || { songs: [], team: [], notes: '' });
+      plan.songs = planSongs(plan).filter(s => s.id !== songId);
       await publishUpdate({ ...plans, [svcId]: plan }, null, null); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
   };
@@ -999,8 +1044,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
     setSaving(true);
     try {
       const svcId = assignTarget.id;
-      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
-      plan.team = (plan.team || []).filter(t => !(t.personId === person.id && t.role === chipRole));
+      const plan = normalizePlan(plans[svcId] || { songs: [], team: [], notes: '' });
+      plan.team = planTeam(plan).filter(t => !(t.personId === person.id && t.role === chipRole));
       plan.team = [...plan.team, { id: `ta_${Date.now()}`, personId: person.id, email: (person.email || '').toLowerCase(), name: person.name, role: chipRole }];
       await publishUpdate({ ...plans, [svcId]: plan }, null, null);
       setShowAssignModal(false); setChipRole('');
@@ -1012,8 +1057,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Remove team member from service ────────────────────────────────────
   const handleRemoveFromService = async (svcId, personId, role) => {
     try {
-      const plan = { ...(plans[svcId] || { songs: [], team: [], notes: '' }) };
-      plan.team = (plan.team || []).filter(t => !(t.personId === personId && t.role === role));
+      const plan = normalizePlan(plans[svcId] || { songs: [], team: [], notes: '' });
+      plan.team = planTeam(plan).filter(t => !(t.personId === personId && t.role === role));
       await publishUpdate({ ...plans, [svcId]: plan }, null, null); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
   };
@@ -1060,8 +1105,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [publishingId, setPublishingId] = useState(null);
 
   const handlePublish = async (svc) => {
-    const plan = plans[svc.id] || {};
-    const team = plan.team || [];
+    const plan = normalizePlan(plans[svc.id]);
+    const team = planTeam(plan);
     if (team.length === 0) {
       Alert.alert('No Team', 'Assign at least one team member before publishing.');
       return;
@@ -1095,7 +1140,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       if (person) {
         svcVocals[songId] = {
           ...svcVocals[songId],
-          [partKey]: { personId: person.id, name: person.name, role: (person.roles || [])[0] || '' },
+          [partKey]: { personId: person.id, name: person.name, role: firstPersonRole(person) },
         };
       } else {
         const updated = { ...svcVocals[songId] };
@@ -1108,7 +1153,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       await fetchJson(`${SYNC_URL}/sync/publish`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ serviceId: svcId, plan: plans[svcId] || {}, vocalAssignments: svcVocals }),
+        body: JSON.stringify({ serviceId: svcId, plan: normalizePlan(plans[svcId]), vocalAssignments: svcVocals }),
       });
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setSavingVocals(false); }
@@ -1134,9 +1179,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
         // Also strip from every plan.team so the orphan logic can't re-add them
         const updatedPlans = {};
         Object.entries(plans).forEach(([svcId, plan]) => {
+          const normalizedPlan = normalizePlan(plan);
           updatedPlans[svcId] = {
-            ...plan,
-            team: (plan.team || []).filter(tm => {
+            ...normalizedPlan,
+            team: planTeam(normalizedPlan).filter(tm => {
               if (pid && (tm.personId || '').toLowerCase() === pid) return false;
               if (pem && (tm.email   || '').toLowerCase() === pem) return false;
               if (pname && (tm.name  || '').toLowerCase().trim() === pname) return false;
@@ -1252,8 +1298,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // ── Submit setlist for approval (Worship Leader / Manager) ─────────────
   const handleSubmitSetlist = async (svc) => {
-    const plan = plans[svc.id] || {};
-    const songs = plan.songs || [];
+    const plan = normalizePlan(plans[svc.id]);
+    const songs = planSongs(plan);
     if (songs.length === 0) {
       Alert.alert('No Songs', 'Add at least one song to the setlist before submitting for approval.');
       return;
@@ -1285,8 +1331,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
         method: 'POST', headers: syncHeaders(),
       });
       // Also broadcast to team via regular publish
-      const plan = setlist.plan || {};
-      if ((plan.team || []).length > 0) {
+      const plan = normalizePlan(setlist.plan);
+      if (planTeam(plan).length > 0) {
         await fetchJson(`${SYNC_URL}/sync/publish`, {
           method: 'POST', headers: syncHeaders(),
           body: JSON.stringify({ serviceId: setlist.serviceId, plan }),
@@ -1346,7 +1392,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
     try {
       const updated = people.map(p =>
         p.id === showEditMember.id
-          ? { ...p, name: editName.trim(), email: editEmail.trim(), roles: editRole ? [editRole] : (p.roles || []) }
+          ? { ...p, name: editName.trim(), email: editEmail.trim(), roles: editRole ? [editRole] : personRoles(p) }
           : p
       );
       await publishUpdate(plans, services, updated);
@@ -1376,7 +1422,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
       };
       await fetchJson(`${SYNC_URL}/sync/library-push`, {
         method: 'POST', headers: hdrs,
-        body: JSON.stringify({ ...lib, songs: [...(lib.songs || []), newSong] }),
+        body: JSON.stringify({ ...lib, songs: [...normalizeArrayOrObjectValues(lib.songs), newSong] }),
       });
       setNewSongTitle(''); setNewSongArtist(''); setNewSongKey(''); setNewSongBpm('');
       setNewSongYouTube(''); setNewSongLyrics(''); setNewSongChords(''); setAddSongTab('info');
@@ -1426,7 +1472,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const libraryAll = songs.map(song => {
     const inServices = [];
     Object.entries(plans).forEach(([svcId, plan]) => {
-      if ((plan.songs || []).some(ps => ps.id === song.id || ps.title === song.title)) {
+      if (planSongs(plan).some(ps => ps.id === song.id || ps.title === song.title)) {
         const svc = services.find(sv => sv.id === svcId);
         inServices.push(svc?.name || svc?.title || svcId);
       }
@@ -1475,9 +1521,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // ── Plan section (used by both Calendar and Services) ───────────────────
   const renderPlanSection = (svc) => {
-    const plan  = plans[svc.id] || {};
-    const songs = plan.songs || [];
-    const team  = plan.team  || [];
+    const plan  = normalizePlan(plans[svc.id]);
+    const songs = planSongs(plan);
+    const team  = planTeam(plan);
     return (
       <View style={s.planSection}>
         {/* Songs */}
@@ -1676,8 +1722,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
               <Text style={s.svcName}>{selectedSvc.name || selectedSvc.title}</Text>
               {selectedSvc.time ? <Text style={s.svcTime}>🕐 {selectedSvc.time}</Text> : null}
               <Text style={s.svcMeta}>
-                🎵 {((plans[selectedSvc.id] || {}).songs || []).length} songs  ·
-                👥 {((plans[selectedSvc.id] || {}).team || []).length} members
+                🎵 {planSongs(plans[selectedSvc.id]).length} songs  ·
+                👥 {planTeam(plans[selectedSvc.id]).length} members
               </Text>
             </View>
             <TouchableOpacity
@@ -1733,9 +1779,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
     const renderSvcCard = (svc) => {
       const isOpen = expandedSvc?.id === svc.id;
-      const plan   = plans[svc.id] || {};
-      const songs  = plan.songs || [];
-      const team   = plan.team  || [];
+      const plan   = normalizePlan(plans[svc.id]);
+      const songs  = planSongs(plan);
+      const team   = planTeam(plan);
       // Admin/Org Owner → Publish directly. Manager/MD → Submit for Approval.
       const canPublishDirect = isAdmin;
 
@@ -1802,33 +1848,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         </View>
       );
 
-      if (!canDeleteServices) return <View key={svc.id}>{card}</View>;
-      return (
-        <Swipeable
-          key={svc.id}
-          ref={(ref) => {
-            if (ref) serviceSwipeRefs.current[svc.id] = ref;
-            else delete serviceSwipeRefs.current[svc.id];
-          }}
-          overshootRight={false} friction={2} rightThreshold={40}
-          onSwipeableOpen={() => handleServiceSwipeOpen(svc.id)}
-          onSwipeableClose={() => { if (openServiceSwipeIdRef.current === svc.id) openServiceSwipeIdRef.current = null; }}
-          renderRightActions={() => (
-            <TouchableOpacity
-              style={[s.serviceDeleteAction, deletingServiceId === svc.id && s.serviceDeleteActionDisabled]}
-              activeOpacity={0.9}
-              disabled={deletingServiceId === svc.id}
-              onPress={() => confirmDeleteService(svc)}
-            >
-              {deletingServiceId === svc.id
-                ? <ActivityIndicator color="#FFF" size="small" />
-                : <><Text style={s.serviceDeleteActionIcon}>🗑</Text><Text style={s.serviceDeleteActionText}>Delete</Text></>}
-            </TouchableOpacity>
-          )}
-        >
-          {card}
-        </Swipeable>
-      );
+      return card;
     };
 
     return (
@@ -1978,7 +1998,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
           const stKey  = getMemberStatusKey(person);
           const stConf = MEMBER_STATUS[stKey] || MEMBER_STATUS.pending;
           const initials = (person.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
-          const roles = person.roles || (person.role ? [person.role] : []);
+          const roles = personRoles(person);
 
           return (
             <View key={person.id || person.name || idx} style={s.tmCard}>
@@ -2016,7 +2036,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
                     setShowEditMember(person);
                     setEditName(person.name || '');
                     setEditEmail(person.email || '');
-                    setEditRole((person.roles || [])[0] || '');
+                    setEditRole(firstPersonRole(person));
                   }}>
                     <Text style={s.tmActionBtnTxt}>✏️</Text>
                   </TouchableOpacity>
@@ -2171,7 +2191,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
         renderItem={({ item }) => (
           <TouchableOpacity style={s.songCard} onPress={() => {
             const svcId = Object.keys(plans).find(sid =>
-              (plans[sid].songs || []).some(ss => ss.id === item.id || ss.title === item.title)
+              planSongs(plans[sid]).some(ss => ss.id === item.id || ss.title === item.title)
             ) || '';
             navigation.navigate('ContentEditor', {
               song: item, serviceId: svcId, type: 'lyrics',
@@ -2223,8 +2243,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
           <View style={s.setlistApprovalSection}>
             <Text style={s.setlistApprovalHeader}>📨 Setlist Approvals ({pendingSetlists.length})</Text>
             {pendingSetlists.map(sl => {
-              const songs = sl.plan?.songs || [];
-              const team  = sl.plan?.team  || [];
+              const songs = planSongs(sl.plan);
+              const team  = planTeam(sl.plan);
               return (
                 <View key={sl.id} style={s.setlistApprovalCard}>
                   <View style={s.setlistApprovalMeta}>
@@ -2545,8 +2565,8 @@ export default function AdminDashboardScreen({ navigation, route }) {
               {assignmentMessageMetaText(item) ? (
                 <Text style={s.msgMeta}>{assignmentMessageMetaText(item)}</Text>
               ) : null}
-              {(item.replies || []).length > 0 && (
-                <Text style={s.repliedBadge}>✓ {item.replies.length} repl{item.replies.length > 1 ? 'ies' : 'y'} sent</Text>
+              {messageReplies(item).length > 0 && (
+                <Text style={s.repliedBadge}>✓ {messageReplies(item).length} repl{messageReplies(item).length > 1 ? 'ies' : 'y'} sent</Text>
               )}
               <Text style={s.msgHint}>Long press to delete</Text>
             </TouchableOpacity>
@@ -2589,7 +2609,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={s.threadMeta}>{assignmentMessageMetaText(selectedMsg)}</Text>
           ) : null}
           <View style={s.threadBubble}><Text style={s.threadText}>{selectedMsg.message}</Text></View>
-          {(selectedMsg.replies || []).map(r => (
+          {messageReplies(selectedMsg).map(r => (
             <View key={r.id} style={s.adminBubble}>
               <Text style={s.adminBubbleFrom}>{r.from} · {timeAgo(r.timestamp)}</Text>
               <Text style={s.adminBubbleText}>{r.message}</Text>
@@ -2731,7 +2751,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={s.modalLabel}>Select Team Member</Text>
             <FlatList
               data={chipRole
-                ? people.filter(p => (p.roles || []).some(r => r.toLowerCase() === chipRole.toLowerCase()))
+                ? people.filter(p => personRoles(p).some(r => String(r || '').toLowerCase() === chipRole.toLowerCase()))
                 : people}
               keyExtractor={p => p.id || p.name}
               style={{ maxHeight: 240 }}
@@ -2742,7 +2762,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
               ) : null}
               renderItem={({ item }) => {
                 const emailLower    = (item.email || '').trim().toLowerCase();
-                const dateBlockouts = allBlockouts[assignTarget?.date] || [];
+                const dateBlockouts = normalizeArrayOrObjectValues(allBlockouts[assignTarget?.date]);
                 const isBlocked     = emailLower && dateBlockouts.includes(emailLower);
                 return (
                   <TouchableOpacity
@@ -2880,12 +2900,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
             </TouchableOpacity>
             <FlatList
               data={(() => {
-                const svcTeam = plans[vocalPartPicker?.svcId || '']?.team || [];
+                const svcTeam = planTeam(plans[vocalPartPicker?.svcId || '']);
                 const teamIds = new Set(svcTeam.map(t => t.personId));
                 const vocalInTeam = [], otherInTeam = [], notInTeam = [];
                 for (const p of people) {
                   const isInTeam = teamIds.has(p.id);
-                  const isVocal  = (p.roles || []).some(r => VOCAL_TEAM_ROLES.has(r));
+                  const isVocal  = personRoles(p).some(r => VOCAL_TEAM_ROLES.has(r));
                   if (isInTeam && isVocal) vocalInTeam.push(p);
                   else if (isInTeam)       otherInTeam.push(p);
                   else                     notInTeam.push(p);
@@ -2895,9 +2915,9 @@ export default function AdminDashboardScreen({ navigation, route }) {
               keyExtractor={p => p.id || p.name}
               style={{ maxHeight: 340 }}
               renderItem={({ item }) => {
-                const svcTeam = plans[vocalPartPicker?.svcId || '']?.team || [];
+                const svcTeam = planTeam(plans[vocalPartPicker?.svcId || '']);
                 const inTeam  = svcTeam.some(t => t.personId === item.id);
-                const isVocal = (item.roles || []).some(r => VOCAL_TEAM_ROLES.has(r));
+                const isVocal = personRoles(item).some(r => VOCAL_TEAM_ROLES.has(r));
                 return (
                   <TouchableOpacity
                     style={[s.modalPerson, savingVocals && { opacity: 0.5 }]}

@@ -23,7 +23,7 @@ import {
 } from "react-native";
 
 import { makeId } from "../data/models";
-import { addOrUpdateSong, getSongs } from "../data/storage";
+import { addOrUpdateSong, getSongs, getServices, saveServices } from "../data/storage";
 import {
   clearPCOCredentials,
   getPCOCredentials,
@@ -84,6 +84,7 @@ export default function PCOImportScreen({ navigation }) {
   const [loadingItems, setLoadingItems] = useState(false);
   const [error, setError] = useState(null);
   const [imported, setImported] = useState(new Set());
+  const [importedAsService, setImportedAsService] = useState(false);
 
   // ── Load saved credentials ────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ export default function PCOImportScreen({ navigation }) {
     if (!selectedPlan || !selectedType || !creds) return;
     setItems([]);
     setError(null);
+    setImportedAsService(false);
     setLoadingItems(true);
     getPlanItems(selectedType.id, selectedPlan.id, creds)
       .then((songs) => setItems(songs))
@@ -211,6 +213,51 @@ export default function PCOImportScreen({ navigation }) {
       `${items.length} song${items.length !== 1 ? "s" : ""} added to your library.`
     );
   }, [items, importSong]);
+
+  // ── Import as UM Service ──────────────────────────────────────────────────
+
+  const importAsService = useCallback(async () => {
+    if (!selectedPlan || !selectedType || items.length === 0) return;
+    try {
+      const service = {
+        id: makeId("pco"),
+        title: selectedPlan.title || selectedType.name,
+        date: selectedPlan.sortDate ? selectedPlan.sortDate.slice(0, 10) : "",
+        time: "10:00",
+        serviceType: "standard",
+        status: "draft",
+        pcoId: selectedPlan.id,
+        pcoServiceTypeId: selectedType.id,
+        songs: items.map((item, i) => ({
+          id: makeId("song"),
+          title: item.title,
+          artist: item.artist || "",
+          key: item.key || "",
+          bpm: null,
+          sequence: i,
+          notes: item.notes || "",
+          pcoItemId: item.id,
+        })),
+        team: [],
+        notes: selectedPlan.publicNotes || "",
+        createdAt: new Date().toISOString(),
+      };
+      const existing = await getServices();
+      const deduped = existing.filter((s) => s.pcoId !== service.pcoId);
+      await saveServices([...deduped, service]);
+      setImportedAsService(true);
+      Alert.alert(
+        "Service Created",
+        `"${service.title}" added to your Calendar.`,
+        [
+          { text: "View Calendar", onPress: () => navigation.navigate("Calendar") },
+          { text: "OK" },
+        ]
+      );
+    } catch (err) {
+      Alert.alert("Error", err?.message || "Failed to create service.");
+    }
+  }, [selectedPlan, selectedType, items, navigation]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -409,6 +456,32 @@ export default function PCOImportScreen({ navigation }) {
           </>
         )}
 
+        {/* ── Import as UM Service ── */}
+        {!loadingItems && selectedPlan && items.length > 0 && (
+          <Card style={styles.importServiceCard}>
+            <View style={styles.importServiceHeader}>
+              <Text style={styles.importServiceTitle}>📋 Import as UM Service</Text>
+              {importedAsService && (
+                <View style={styles.importedBadge}>
+                  <Text style={styles.importedBadgeText}>✓ Imported</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.importServiceDesc}>
+              Creates a local service with all songs pre-loaded, ready to plan.
+            </Text>
+            <TouchableOpacity
+              style={[styles.importServiceBtn, importedAsService && styles.importServiceBtnDone]}
+              onPress={importedAsService ? undefined : importAsService}
+              disabled={importedAsService}
+            >
+              <Text style={[styles.importServiceBtnText, importedAsService && styles.importServiceBtnTextDone]}>
+                {importedAsService ? "✓ Service Added to Calendar" : "Import as Service →"}
+              </Text>
+            </TouchableOpacity>
+          </Card>
+        )}
+
         <View style={{ height: 60 }} />
       </ScrollView>
     </View>
@@ -562,4 +635,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   pillText: { fontSize: 11, fontWeight: "700" },
+
+  // ── Import as Service card ────────────────────────────────────────────────
+  importServiceCard: {
+    marginTop: 20,
+    borderColor: "#0EA5E966",
+    backgroundColor: "#03111F",
+  },
+  importServiceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  importServiceTitle: {
+    color: "#F9FAFB",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  importServiceDesc: {
+    color: "#6B7280",
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  importServiceBtn: {
+    backgroundColor: "#0C3A5F",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#0EA5E966",
+  },
+  importServiceBtnDone: {
+    backgroundColor: "#0D1B0D",
+    borderColor: "#14532D55",
+  },
+  importServiceBtnText: {
+    color: "#7DD3FC",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  importServiceBtnTextDone: {
+    color: "#34D399",
+  },
+  importedBadge: {
+    backgroundColor: "#14532D",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  importedBadgeText: {
+    color: "#34D399",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });

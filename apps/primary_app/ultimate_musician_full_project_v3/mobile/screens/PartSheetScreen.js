@@ -18,11 +18,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { CINESTAGE_URL } from "./config";
+import { SYNC_URL } from "./config";
 import { formatRoleLabel } from "../data/models";
 import ChartReferencePanel from "../components/ChartReferencePanel";
 import { connectSync, disconnectSync, subscribeSync } from "../services/syncClient";
-import { SYNC_URL } from "./config";
+import { generateInstrumentChartText } from "../services/cinestage/client";
 
 // Map role key → instrument name accepted by /ai/instrument-charts/generate-text
 const ROLE_TO_INSTRUMENT = {
@@ -168,30 +168,18 @@ export default function PartSheetScreen({ navigation, route }) {
     const sid = song.id || song.title;
     setLoadingBass((p) => ({ ...p, [sid]: true }));
     try {
-      const res = await fetch(
-        `${CINESTAGE_URL}/ai/instrument-charts/generate-text`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            song_title: song.title || song.name || "",
-            key:        song.key || song.originalKey || "",
-            time_sig:   song.timeSig || song.timeSignature || "4/4",
-            chord_chart: song.chordChart || song.chordSheet || "",
-            lyrics:     song.lyrics || "",
-            instrument: "Bass",
-          }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.chart_text || data.notes || data.content || "";
-        setBassChart((p) => ({ ...p, [sid]: text }));
-      } else {
-        Alert.alert("CineStage Error", `HTTP ${res.status}`);
-      }
-    } catch {
-      Alert.alert("CineStage", "Could not reach CineStage. Check your connection.");
+      const data = await generateInstrumentChartText({
+        song_title: song.title || song.name || "",
+        key: song.key || song.originalKey || "",
+        time_sig: song.timeSig || song.timeSignature || "4/4",
+        chord_chart: song.chordChart || song.chordSheet || "",
+        lyrics: song.lyrics || "",
+        instrument: "Bass",
+      });
+      const text = data.chart_text || data.notes || data.content || "";
+      setBassChart((p) => ({ ...p, [sid]: text }));
+    } catch (error) {
+      Alert.alert("CineStage", error?.message || "Could not reach CineStage. Check your connection.");
     } finally {
       setLoadingBass((p) => ({ ...p, [sid]: false }));
     }
@@ -204,31 +192,18 @@ export default function PartSheetScreen({ navigation, route }) {
     const roleKey = activeRole.toLowerCase().replace(/\s+/g, "_");
     const instrument = ROLE_TO_INSTRUMENT[roleKey] || activeRole;
     try {
-      const res = await fetch(
-        `${CINESTAGE_URL}/ai/instrument-charts/generate-text`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            song_title: song.title || song.name || "",
-            key: song.key || song.originalKey || "",
-            time_sig: song.timeSig || song.timeSignature || "4/4",
-            chord_chart: song.chordChart || song.chordSheet || "",
-            lyrics: song.lyrics || song.lyricsText || "",
-            instrument,
-          }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const notes = data.chart_text || data.notes || data.content || JSON.stringify(data);
-        setAiNotes((p) => ({ ...p, [sid]: notes }));
-      } else {
-        const err = await res.text().catch(() => `HTTP ${res.status}`);
-        Alert.alert("AI Error", err || "Could not generate notes.");
-      }
-    } catch (e) {
-      Alert.alert("AI not available", "Could not reach CineStage. Check your connection.");
+      const data = await generateInstrumentChartText({
+        song_title: song.title || song.name || "",
+        key: song.key || song.originalKey || "",
+        time_sig: song.timeSig || song.timeSignature || "4/4",
+        chord_chart: song.chordChart || song.chordSheet || "",
+        lyrics: song.lyrics || song.lyricsText || "",
+        instrument,
+      });
+      const notes = data.chart_text || data.notes || data.content || JSON.stringify(data);
+      setAiNotes((p) => ({ ...p, [sid]: notes }));
+    } catch (error) {
+      Alert.alert("AI not available", error?.message || "Could not reach CineStage. Check your connection.");
     } finally {
       setLoadingAi((p) => ({ ...p, [sid]: false }));
     }

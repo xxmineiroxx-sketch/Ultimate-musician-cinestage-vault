@@ -14,13 +14,16 @@ export const createJob = (payload) =>
 
 export const getJob = (jobId) => http(`/jobs/${encodeURIComponent(jobId)}`);
 
-export async function pollJob(jobId, intervalMs = 750, timeoutMs = 60000) {
+const TERMINAL_STATUSES = new Set(["COMPLETED", "SUCCEEDED", "FAILED", "CANCELLED", "ERROR"]);
+
+export async function pollJob(jobId, { intervalMs = 5000, timeoutMs = 1200000, onPoll } = {}) {
   const start = Date.now();
   while (true) {
     const job = await getJob(jobId);
-    if (["SUCCEEDED", "FAILED", "CANCELLED"].includes(job.status)) return job;
+    if (typeof onPoll === 'function') onPoll(job);
+    if (TERMINAL_STATUSES.has(job.status)) return job;
     if (Date.now() - start > timeoutMs)
-      throw new Error("CineStage poll timed out");
+      throw new Error("CineStage stem separation timed out after 20 min — check job status later");
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }

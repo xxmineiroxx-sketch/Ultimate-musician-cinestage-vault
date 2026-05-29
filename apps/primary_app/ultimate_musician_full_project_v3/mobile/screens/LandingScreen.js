@@ -1,7 +1,7 @@
 import * as AppleAuthentication from "expo-apple-authentication";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
 } from "react-native";
@@ -23,6 +24,7 @@ import {
   getActiveSecretKey,
 } from "./config";
 import { useAuth } from "../context/AuthContext";
+import { sendLoginNotification } from "../services/loginNotification";
 
 async function registerExpoPushToken() {
   try {
@@ -61,11 +63,117 @@ export default function LandingScreen({ navigation }) {
     pendingVerification,
     userId,
     ready,
+    resetRequestCode,
+    resetVerify,
+    resetPassword,
+    verifyTwoFa,
   } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [isAppleLoginAvailable, setIsAppleLoginAvailable] = useState(false);
+
+  // ── Password Reset modal state ──────────────────────────────────────────────
+  const [resetVisible, setResetVisible] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1=email, 2=code, 3=new password
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [resetNewPw, setResetNewPw] = useState("");
+  const [resetConfirmPw, setResetConfirmPw] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+
+  // ── 2FA modal state ─────────────────────────────────────────────────────────
+  const [twoFaVisible, setTwoFaVisible] = useState(false);
+  const [twoFaTempToken, setTwoFaTempToken] = useState("");
+  const [twoFaCode, setTwoFaCode] = useState("");
+  const [twoFaLoading, setTwoFaLoading] = useState(false);
+  // Keep a ref to the identifier used during login for session persistence
+  const twoFaIdentifierRef = useRef("");
+
+  function openResetModal() {
+    setResetStep(1);
+    setResetEmail(identifier.trim() || "");
+    setResetCode("");
+    setResetToken("");
+    setResetNewPw("");
+    setResetConfirmPw("");
+    setResetSuccess(false);
+    setResetVisible(true);
+  }
+
+  async function handleResetSendCode() {
+    if (!resetEmail.trim()) {
+      Alert.alert("Email required", "Enter your email address.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await resetRequestCode(resetEmail.trim());
+      setResetStep(2);
+    } catch (err) {
+      Alert.alert("Error", String(err.message || err));
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  async function handleResetVerifyCode() {
+    if (resetCode.length !== 6) {
+      Alert.alert("Invalid code", "Enter the 6-digit code.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const data = await resetVerify(resetEmail.trim(), resetCode.trim());
+      setResetToken(data.resetToken);
+      setResetStep(3);
+    } catch (err) {
+      Alert.alert("Error", String(err.message || err));
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  async function handleResetSetPassword() {
+    if (resetNewPw.length < 8) {
+      Alert.alert("Too short", "Password must be at least 8 characters.");
+      return;
+    }
+    if (resetNewPw !== resetConfirmPw) {
+      Alert.alert("Mismatch", "Passwords do not match.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await resetPassword(resetToken, resetNewPw);
+      setResetSuccess(true);
+    } catch (err) {
+      Alert.alert("Error", String(err.message || err));
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
+  async function handleTwoFaVerify() {
+    if (twoFaCode.length !== 6) {
+      Alert.alert("Invalid code", "Enter the 6-digit code.");
+      return;
+    }
+    setTwoFaLoading(true);
+    try {
+      await verifyTwoFa(twoFaTempToken, twoFaCode.trim(), twoFaIdentifierRef.current);
+      sendLoginNotification(twoFaIdentifierRef.current);
+      setTwoFaVisible(false);
+      setTwoFaCode("");
+      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+    } catch (err) {
+      Alert.alert("2FA Failed", String(err.message || err));
+    } finally {
+      setTwoFaLoading(false);
+    }
+  }
 
   // Load branch credentials from AsyncStorage on first mount
   useEffect(() => {
@@ -95,8 +203,19 @@ export default function LandingScreen({ navigation }) {
     setLoading(true);
     try {
       const data = await login(identifier.trim(), password);
+
+      // Admin 2FA gate
+      if (data.needsTwoFa) {
+        twoFaIdentifierRef.current = identifier.trim();
+        setTwoFaTempToken(data.tempToken);
+        setTwoFaCode("");
+        setTwoFaVisible(true);
+        return;
+      }
+
       if (!data.needsVerification) {
         registerExpoPushToken(); // fire-and-forget, best-effort
+        sendLoginNotification(identifier.trim());
       }
       navigation.reset({
         index: 0,
@@ -133,6 +252,7 @@ export default function LandingScreen({ navigation }) {
         });
       } else {
         registerExpoPushToken();
+        sendLoginNotification(credential.email || data?.email || '');
         navigation.reset({
           index: 0,
           routes: [{ name: "Home" }],
@@ -221,12 +341,215 @@ export default function LandingScreen({ navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={openResetModal}
+          >
+            <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={styles.registerLink}
             onPress={() => navigation.navigate("Register")}
           >
             <Text style={styles.registerLinkText}>Create an account</Text>
           </TouchableOpacity>
         </View>
+
+        {/* ── Password Reset Modal ──────────────────────────────── */}
+        <Modal
+          visible={resetVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setResetVisible(false)}
+        >
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalCard}>
+                <Text style={styles.modalTitle}>Reset Password</Text>
+
+                {resetSuccess ? (
+                  <>
+                    <Text style={styles.modalSuccessText}>
+                      Password updated successfully. You can now sign in.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.modalPrimaryBtn}
+                      onPress={() => setResetVisible(false)}
+                    >
+                      <Text style={styles.modalPrimaryBtnText}>Done</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : resetStep === 1 ? (
+                  <>
+                    <Text style={styles.modalSubtitle}>
+                      Enter your account email and we will send a verification code.
+                    </Text>
+                    <Text style={styles.label}>Email</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={resetEmail}
+                      onChangeText={setResetEmail}
+                      placeholder="email@example.com"
+                      placeholderTextColor="#4B5563"
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      autoCorrect={false}
+                    />
+                    <TouchableOpacity
+                      style={[styles.modalPrimaryBtn, resetLoading && { opacity: 0.6 }]}
+                      onPress={handleResetSendCode}
+                      disabled={resetLoading}
+                    >
+                      {resetLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.modalPrimaryBtnText}>Send Code</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
+                ) : resetStep === 2 ? (
+                  <>
+                    <Text style={styles.modalSubtitle}>
+                      A 6-digit code was sent to {resetEmail}. Enter it below.
+                    </Text>
+                    <Text style={styles.label}>6-Digit Code</Text>
+                    <TextInput
+                      style={[styles.input, styles.codeInput]}
+                      value={resetCode}
+                      onChangeText={(v) => setResetCode(v.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="000000"
+                      placeholderTextColor="#4B5563"
+                      keyboardType="number-pad"
+                      maxLength={6}
+                    />
+                    <TouchableOpacity
+                      style={[styles.modalPrimaryBtn, resetLoading && { opacity: 0.6 }]}
+                      onPress={handleResetVerifyCode}
+                      disabled={resetLoading}
+                    >
+                      {resetLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.modalPrimaryBtnText}>Verify Code</Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.modalSecondaryBtn}
+                      onPress={() => setResetStep(1)}
+                    >
+                      <Text style={styles.modalSecondaryBtnText}>Back</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.modalSubtitle}>
+                      Choose a new password (minimum 8 characters).
+                    </Text>
+                    <Text style={styles.label}>New Password</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={resetNewPw}
+                      onChangeText={setResetNewPw}
+                      placeholder="••••••••"
+                      placeholderTextColor="#4B5563"
+                      secureTextEntry
+                    />
+                    <Text style={styles.label}>Confirm Password</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={resetConfirmPw}
+                      onChangeText={setResetConfirmPw}
+                      placeholder="••••••••"
+                      placeholderTextColor="#4B5563"
+                      secureTextEntry
+                    />
+                    <TouchableOpacity
+                      style={[styles.modalPrimaryBtn, resetLoading && { opacity: 0.6 }]}
+                      onPress={handleResetSetPassword}
+                      disabled={resetLoading}
+                    >
+                      {resetLoading ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.modalPrimaryBtnText}>Reset Password</Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.modalSecondaryBtn}
+                      onPress={() => setResetStep(2)}
+                    >
+                      <Text style={styles.modalSecondaryBtnText}>Back</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {!resetSuccess && (
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={() => setResetVisible(false)}
+                  >
+                    <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* ── 2FA Verification Modal ───────────────────────────── */}
+        <Modal
+          visible={twoFaVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {}}
+        >
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalCard}>
+                <Text style={styles.modalTitle}>Two-Factor Auth</Text>
+                <Text style={styles.modalSubtitle}>
+                  Your account requires 2FA. Enter the 6-digit code sent to your device.
+                </Text>
+                <Text style={styles.label}>Authentication Code</Text>
+                <TextInput
+                  style={[styles.input, styles.codeInput]}
+                  value={twoFaCode}
+                  onChangeText={(v) => setTwoFaCode(v.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  placeholderTextColor="#4B5563"
+                  keyboardType="number-pad"
+                  maxLength={6}
+                />
+                <TouchableOpacity
+                  style={[styles.modalPrimaryBtn, twoFaLoading && { opacity: 0.6 }]}
+                  onPress={handleTwoFaVerify}
+                  disabled={twoFaLoading}
+                >
+                  {twoFaLoading ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.modalPrimaryBtnText}>Verify</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalCancelBtn}
+                  onPress={() => {
+                    setTwoFaVisible(false);
+                    setTwoFaCode("");
+                  }}
+                >
+                  <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {isAppleLoginAvailable && (
           <AppleAuthentication.AppleAuthenticationButton
@@ -337,6 +660,15 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 16,
   },
+  forgotLink: {
+    marginTop: 10,
+    alignItems: "center",
+  },
+  forgotLinkText: {
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   registerLink: {
     marginTop: 14,
     alignItems: "center",
@@ -350,6 +682,81 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 50,
     marginBottom: 12,
+  },
+
+  // ── Modal shared styles ──────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "#0B1120",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+    padding: 24,
+  },
+  modalTitle: {
+    color: "#F9FAFB",
+    fontSize: 20,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    color: "#6B7280",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 20,
+  },
+  modalSuccessText: {
+    color: "#4ADE80",
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  modalPrimaryBtn: {
+    backgroundColor: "#4F46E5",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  modalPrimaryBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  modalSecondaryBtn: {
+    marginTop: 10,
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  modalSecondaryBtnText: {
+    color: "#818CF8",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalCancelBtn: {
+    marginTop: 10,
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  modalCancelBtnText: {
+    color: "#4B5563",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  codeInput: {
+    textAlign: "center",
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 8,
   },
 });
 

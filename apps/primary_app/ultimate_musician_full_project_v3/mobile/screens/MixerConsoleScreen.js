@@ -19,7 +19,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CINESTAGE_URL } from "./config";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SCENES_KEY = "um/mixer/scenes/v1";
@@ -656,33 +655,6 @@ export default function MixerConsoleScreen() {
   const [hwModal, setHwModal] = useState(false);
   const [renameCandidate, setRenameCandidate] = useState(null);
   const [renameText, setRenameText] = useState("");
-  const [aiEqLoading, setAiEqLoading] = useState(false);
-  const [aiEqResult, setAiEqResult]   = useState(null);
-
-  async function handleAIEqAnalysis() {
-    setAiEqLoading(true);
-    setAiEqResult(null);
-    try {
-      const channelData = channels.map(c => ({
-        name: c.name,
-        fader: Math.round(c.fader * 100),
-        muted: !!c.mute,
-        eq: c.eq,
-      }));
-      const res = await fetch(`${CINESTAGE_URL}/ai/music/analyze-eq`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channels: channelData, genre: 'worship', mix_style: 'live' }),
-      });
-      if (!res.ok) throw new Error(`AI EQ ${res.status}`);
-      const data = await res.json();
-      setAiEqResult(data.recommendations || data.analysis || data.content || JSON.stringify(data));
-    } catch (e) {
-      Alert.alert('AI EQ Error', e.message);
-    } finally {
-      setAiEqLoading(false);
-    }
-  }
 
   const selectedChannel = channels.find((c) => c.id === selectedId) || null;
   const bankSize = 16;
@@ -826,34 +798,6 @@ export default function MixerConsoleScreen() {
     <View style={[S.root, { paddingBottom: insets.bottom }]}>
       <View style={S.textureLayer} />
       <View style={S.rootContent}>
-      {/* AI EQ Analysis bar */}
-      <View style={S.panelSurface}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, gap: 10 }}>
-        <TouchableOpacity
-          onPress={handleAIEqAnalysis}
-          disabled={aiEqLoading}
-          style={{ paddingHorizontal: 14, paddingVertical: 6, backgroundColor: '#1e1b4b', borderRadius: 6, borderWidth: 1, borderColor: '#6366f1' }}
-        >
-          <Text style={{ color: '#818cf8', fontSize: 12, fontWeight: '600' }}>
-            {aiEqLoading ? '⏳ Analyzing…' : '🤖 AI EQ Suggestions'}
-          </Text>
-        </TouchableOpacity>
-        {aiEqResult && (
-          <TouchableOpacity onPress={() => setAiEqResult(null)}>
-            <Text style={{ color: '#475569', fontSize: 11 }}>✕ dismiss</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      {aiEqResult && (
-        <View style={[S.panelSurface, { marginTop: 4, padding: 10 }]}>
-          <Text style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 16 }}>
-            {typeof aiEqResult === 'string' ? aiEqResult : JSON.stringify(aiEqResult, null, 2)}
-          </Text>
-        </View>
-      )}
-
-      </View>
-
       {/* Scene bar */}
       <SceneBar
         scenes={scenes}

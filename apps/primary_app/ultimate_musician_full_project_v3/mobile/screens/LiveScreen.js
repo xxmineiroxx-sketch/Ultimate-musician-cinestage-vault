@@ -13,8 +13,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,9 +31,16 @@ import { CINESTAGE_URL, SYNC_ORG_ID, SYNC_SECRET_KEY, SYNC_URL, broadcastToRoom,
 import WaveformTimeline from '../components/WaveformTimeline';
 import { addOrUpdateSong } from '../data/storage';
 import { OUTPUT_COLORS } from '../data/models';
-import { processPeaksForDisplay } from '../services/wavePipelineEngine';
+import { processPeaksForDisplay, quantizedJumpTarget, resolveTransitionWindow } from '../services/wavePipelineEngine';
+import { evaluateJumpSafety } from '../services/livePerformancePolicy';
+import { createPredictiveState, registerJumpIntent } from '../services/predictiveJumpEngine';
+import {
+  loadSongWavePipeline,
+  resolveSongWaveformSourceUrl,
+} from '../services/songWavePipeline';
 import { parseSectionsForWaveform } from '../utils/parseSectionsForWaveform';
 import { normalizeBackendStemEntries } from '../utils/stemPayload';
+import { SECTION_COLORS, normSectionLabel, colorForSection } from '../utils/sectionUtils';
 
 const EMPTY_OBJECT = Object.freeze({});
 const EMPTY_LIST = Object.freeze([]);
@@ -87,13 +96,167 @@ function RoutingPicker({ label, value, options, onChange }) {
   );
 }
 
+// ── Stem Channel Strip ─────────────────────────────────────────────────────────
+const FADER_RAIL_H = 136;
+const LED_COUNT    = 16;
+
+const StemChannelStrip = React.memo(function StemChannelStrip({
+  track, color, onVolumeChange, onMute, onPan,
+}) {
+  const startVolRef  = useRef(track.volume ?? 1);
+  const volRef       = useRef(track.volume ?? 1);
+  const thumbAnim    = useRef(new Animated.Value((1 - (track.volume ?? 1)) * FADER_RAIL_H)).current;
+  const fillAnim     = useRef(new Animated.Value((track.volume ?? 1) * FADER_RAIL_H)).current;
+  const [volDisplay, setVolDisplay] = useState(track.volume ?? 1);
+  const [panLocal, setPanLocal]     = useState(track.pan ?? 0);
+  const [meterLvl, setMeterLvl]    = useState(0);
+
+  // Update thumb/fill when track.volume changes externally (e.g. worship-free fade)
+  useEffect(() => {
+    const v = track.volume ?? 1;
+    volRef.current = v;
+    thumbAnim.setValue((1 - v) * FADER_RAIL_H);
+    fillAnim.setValue(v * FADER_RAIL_H);
+    setVolDisplay(v);
+  }, [track.volume]);
+
+  // Simulated LED meter
+  useEffect(() => {
+    if (track.muted) { setMeterLvl(0); return; }
+    const id = setInterval(() => {
+      setMeterLvl(prev => {
+        const target = 0.35 + Math.random() * 0.65;
+        return prev * 0.4 + target * 0.6;
+      });
+    }, 130);
+    return () => clearInterval(id);
+  }, [track.muted]);
+
+  const faderPR = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder:  () => true,
+      onPanResponderGrant: () => { startVolRef.current = volRef.current; },
+      onPanResponderMove: (_, gs) => {
+        const next = Math.max(0, Math.min(1, startVolRef.current - gs.dy / FADER_RAIL_H));
+        volRef.current = next;
+        thumbAnim.setValue((1 - next) * FADER_RAIL_H);
+        fillAnim.setValue(next * FADER_RAIL_H);
+        setVolDisplay(next);
+        onVolumeChange(track.id, next);
+      },
+    })
+  ).current;
+
+  function nudge(delta) {
+    const next = Math.max(0, Math.min(1, volRef.current + delta));
+    volRef.current = next;
+    thumbAnim.setValue((1 - next) * FADER_RAIL_H);
+    fillAnim.setValue(next * FADER_RAIL_H);
+    setVolDisplay(next);
+    onVolumeChange(track.id, next);
+  }
+
+  const dbLabel = track.muted || volDisplay <= 0 ? '-∞' : `${Math.round(20 * Math.log10(Math.max(0.001, volDisplay)))}`;
+
+  return (
+    <View style={[ss.card, track.muted && ss.cardMuted]}>
+      {/* Accent */}
+      <View style={[ss.accent, { backgroundColor: color }]} />
+
+      {/* Label */}
+      <Text style={ss.label} numberOfLines={2}>{formatTrackLabel(track)}</Text>
+
+      {/* Body: LED + Fader */}
+      <View style={ss.body}>
+
+        {/* LED Meter */}
+        <View style={ss.ledCol}>
+          {Array.from({ length: LED_COUNT }, (_, i) => {
+            const segIdx = LED_COUNT - 1 - i; // 15=top(red), 0=bottom(green)
+            const threshold = segIdx / LED_COUNT;
+            const lit = meterLvl > threshold;
+            const segColor = segIdx >= 14 ? '#EF4444' : segIdx >= 12 ? '#F59E0B' : '#22C55E';
+            return (
+              <View key={i} style={[ss.ledSeg, { backgroundColor: lit ? segColor : '#0D1F35' }]} />
+            );
+          })}
+        </View>
+
+        {/* Fader */}
+        <View style={ss.faderCol}>
+          <TouchableOpacity style={ss.nudgeBtn} onPress={() => nudge(0.05)}>
+            <Text style={ss.nudgeText}>+</Text>
+          </TouchableOpacity>
+
+          <View style={ss.rail} {...faderPR.panHandlers}>
+            <View style={ss.railTrack} />
+            <Animated.View style={[ss.railFill, { height: fillAnim, backgroundColor: color }]} />
+            <Animated.View style={[ss.thumb, { top: thumbAnim }]} />
+          </View>
+
+          <TouchableOpacity style={ss.nudgeBtn} onPress={() => nudge(-0.05)}>
+            <Text style={ss.nudgeText}>−</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* dB */}
+      <Text style={[ss.dbLabel, { color }]}>{dbLabel} dB</Text>
+
+      {/* Pan row */}
+      <View style={ss.panRow}>
+        {[['L', -1], ['C', 0], ['R', 1]].map(([lbl, val]) => {
+          const active = panLocal === val;
+          return (
+            <TouchableOpacity key={lbl}
+              style={[ss.panBtn, active && { borderColor: color, backgroundColor: color + '25' }]}
+              onPress={() => { setPanLocal(val); onPan(track.id, val); }}>
+              <Text style={[ss.panBtnText, active && { color }]}>{lbl}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Mute */}
+      <TouchableOpacity
+        style={[ss.muteBtn, track.muted && ss.muteBtnActive]}
+        onPress={() => onMute(track.id)}>
+        <Text style={[ss.muteBtnText, track.muted && ss.muteBtnTextActive]}>
+          {track.muted ? 'MUTED' : 'MUTE'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+const ss = StyleSheet.create({
+  card:         { width: 110, borderRadius: 16, backgroundColor: '#0B1528', borderWidth: 1, borderColor: '#1A2840', padding: 10, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 10, shadowOffset: { width: 0, height: 6 } },
+  cardMuted:    { backgroundColor: '#080F1C', opacity: 0.65 },
+  accent:       { width: '100%', height: 3, borderRadius: 999, marginBottom: 8 },
+  label:        { color: '#F1F5F9', fontSize: 11, fontWeight: '800', textAlign: 'center', marginBottom: 10, lineHeight: 14 },
+  body:         { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 6 },
+  ledCol:       { width: 14, height: FADER_RAIL_H + 60, justifyContent: 'flex-end', gap: 2 },
+  ledSeg:       { width: 14, height: 5, borderRadius: 2 },
+  faderCol:     { alignItems: 'center', gap: 6 },
+  nudgeBtn:     { width: 26, height: 26, borderRadius: 8, backgroundColor: '#111D30', alignItems: 'center', justifyContent: 'center' },
+  nudgeText:    { color: '#94A3B8', fontSize: 16, fontWeight: '900', lineHeight: 18 },
+  rail:         { width: 32, height: FADER_RAIL_H, borderRadius: 16, backgroundColor: '#060E1C', alignItems: 'center', paddingVertical: 8 },
+  railTrack:    { position: 'absolute', top: 8, bottom: 8, width: 6, borderRadius: 999, backgroundColor: '#16233B' },
+  railFill:     { position: 'absolute', bottom: 8, width: 6, borderRadius: 999 },
+  thumb:        { position: 'absolute', width: 22, height: 10, borderRadius: 5, backgroundColor: '#E2E8F0', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  dbLabel:      { fontSize: 10, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  panRow:       { flexDirection: 'row', gap: 4, marginBottom: 8 },
+  panBtn:       { width: 26, height: 22, borderRadius: 6, borderWidth: 1, borderColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
+  panBtnText:   { color: '#64748B', fontSize: 10, fontWeight: '800' },
+  muteBtn:      { width: '100%', height: 28, borderRadius: 8, borderWidth: 1, borderColor: '#1E293B', alignItems: 'center', justifyContent: 'center' },
+  muteBtnActive:{ borderColor: '#EF4444', backgroundColor: '#2C0F0F' },
+  muteBtnText:  { color: '#94A3B8', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
+  muteBtnTextActive: { color: '#FCA5A5' },
+});
+
 // ── Constants ───────────────────────────────────────────────────────────────────
-const SECTION_COLORS = {
-  intro: '#6B7280', verse: '#6366F1', 'pre-chorus': '#8B5CF6',
-  chorus: '#EC4899', bridge: '#F59E0B', outro: '#10B981',
-  tag: '#0EA5E9', vamp: '#F97316', channel: '#0EA5E9',
-  repeat: '#EC4899', alt: '#F472B6', hook: '#EC4899',
-};
+// SECTION_COLORS + normSectionLabel + colorForSection imported from sectionUtils
 
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const TRACK_COLORS = {
@@ -150,9 +313,7 @@ function rootFromKey(key) {
   };
 }
 
-function normLabel(label) {
-  return (label || '').toLowerCase().replace(/[\s]*\d+\s*$/, '').trim();
-}
+const normLabel = normSectionLabel;
 
 function transposeKey(key, steps) {
   if (!key || steps === 0) return key;
@@ -174,8 +335,7 @@ function stepsBetweenKeys(fromKey, toKey) {
 }
 
 function chipColor(label) {
-  const n = normLabel(label);
-  return SECTION_COLORS[n] || '#6366F1';
+  return colorForSection(label);
 }
 
 function formatRoleLabel(role) {
@@ -871,6 +1031,10 @@ export default function LiveScreen({ route, navigation }) {
     backendBpm: song?.latestStemsJob?.result?.bpm || song?.latestStemsJob?.bpm,
     stemBpm: inferredStemBpm,
   });
+  const liveWaveformPointCount = Math.max(
+    220,
+    Math.min(1280, Math.floor(Dimensions.get('window').width * (Dimensions.get('window').width > 700 ? 2.2 : 1.4))),
+  );
 
   // ── Playback state ─────────────────────────────────────────────────────────
   const [isPlaying, setIsPlaying]             = useState(false);
@@ -931,6 +1095,85 @@ export default function LiveScreen({ route, navigation }) {
   const [isRecording, setIsRecording]       = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [trackRouting, setTrackRouting] = useState({});
+  const [resolvedWavePipeline, setResolvedWavePipeline] = useState(null);
+
+  // ── Phase 1: Quantized Cue Jump Engine ─────────────────────────────────────
+  const JUMP_MODES = ['INSTANT', 'BEAT', 'BAR'];
+  const [jumpMode, setJumpMode]       = useState('BEAT');
+  const [armedCue, setArmedCue]       = useState(null);  // { sec, timeSec, color, transitionMode }
+  const [beatsToFire, setBeatsToFire] = useState(0);
+  const [jumpFlashKey, setJumpFlashKey] = useState(0);
+  const jumpBeatRef = useRef(null);                   // interval handle
+  const predictiveRef = useRef(null);                 // predictiveJumpEngine state
+
+  // ── Phase 1.4: Transition Mode per Cue ─────────────────────────────────────
+  const [transitionModes, setTransitionModes] = useState({}); // { [sectionLabel]: 'CUT'|'CROSSFADE'|'OVERLAP' }
+  const [cueMenuSec, setCueMenuSec] = useState(null);          // section shown in long-press menu
+
+  function cycleJumpMode() {
+    setJumpMode(v => JUMP_MODES[(JUMP_MODES.indexOf(v) + 1) % JUMP_MODES.length]);
+  }
+
+  function disarmCue() {
+    if (jumpBeatRef.current) { clearInterval(jumpBeatRef.current); jumpBeatRef.current = null; }
+    setArmedCue(null);
+    setBeatsToFire(0);
+  }
+
+  function handleCueArm(sec) {
+    const targetSec = Number(sec.timeSec ?? sec.positionSeconds ?? 0);
+    const bpm = rawBpm || 120;
+    const safeMode = jumpMode === 'INSTANT' ? 'IMMEDIATE' : jumpMode; // engine uses 'IMMEDIATE'
+
+    // Safety gate (livePerformancePolicy)
+    const policyMode = safeMode === 'IMMEDIATE' ? 'tech' : safeMode === 'BEAT' ? 'guided' : 'strict';
+    const safety = evaluateJumpSafety({ safetyPolicy: { mode: policyMode } }, position, targetSec);
+    if (!safety.ok && safeMode !== 'IMMEDIATE') {
+      // Non-blocking: log but proceed — quantizedJumpTarget will still snap correctly
+    }
+
+    const snapped = quantizedJumpTarget(targetSec, safeMode, bpm);
+
+    // Capture transition mode at arm time (avoids stale closure)
+    const tMode = transitionModes[sec?.label] || 'CUT';
+
+    // Register intent with predictive engine
+    if (!predictiveRef.current) predictiveRef.current = createPredictiveState(sectionJumpList);
+    const sectionId = String(sec?.markerId || sec?.id || sec?.label);
+    predictiveRef.current = registerJumpIntent(predictiveRef.current, sectionId);
+
+    // Clear any existing arm
+    disarmCue();
+
+    if (safeMode === 'IMMEDIATE') {
+      handleSeek(snapped);
+      setJumpFlashKey(k => k + 1);
+      return;
+    }
+
+    // Arm the cue with countdown
+    const beatMs = Math.round(60000 / bpm);
+    const beatsNeeded = safeMode === 'BAR' ? 4 : 1;
+    setArmedCue({ sec, timeSec: snapped, color: sec.color || '#6366F1', transitionMode: tMode });
+    setBeatsToFire(beatsNeeded);
+
+    let remaining = beatsNeeded;
+    jumpBeatRef.current = setInterval(() => {
+      remaining -= 1;
+      setBeatsToFire(remaining);
+      if (remaining <= 0) {
+        clearInterval(jumpBeatRef.current);
+        jumpBeatRef.current = null;
+        // resolveTransitionWindow(from, to, tMode) — computed here for CROSSFADE/OVERLAP;
+        // wired to audio engine in Phase 7 (Native Audio Core).
+        resolveTransitionWindow(snapped, snapped, tMode);
+        handleSeek(snapped);
+        setJumpFlashKey(k => k + 1);
+        setArmedCue(null);
+        setBeatsToFire(0);
+      }
+    }, beatMs);
+  }
 
   function cycleSig() {
     setLocalTimeSig(v => {
@@ -942,14 +1185,69 @@ export default function LiveScreen({ route, navigation }) {
   function stopDrone() { setDroneNote(null); }
   async function playDrone(note) { setDroneNote(note); }
 
+  // ── Stem strip handlers ──────────────────────────────────────────────────────
+  const handleStemVolume = useCallback((trackId, vol) => {
+    setLiveTracks(prev => {
+      const updated = prev.map(t => t.id === trackId ? { ...t, volume: vol } : t);
+      audioEngine.setMixerState(updated);
+      return updated;
+    });
+  }, []);
+
+  const handleStemMute = useCallback((trackId) => {
+    setLiveTracks(prev => {
+      const updated = prev.map(t => t.id === trackId ? { ...t, muted: !t.muted } : t);
+      audioEngine.setMixerState(updated);
+      return updated;
+    });
+  }, []);
+
+  const handleStemPan = useCallback((trackId, value) => {
+    if (audioEngine.setPan) audioEngine.setPan(trackId, value);
+    setLiveTracks(prev => prev.map(t => t.id === trackId ? { ...t, pan: value } : t));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const pipeline = await loadSongWavePipeline(song, {
+          audioUrl: resolveSongWaveformSourceUrl(song),
+          waveformPoints: 1280,
+          displayPoints: liveWaveformPointCount,
+          includeCues: true,
+        });
+        if (cancelled) return;
+        setResolvedWavePipeline(pipeline);
+        if (pipeline?.durationSec > 0) {
+          setDuration((prev) => (prev > 0 ? prev : pipeline.durationSec));
+        }
+      } catch {
+        if (!cancelled) setResolvedWavePipeline(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    song?.id,
+    song?.analysis?.analyzedAt,
+    song?.analysis?.waveformSourceUrl,
+    liveWaveformPointCount,
+  ]);
+
   // ── Derived song data ──────────────────────────────────────────────────────
   const stemsResult    = song?.latestStemsJob?.result || song?.latestStemsJob || null;
-  const waveformRaw    = paramPeaks || song?.analysis?.waveformPeaks || song?.waveformPeaks || stemsResult?.waveformPeaks || null;
-  const waveformPointCount = Math.max(
-    220,
-    Math.min(1280, Math.floor(Dimensions.get('window').width * (Dimensions.get('window').width > 700 ? 2.2 : 1.4))),
-  );
-  const waveformPeaks  = processPeaksForDisplay(waveformRaw, waveformPointCount);
+  const waveformRaw    =
+    paramPeaks ||
+    resolvedWavePipeline?.waveformPeaks ||
+    song?.analysis?.waveformPeaks ||
+    song?.waveformPeaks ||
+    stemsResult?.waveformPeaks ||
+    null;
+  const waveformPeaks  = processPeaksForDisplay(waveformRaw, liveWaveformPointCount);
   const sourceSections = useMemo(() => (
     paramSections.length > 0
       ? paramSections
@@ -959,16 +1257,18 @@ export default function LiveScreen({ route, navigation }) {
           song?.livePipeline?.sections?.length ? song.livePipeline.sections
           : song?.sections?.length ? song.sections
           : song?.cues?.length ? song.cues
+          : resolvedWavePipeline?.sections?.length ? resolvedWavePipeline.sections
+          : resolvedWavePipeline?.cues?.length ? resolvedWavePipeline.cues
           : song?.analysis?.sections?.length ? song.analysis.sections
           : song?.analysis?.cues?.length ? song.analysis.cues
           : stemsResult?.sections?.length ? stemsResult.sections
           : stemsResult?.cues?.length ? stemsResult.cues
           : []
         )
-  ), [paramSections, paramCues, song?.livePipeline?.sections, song?.sections, song?.cues, song?.analysis?.sections, song?.analysis?.cues, stemsResult?.sections, stemsResult?.cues]);
+  ), [paramSections, paramCues, song?.livePipeline?.sections, song?.sections, song?.cues, resolvedWavePipeline?.sections, resolvedWavePipeline?.cues, song?.analysis?.sections, song?.analysis?.cues, stemsResult?.sections, stemsResult?.cues]);
   const [editableSections, setEditableSections] = useState(sourceSections);
   const rawBpm         = manualBpm || tappedBpm || initialBpm || 0;
-  const effectiveDuration = duration || song?.durationSec || 0;
+  const effectiveDuration = duration || resolvedWavePipeline?.durationSec || song?.durationSec || 0;
 
   const baseKey    = detectedOriginalKey || originalSongKey;
   const displayKey = transposeKey(baseKey, transposeSteps);
@@ -1481,13 +1781,8 @@ export default function LiveScreen({ route, navigation }) {
     }
 
     if (tapCount === 1) {
-      // 1× — QUEUE: play to end of current section then jump
-      queuedSectionRef.current = resolvedSec;
-      setQueueLabel(resolvedSec.label);
-      audioEngine.clearLoopRegion?.();
-      loopSectionRef.current = null;
-      setLoopActive(false);
-      setEngineState(ENGINE_STATE.PLAYING);
+      // 1× — ARM: quantized jump to that section on next beat/bar boundary
+      handleCueArm(resolvedSec);
     } else if (tapCount === 2) {
       // 2× — LOOP: seek immediately + loop
       armLoopForSection(resolvedSec);
@@ -2027,6 +2322,24 @@ export default function LiveScreen({ route, navigation }) {
                 </Text>
               </TouchableOpacity>
               <View style={s.tbDivider} />
+              {/* Jump Mode — INSTANT · BEAT · BAR */}
+              <TouchableOpacity
+                style={[s.tbMenuBtn, {
+                  borderColor: jumpMode === 'INSTANT' ? '#EF4444' : jumpMode === 'BEAT' ? '#6366F1' : '#10B981',
+                  backgroundColor: armedCue
+                    ? (jumpMode === 'INSTANT' ? '#3A0A0A' : jumpMode === 'BEAT' ? '#1A1A3A' : '#052E16')
+                    : 'transparent',
+                }]}
+                onPress={cycleJumpMode}
+                onLongPress={disarmCue}
+              >
+                <Text style={[s.tbMenuBtnText, {
+                  color: jumpMode === 'INSTANT' ? '#F87171' : jumpMode === 'BEAT' ? '#A5B4FC' : '#4ADE80',
+                }]}>
+                  {armedCue ? `⊙ ${beatsToFire > 0 ? beatsToFire : '→'}` : jumpMode}
+                </Text>
+              </TouchableOpacity>
+              <View style={s.tbDivider} />
               {/* REC */}
               <TouchableOpacity
                 style={[s.tbMenuBtn, isRecording && { borderColor: '#EF4444', backgroundColor: '#3A0A0A' }]}
@@ -2108,7 +2421,23 @@ export default function LiveScreen({ route, navigation }) {
                 lengthSeconds={effectiveDuration}
                 playheadPct={playheadPct}
                 waveformPeaks={waveformPeaks}
-                onSeek={(pct) => handleSeek(pct * effectiveDuration)}
+                onSeek={(pct) => {
+                  // pct is 0–1 fraction from WaveformTimeline
+                  const timeSec = pct * effectiveDuration;
+                  if (armedCue) { disarmCue(); return; } // tap background = disarm existing cue
+                  if (jumpMode === 'INSTANT') {
+                    handleSeek(timeSec);
+                  } else {
+                    // Phase 1.1: arm a quantized jump to the tapped position
+                    // inherit label + color from whichever section the tap falls inside
+                    const landingSec = sectionJumpList.reduceRight((found, sec) =>
+                      found === null && sec.timeSec <= timeSec ? sec : found, null
+                    ) || sectionJumpList[0];
+                    handleCueArm(landingSec
+                      ? { ...landingSec, timeSec }
+                      : { timeSec, label: '→', color: '#6366F1' });
+                  }
+                }}
                 onAddMarker={handleAddMarker}
                 bpm={rawBpm}
                 songTitle={song?.title || ''}
@@ -2116,12 +2445,19 @@ export default function LiveScreen({ route, navigation }) {
                 activeSectionLabel={activeSectionLabel}
                 sectionLoopActive={loopActive}
                 onSectionTap={(sec, tapCount) => handleSectionTap(sec, tapCount)}
+                onSectionMenu={setCueMenuSec}
                 onSectionMarkerDrag={handleSectionMarkerDrag}
                 onMarkerTap={handleWaveMarkerTap}
                 onMarkerDrag={handleWaveMarkerDrag}
                 height={waveformH}
                 userRole={userRole}
                 worshipFreeActive={isWorshipFree}
+                armedCueLabel={armedCue?.sec?.label ?? null}
+                armedCuePct={armedCue ? (armedCue.timeSec / (effectiveDuration || 1)) : null}
+                armedCueColor={armedCue?.color ?? '#6366F1'}
+                beatsToFire={beatsToFire}
+                jumpMode={jumpMode === 'INSTANT' ? 'IMMEDIATE' : jumpMode}
+                jumpFlashKey={jumpFlashKey}
               />
 
               <View style={s.waveFooter}>
@@ -2213,9 +2549,103 @@ export default function LiveScreen({ route, navigation }) {
               );
             })()}
 
+            {/* ── Stem Channel Strips ── */}
+            {liveTracks.length > 0 && (
+              <View style={{ marginTop: 14 }}>
+                <Text style={{ color: '#334155', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginBottom: 8 }}>
+                  MIXER
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: 8, paddingRight: 4, paddingBottom: 4 }}
+                >
+                  {liveTracks.map(track => (
+                    <StemChannelStrip
+                      key={track.id}
+                      track={track}
+                      color={getTrackColor(track)}
+                      onVolumeChange={handleStemVolume}
+                      onMute={handleStemMute}
+                      onPan={handleStemPan}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
           </View>
         </View>
       </ScrollView>
+
+      {/* ── Cue Transition Menu Modal (long-press section pin) ── */}
+      <Modal visible={cueMenuSec !== null} transparent animationType="fade"
+        onRequestClose={() => setCueMenuSec(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center' }}
+          onPress={() => setCueMenuSec(null)}>
+          <Pressable onPress={() => {}} style={{ width: 300, backgroundColor: '#0B1120',
+            borderRadius: 18, padding: 20, borderWidth: 1, borderColor: '#1E293B' }}>
+            {cueMenuSec && (() => {
+              const color = cueMenuSec.color || '#6366F1';
+              const lbl   = cueMenuSec.label || 'Section';
+              const cur   = transitionModes[lbl] || 'CUT';
+              const MODES = [
+                { key: 'CUT',       icon: '✂',  label: 'Cut'       },
+                { key: 'CROSSFADE', icon: '⟼', label: 'Crossfade'  },
+                { key: 'OVERLAP',   icon: '⊕',  label: 'Overlap'   },
+              ];
+              return (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
+                    <Text style={{ color: '#F8FAFC', fontWeight: '900', fontSize: 15 }}>{lbl}</Text>
+                  </View>
+                  <Text style={{ color: '#475569', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 10 }}>
+                    TRANSITION INTO THIS SECTION
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+                    {MODES.map(m => {
+                      const active = cur === m.key;
+                      return (
+                        <TouchableOpacity key={m.key} style={{ flex: 1, paddingVertical: 10, borderRadius: 10,
+                          alignItems: 'center', backgroundColor: active ? color + '25' : '#060D1E',
+                          borderWidth: 1.5, borderColor: active ? color : '#1E293B' }}
+                          onPress={() => setTransitionModes(prev => ({ ...prev, [lbl]: m.key }))}>
+                          <Text style={{ fontSize: 16, marginBottom: 2 }}>{m.icon}</Text>
+                          <Text style={{ color: active ? color : '#64748B', fontSize: 10, fontWeight: '800' }}>{m.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  <View style={{ height: 1, backgroundColor: '#1E293B', marginBottom: 14 }} />
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                    <TouchableOpacity style={{ flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center',
+                      backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#1E293B' }}
+                      onPress={() => {
+                        const key = cueIdentity(cueMenuSec);
+                        setCueMenuSec(null);
+                        setRenamingMarkerId(key);
+                        setRenamingCueKind('section');
+                        setRenamingLabel(cueMenuSec.label || '');
+                      }}>
+                      <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: '700' }}>✏ Rename</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center',
+                      backgroundColor: '#1A0A0A', borderWidth: 1, borderColor: '#EF444440' }}
+                      onPress={() => { const s = cueMenuSec; setCueMenuSec(null); handleDeleteCue(s); }}>
+                      <Text style={{ color: '#F87171', fontSize: 12, fontWeight: '700' }}>🗑 Delete</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={{ paddingVertical: 8, alignItems: 'center' }}
+                    onPress={() => setCueMenuSec(null)}>
+                    <Text style={{ color: '#475569', fontSize: 13 }}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Settings Modal */}
       <Modal visible={settingsModalVisible} transparent animationType="slide"

@@ -1,7 +1,6 @@
 import {
   CINESTAGE_API_BASE_URL,
-  CINESTAGE_BRAIN_BOOTSTRAP_URL,
-  CINESTAGE_BRAIN_CAPABILITIES_URL,
+  CINESTAGE_REMOTE_API_BASE_URL,
 } from "./config";
 
 async function http(path, init) {
@@ -9,13 +8,70 @@ async function http(path, init) {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     ...init,
   });
-  if (!res.ok) throw new Error(`CineStage API ${res.status}`);
-  return await res.json();
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(
+      payload?.detail
+      || payload?.error
+      || payload?.message
+      || `CineStage API ${res.status}`,
+    );
+  }
+  return payload;
 }
 
 let _brainBootstrap = null;
 let _brainBootstrapAt = 0;
 const BRAIN_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildMusicAiJobId(prefix = "cinestage") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeJobStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function pollMusicAiJob(basePath, jobId, {
+  intervalMs = 900,
+  timeoutMs = 60000,
+} = {}) {
+  const start = Date.now();
+
+  while (true) {
+    const result = await http(`${basePath}/${encodeURIComponent(jobId)}`);
+    const status = normalizeJobStatus(result?.status);
+
+    if (status === "completed") return result;
+    if (status === "failed") {
+      throw new Error(result?.error || `CineStage job ${jobId} failed.`);
+    }
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("CineStage music AI job timed out.");
+    }
+
+    await sleep(intervalMs);
+  }
+}
+
+async function runMusicAiJob(submitPath, pollPath, payload, prefix, options) {
+  const request = {
+    ...payload,
+    job_id: payload?.job_id || buildMusicAiJobId(prefix),
+  };
+  const queued = await http(submitPath, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+  const jobId = queued?.job_id || request.job_id;
+
+  if (!jobId) return queued;
+  return pollMusicAiJob(pollPath, jobId, options);
+}
 
 function buildBootstrapPayload(brain) {
   return {
@@ -29,25 +85,178 @@ function buildBootstrapPayload(brain) {
   };
 }
 
+function normalizeBaseUrl(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function getBrainBaseCandidates() {
+  return [...new Set([
+    normalizeBaseUrl(CINESTAGE_API_BASE_URL),
+    normalizeBaseUrl(CINESTAGE_REMOTE_API_BASE_URL),
+  ].filter(Boolean))];
+}
+
+async function fetchBrainBootstrapFromBase(apiBase) {
+  const res = await fetch(`${apiBase}/api/brain/bootstrap`, {
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  });
+
+  if (res.ok) {
+    return await res.json();
+  }
+
+  const fallbackRes = await fetch(`${apiBase}/api/brain/capabilities`, {
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  });
+  if (!fallbackRes.ok) {
+    throw new Error(`CineStage bootstrap ${res.status}`);
+  }
+
+  const brain = await fallbackRes.json();
+  return buildBootstrapPayload(brain);
+}
+
+async function fetchBrainCapabilitiesFromBase(apiBase) {
+  const res = await fetch(`${apiBase}/api/brain/capabilities`, {
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`CineStage capabilities ${res.status}`);
+  }
+
+  return await res.json();
+}
+
 export const getCineStageHealth = () => http("/health");
+
+export function isBrainOnline(brain) {
+  if (!brain) return false;
+  const status = String(brain?.status || "").trim().toLowerCase();
+  if (!status) return true;
+  return !["offline", "error", "unavailable", "degraded"].includes(status);
+}
+
+
+export async function loadBrainSnapshot(force = false) {
+  const startedAt = Date.now();
+  const payload = await bootstrapBrain(force);
+  const finishedAt = Date.now();
+  return {
+    brain: payload?.brain ?? null,
+    isOnline: isBrainOnline(payload?.brain),
+    latencyMs: finishedAt - startedAt,
+    checkedAt: finishedAt,
+    payload,
+  };
+}
+
+function normalizeScanResult(result) {
+  const devicePayload =
+    result?.devices && typeof result.devices === "object"
+      ? result.devices
+      : null;
+
+  const inputs = Array.isArray(result?.inputs)
+    ? result.inputs
+    : Array.isArray(devicePayload?.inputs)
+      ? devicePayload.inputs
+      : [];
+
+  const outputs = Array.isArray(result?.outputs)
+    ? result.outputs
+    : Array.isArray(devicePayload?.outputs)
+      ? devicePayload.outputs
+      : Object.keys(result?.detected_devices || {});
+
+  const detectedDevices =
+    result?.detected_devices && typeof result.detected_devices === "object"
+      ? result.detected_devices
+      : Object.fromEntries(
+          [...inputs, ...outputs].map((name) => [name, { name }]),
+        );
+
+  return {
+    ...result,
+    inputs,
+    outputs,
+    detected_devices: detectedDevices,
+  };
+}
+
+function isMissingMidiRuntime(error) {
+  return /no module named ['"]?(rtmidi|mido)['"]?/i.test(
+    String(error?.message || error || ""),
+  );
+}
+
+function buildSafeScanResult(message) {
+  return normalizeScanResult({
+    status: "degraded",
+    inputs: [],
+    outputs: [],
+    detected_devices: {},
+    message,
+    capabilities: {
+      server_scan: false,
+      electron_midi: true,
+      protocols: ["USB-MIDI", "Bluetooth LE MIDI", "RTP-MIDI"],
+    },
+  });
+}
+
+export async function scanDevices() {
+  const endpoints = [
+    "/api/devices/scan",
+    "/ai/midi-presets/midi-devices",
+  ];
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const payload = await http(endpoint);
+      return normalizeScanResult(payload);
+    } catch (error) {
+      if (isMissingMidiRuntime(error)) {
+        return buildSafeScanResult(
+          "CineStage MIDI scan is not installed on this backend runtime. Use Ultimate Musician desktop for live hardware scanning.",
+        );
+      }
+      lastError = error;
+    }
+  }
+
+  return buildSafeScanResult(
+    lastError?.message || "CineStage device scan is unavailable on this connection.",
+  );
+}
 
 export async function getBrainCapabilities(force = false) {
   if (!force && _brainBootstrap?.brain?.capabilities && Date.now() - _brainBootstrapAt < BRAIN_CACHE_TTL_MS) {
     return _brainBootstrap.brain;
   }
 
-  const res = await fetch(CINESTAGE_BRAIN_CAPABILITIES_URL, {
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-  });
-  if (!res.ok) {
+  let lastError = null;
+  for (const apiBase of getBrainBaseCandidates()) {
+    try {
+      const brain = await fetchBrainCapabilitiesFromBase(apiBase);
+      _brainBootstrap = buildBootstrapPayload(brain);
+      _brainBootstrapAt = Date.now();
+      return brain;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
     const bootstrap = await bootstrapBrain(force);
     return bootstrap.brain;
   }
-  const brain = await res.json();
-  _brainBootstrap = buildBootstrapPayload(brain);
-  _brainBootstrapAt = Date.now();
-  return brain;
+
+  throw new Error("CineStage capabilities unavailable.");
 }
 
 export async function bootstrapBrain(force = false) {
@@ -55,28 +264,18 @@ export async function bootstrapBrain(force = false) {
     return _brainBootstrap;
   }
 
-  const res = await fetch(CINESTAGE_BRAIN_BOOTSTRAP_URL, {
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    const fallbackRes = await fetch(CINESTAGE_BRAIN_CAPABILITIES_URL, {
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-    });
-    if (!fallbackRes.ok) {
-      throw new Error(`CineStage bootstrap ${res.status}`);
+  let lastError = null;
+  for (const apiBase of getBrainBaseCandidates()) {
+    try {
+      _brainBootstrap = await fetchBrainBootstrapFromBase(apiBase);
+      _brainBootstrapAt = Date.now();
+      return _brainBootstrap;
+    } catch (error) {
+      lastError = error;
     }
-    const brain = await fallbackRes.json();
-    _brainBootstrap = buildBootstrapPayload(brain);
-    _brainBootstrapAt = Date.now();
-    return _brainBootstrap;
   }
 
-  _brainBootstrap = await res.json();
-  _brainBootstrapAt = Date.now();
-  return _brainBootstrap;
+  throw lastError || new Error("CineStage bootstrap unavailable.");
 }
 
 // ── Jobs / Stems ──────────────────────────────────────────────────────────────
@@ -86,13 +285,15 @@ export const createJob = (payload) =>
 
 export const getJob = (jobId) => http(`/jobs/${encodeURIComponent(jobId)}`);
 
-export async function pollJob(jobId, intervalMs = 750, timeoutMs = 60000) {
+const _TERMINAL = new Set(["COMPLETED", "SUCCEEDED", "FAILED", "CANCELLED", "ERROR"]);
+
+export async function pollJob(jobId, intervalMs = 1500, timeoutMs = 300000) {
   const start = Date.now();
   while (true) {
     const job = await getJob(jobId);
-    if (["SUCCEEDED", "FAILED", "CANCELLED"].includes(job.status)) return job;
+    if (_TERMINAL.has(job.status)) return job;
     if (Date.now() - start > timeoutMs)
-      throw new Error("CineStage poll timed out");
+      throw new Error("CineStage stem separation timed out — check job status later");
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
@@ -170,45 +371,6 @@ export const getCapoCalculation = (payload) =>
 /** List all supported instruments. */
 export const listInstruments = () =>
   http("/ai/instrument-charts/instruments");
-
-// ── Mix / EQ / Compression ────────────────────────────────────────────────────
-
-/**
- * EQ analysis for a track.
- * payload: { track_name, genre?, instrumentation?, mix_context? }
- */
-export const analyzeEQ = (payload) =>
-  http("/ai/music/analyze-eq", { method: "POST", body: JSON.stringify(payload) });
-
-/**
- * Compression suggestions.
- * payload: { track_name, genre?, role?, dynamic_range? }
- */
-export const suggestCompression = (payload) =>
-  http("/ai/music/suggest-compression", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-/**
- * Full mix recommendations across all stems/channels.
- * payload: { song_title, genre?, stems?, channel_names? }
- */
-export const getMixRecommendations = (payload) =>
-  http("/ai/music/mix-recommendations", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-
-/**
- * Apply mixer settings to a channel (returns recommended parameter values).
- * payload: { channel, settings: { eq, compression, fx, ... } }
- */
-export const applyMixerSettings = (payload) =>
-  http("/ai/music/mixer/apply-settings", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 
 // ── Music Theory ──────────────────────────────────────────────────────────────
 
@@ -310,10 +472,19 @@ export const listMidiDevices = () => http("/ai/midi-presets/midi-devices");
  * payload: { description, instrument?, genre? }
  */
 export const quickMidiSetup = (payload) =>
-  http("/ai/midi-presets/quick-setup", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  http(
+    `/ai/midi-presets/quick-setup?${new URLSearchParams(
+      Object.entries(payload || {}).reduce((acc, [key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          acc[key] = String(value);
+        }
+        return acc;
+      }, {}),
+    ).toString()}`,
+    {
+      method: "POST",
+    },
+  );
 
 // ── Vocal Harmony (Audio) ─────────────────────────────────────────────────────
 

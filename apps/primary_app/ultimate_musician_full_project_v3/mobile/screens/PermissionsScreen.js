@@ -103,7 +103,7 @@ export default function PermissionsScreen({ navigation }) {
     }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { let active = true; load().catch(() => {}); return () => { active = false; }; }, [load]);
 
   const canAssignRole = (roleKey) => {
     if (viewerRole === "org_owner") return roleKey === "admin" || roleKey === "worship_leader";

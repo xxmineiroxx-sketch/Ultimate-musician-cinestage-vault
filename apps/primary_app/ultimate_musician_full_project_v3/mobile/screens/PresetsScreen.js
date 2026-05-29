@@ -10,7 +10,7 @@ import {
 } from "react-native";
 
 import { getSongs } from "../data/storage";
-import { CINESTAGE_URL } from "./config";
+import { CINESTAGE_URL, syncHeaders } from "./config";
 import { fetchWithRetry } from "../utils/fetchRetry";
 
 const PRESET_TYPES = ["Worship Keys", "Ambient Pad", "Strings", "Organ B3", "Synth Lead"];
@@ -31,7 +31,7 @@ export default function PresetsScreen({ navigation }) {
     try {
       const res = await fetchWithRetry(`${CINESTAGE_URL}/ai/midi-presets/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: syncHeaders(),
         body: JSON.stringify({
           instrument_type: presetType,
           song_title: presetSongTitle.trim() || undefined,

@@ -4,9 +4,8 @@
  * Songs include chord charts in Portuguese with keys, artists, and BPMs.
  * Only runs once per install (guarded by um.cifras.seeded.v1).
  */
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import cifrasData from "./cifras-seed.json";
+import { getScopedItem, removeScopedItem, setScopedItem } from "./orgScopedStorage";
 
 const SONGS_KEY = "um.songs.v2";
 const CIFRAS_SEEDED = "um.cifras.seeded.v1";
@@ -26,10 +25,10 @@ const safeJsonParse = (val, fallback) => {
  */
 export const ensureCifrasSeeded = async () => {
   try {
-    const already = await AsyncStorage.getItem(CIFRAS_SEEDED);
+    const already = await getScopedItem(CIFRAS_SEEDED);
     if (already === "true") return { status: "already_seeded" };
 
-    const raw = await AsyncStorage.getItem(SONGS_KEY);
+    const raw = await getScopedItem(SONGS_KEY);
     const existing = safeJsonParse(raw, []);
     const existIds = new Set(existing.map((s) => s.id));
 
@@ -37,8 +36,8 @@ export const ensureCifrasSeeded = async () => {
     const toAdd = cifrasData.filter((s) => !existIds.has(s.id));
     const merged = [...existing, ...toAdd];
 
-    await AsyncStorage.setItem(SONGS_KEY, JSON.stringify(merged));
-    await AsyncStorage.setItem(CIFRAS_SEEDED, "true");
+    await setScopedItem(SONGS_KEY, JSON.stringify(merged));
+    await setScopedItem(CIFRAS_SEEDED, "true");
 
     return { status: "seeded", count: toAdd.length };
   } catch (e) {
@@ -52,11 +51,11 @@ export const ensureCifrasSeeded = async () => {
  */
 export const removeCifrasSongs = async () => {
   try {
-    const raw = await AsyncStorage.getItem(SONGS_KEY);
+    const raw = await getScopedItem(SONGS_KEY);
     const existing = safeJsonParse(raw, []);
     const filtered = existing.filter((s) => s.source !== "cifras-incc");
-    await AsyncStorage.setItem(SONGS_KEY, JSON.stringify(filtered));
-    await AsyncStorage.removeItem(CIFRAS_SEEDED);
+    await setScopedItem(SONGS_KEY, JSON.stringify(filtered));
+    await removeScopedItem(CIFRAS_SEEDED);
     return { removed: existing.length - filtered.length };
   } catch (e) {
     return { error: e.message };

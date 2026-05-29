@@ -1,0 +1,89 @@
+{
+  "name": "ultimate-musician-daw",
+  "version": "1.0.0",
+  "description": "Ultimate Musician — Professional Desktop DAW & Team Platform",
+  "author": "Ultimate Labs",
+  "license": "UNLICENSED",
+  "main": "src/main/main.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"cross-env UM_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build": "vite build",
+    "build:renderer": "vite build",
+    "preview": "vite preview",
+    "dist": "vite build && electron-builder --mac --publish never",
+    "dist:win": "vite build && electron-builder --win --publish never",
+    "electron:dev": "cross-env UM_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "electron": "electron ."
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "howler": "^2.2.4",
+    "python-shell": "^5.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  },
+  "build": {
+    "appId": "com.ultimatelabs.musician-daw",
+    "productName": "Ultimate Musician",
+    "copyright": "© 2026 Ultimate Labs",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/main/**/*",
+      "src/backend/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Ultimate Musician",
+      "background": "assets/dmg-background.png",
+      "icon": "assets/icon.icns",
+      "iconSize": 128,
+      "window": { "width": 660, "height": 400 },
+      "contents": [
+        { "x": 180, "y": 200, "type": "file" },
+        { "x": 480, "y": 200, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "installerHeader": "assets/installer-header.bmp",
+      "license": "assets/LICENSE.txt",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "extraResources": [{ "from": "assets/", "to": "assets/" }]
+  }
+}

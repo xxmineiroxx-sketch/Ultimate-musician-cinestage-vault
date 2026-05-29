@@ -1,7 +1,8 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -9,8 +10,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
+import MiniWaveform from "../components/MiniWaveform";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -29,16 +32,18 @@ import {
 } from "../services/stemJobService";
 import { analyzeWorshipSong } from "../services/worshipFlowService";
 import {
+  quickMidiSetup,
+  scanDevices,
+} from "../services/cinestage/client";
+import { getWaveformAnalysis } from "../services/waveformService";
+import {
   CHORD_CHART_INSTRUMENTS,
   makeId,
-  ROUTING_TRACKS,
-  OUTPUT_COLORS,
-  getOutputOptions,
-  makeDefaultSettings,
 } from "../data/models";
-import { addOrUpdateSong, getSettings, getSongs } from "../data/storage";
+import { addOrUpdateSong, deleteSong, getSettings, getSongs } from "../data/storage";
 import { transposeChordChart } from "../data/chordTranspose";
 import { parseSectionsForWaveform } from "../utils/parseSectionsForWaveform";
+import { normalizeBackendStemEntries } from "../utils/stemPayload";
 
 const CINESTAGE_STEPS = [
   "Collecting song info",
@@ -78,15 +83,6 @@ const ROLE_COLORS = {
   "Synth/Pad": "#22C55E",
   Other: "#FBBF24",
 };
-const WORSHIP_FLOW_VIEWER_ROLES = new Set([
-  "admin",
-  "org_owner",
-  "worship_leader",
-  "md",
-  "music_director",
-  "sound_tech",
-  "sound",
-]);
 
 // ── Keyboard Rigs ─────────────────────────────────────────────────────────────
 const DEFAULT_KEYS_RIGS = [
@@ -314,10 +310,6 @@ function normalizeSectionRole(role) {
     other: "Other",
   };
   return aliasMap[key] || role;
-}
-
-function canViewWorshipFlow(role) {
-  return WORSHIP_FLOW_VIEWER_ROLES.has(normalizeRoleKey(role));
 }
 
 function defaultSectionParts(name, content) {
@@ -808,15 +800,20 @@ function autoRecognizeSections(text) {
 // ── Screen ───────────────────────────────────────────────────────────────────
 export default function SongDetailScreen({ route, navigation }) {
   const incomingSong = route?.params?.song || null;
+  const linkedSongId = route?.params?.songId || null;
   // Optional: service-context playing key passed when opening from a service plan
   const serviceTransposedKey = route?.params?.transposedKey || '';
-  const isNew = !incomingSong?.id;
+  const isNew = !(incomingSong?.id || linkedSongId);
+  const { width: _sdWidth } = useWindowDimensions();
 
-  const [songId] = useState(incomingSong?.id || makeId("song"));
+  const [songId] = useState(incomingSong?.id || linkedSongId || makeId("song"));
   const [title, setTitle] = useState(incomingSong?.title || "");
   const [artist, setArtist] = useState(incomingSong?.artist || "");
+  // originalKey = immutable once set (detected by CineStage, never overwritten by user edits)
+  // key = current working key (user can change for transposition)
+  const [originalKey, setOriginalKey] = useState(incomingSong?.originalKey || "");
   const [key, setKey] = useState(
-    incomingSong?.originalKey || incomingSong?.key || "",
+    incomingSong?.key || incomingSong?.originalKey || "",
   );
   const [bpm, setBpm] = useState(
     incomingSong?.bpm ? String(incomingSong.bpm) : "",
@@ -826,22 +823,10 @@ export default function SongDetailScreen({ route, navigation }) {
     incomingSong?.youtubeLink || "",
   );
   const [tags, setTags] = useState(Array.isArray(incomingSong?.tags) ? incomingSong.tags.join(', ') : (incomingSong?.tags || ""));
-  const [routing, setRouting] = useState(incomingSong?.routing || {});
-  const [routingExpanded, setRoutingExpanded] = useState(false);
   const [cueSync, setCueSync] = useState(
     incomingSong?.cueSync || { enabled: false },
   );
-  const [routingPicker, setRoutingPicker] = useState({
-    open: false,
-    key: null,
-  });
-  const [settingsRouting, setSettingsRouting] = useState({
-    interfaceChannels: 2,
-    global: {},
-  });
   const [dirty, setDirty] = useState(isNew);
-  const [viewerRole, setViewerRole] = useState("");
-  const [worshipFlowLoading, setWorshipFlowLoading] = useState(false);
   const [worshipFlowInsights, setWorshipFlowInsights] = useState(
     incomingSong?.worshipFlowInsights || null,
   );
@@ -875,7 +860,6 @@ export default function SongDetailScreen({ route, navigation }) {
   const [keysRigsExpanded, setKeysRigsExpanded] = useState(false);
 
   // AI Instrument Chart
-  const [aiChartLoading, setAiChartLoading] = useState(false);
   const [aiChartResult, setAiChartResult] = useState(null); // { instrument, chart_text }
   const [aiChartInstrument, setAiChartInstrument] = useState("Keys");
 
@@ -884,7 +868,6 @@ export default function SongDetailScreen({ route, navigation }) {
   const [keysPresetType, setKeysPresetType]         = useState('Worship Keys');
   const [keysPresetLoading, setKeysPresetLoading]   = useState(false);
   const [keysPresetResult, setKeysPresetResult]     = useState(null);
-
   // CAGED reference / strumming patterns / bass fingering
   const [cagedData, setCagedData] = useState(null);
   const [strummingData, setStrummingData] = useState(null);
@@ -941,7 +924,14 @@ export default function SongDetailScreen({ route, navigation }) {
   const [processingStep, setProcessingStep] = useState(0);
   const [processingProgress, setProcessingProgress] = useState(0);
 
+  // CineStage Brain — unified super-analysis
+  const [brainRunning, setBrainRunning] = useState(false);
+  const [brainStage,   setBrainStage]   = useState('');
+  const [brainProgress, setBrainProgress] = useState(0);
+  const [brainResult,  setBrainResult]  = useState(null);
+
   const [currentSong, setCurrentSong] = useState(incomingSong);
+  const canDeleteSong = Boolean(currentSong?.id || incomingSong?.id);
   const hasStemsDone =
     Object.keys(currentSong?.localStems || {}).length > 0 ||
     (() => {
@@ -955,22 +945,67 @@ export default function SongDetailScreen({ route, navigation }) {
   useEffect(() => {
     (async () => {
       const settings = await getSettings();
-      const storedRole = await AsyncStorage.getItem("@user_role");
       if (settings.apiBase) setApiBase(settings.apiBase);
       if (settings.defaultUserId) setUserId(settings.defaultUserId);
-      if (storedRole) setViewerRole(storedRole);
-      const defaults = makeDefaultSettings();
-      setSettingsRouting({
-        interfaceChannels:
-          settings.routing?.interfaceChannels ??
-          defaults.routing.interfaceChannels,
-        global: {
-          ...defaults.routing.global,
-          ...(settings.routing?.global || {}),
-        },
-      });
     })();
   }, []);
+
+  useEffect(() => {
+    if (incomingSong || !linkedSongId) return;
+    let alive = true;
+
+    (async () => {
+      try {
+        const librarySongs = await getSongs();
+        const matchedSong = librarySongs.find(
+          (song) => song?.id === linkedSongId || song?.songId === linkedSongId,
+        );
+        if (!alive || !matchedSong) return;
+
+        setTitle(matchedSong.title || "");
+        setArtist(matchedSong.artist || "");
+        setOriginalKey(matchedSong.originalKey || "");
+        setKey(matchedSong.key || matchedSong.originalKey || "");
+        setBpm(matchedSong.bpm ? String(matchedSong.bpm) : "");
+        setTimeSig(matchedSong.timeSig || "4/4");
+        setYoutubeLink(matchedSong.youtubeLink || "");
+        setTags(
+          Array.isArray(matchedSong.tags)
+            ? matchedSong.tags.join(', ')
+            : (matchedSong.tags || ""),
+        );
+        setCueSync(matchedSong.cueSync || { enabled: false });
+        setWorshipFlowInsights(matchedSong.worshipFlowInsights || null);
+        setRawChart(matchedSong.lyricsChordChart || "");
+        setSections(matchedSong.sections || []);
+        setLocalStemsState(matchedSong.localStems || {});
+        setCurrentSong(matchedSong);
+      } catch (error) {
+        console.warn('SongDetail deep-link hydrate failed:', error);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [incomingSong, linkedSongId]);
+
+  useEffect(() => {
+    const roleCharts =
+      currentSong?.smartArrangement?.roleCharts ||
+      currentSong?.smartArrangement?.role_charts ||
+      {};
+    const previewChart = getPreviewChartForInstrument(
+      roleCharts,
+      aiChartInstrument,
+    );
+
+    if (previewChart) {
+      setAiChartResult({ instrument: aiChartInstrument, text: previewChart });
+    } else {
+      setAiChartResult(null);
+    }
+  }, [currentSong, aiChartInstrument]);
 
   function markDirty() {
     setDirty(true);
@@ -982,13 +1017,12 @@ export default function SongDetailScreen({ route, navigation }) {
       id: songId,
       title: title.trim() || "Untitled",
       artist: artist.trim(),
-      key,            // canonical field — read by Playback
-      originalKey: key,
+      key,            // current working key (may differ from originalKey if transposed)
+      originalKey: originalKey || key,  // user-editable; defaults to current key if blank
       bpm: bpm ? Number(bpm) : null,
       timeSig,
       youtubeLink: youtubeLink.trim(),
       tags: (tags || '').trim(),
-      routing,
       chordChart: rawChart,        // canonical field — read by Playback
       lyricsChordChart: rawChart,
       sections,
@@ -1018,6 +1052,53 @@ export default function SongDetailScreen({ route, navigation }) {
     } catch (e) {
       Alert.alert("Error", String(e.message || e));
     }
+  }
+
+  async function cleanupLocalStemFiles() {
+    const stemEntries = Object.values(localStemsState || {});
+    await Promise.all(
+      stemEntries.map(async (stemInfo) => {
+        if (!stemInfo?.localUri) {
+          return;
+        }
+
+        try {
+          await FileSystem.deleteAsync(stemInfo.localUri, { idempotent: true });
+        } catch {
+          // Ignore local file cleanup failures; the song record is still removed.
+        }
+      }),
+    );
+  }
+
+  function handleDeleteCurrentSong() {
+    const songToDelete = currentSong || incomingSong;
+    if (!songToDelete?.id) {
+      Alert.alert("Nothing to delete", "Save this song first before trying to remove it.");
+      return;
+    }
+
+    const songLabel = songToDelete?.title?.trim() || "this song";
+    Alert.alert(
+      `Delete "${songLabel}"?`,
+      "This removes the song from your library and discards any unsaved edits on this screen.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await cleanupLocalStemFiles();
+              await deleteSong(songToDelete.id);
+              navigation.goBack();
+            } catch (error) {
+              Alert.alert("Delete failed", String(error?.message || error));
+            }
+          },
+        },
+      ],
+    );
   }
 
   // ── Stem file upload helpers ────────────────────────────────────────────────
@@ -1086,6 +1167,8 @@ export default function SongDetailScreen({ route, navigation }) {
     setAiRecommendations(null);
     try {
       const librarySongs = await getSongs();
+
+      // Build setlist context (songs already planned)
       const setlistSource =
         route?.params?.setlistContext ||
         route?.params?.service?.songs ||
@@ -1097,6 +1180,7 @@ export default function SongDetailScreen({ route, navigation }) {
             .map((item) => {
               const song = item?.song || item || {};
               return {
+                id: song?.id || item?.id || '',
                 title: song?.title || item?.title || '',
                 key: song?.key || song?.originalKey || item?.key || '',
                 bpm: Number.isFinite(Number(song?.bpm || item?.bpm))
@@ -1104,33 +1188,46 @@ export default function SongDetailScreen({ route, navigation }) {
                   : null,
               };
             })
-            .filter((song) => song.title)
+            .filter((s) => s.title)
         : [];
+
+      // Build library pool — include full lyrics/chart for semantic analysis
       const songPool = Array.isArray(librarySongs)
         ? librarySongs
             .map((song) => ({
+              id: song?.id || '',
               title: song?.title || '',
               artist: song?.artist || '',
               key: song?.key || song?.originalKey || '',
               bpm: Number.isFinite(Number(song?.bpm)) ? Number(song.bpm) : null,
               tags: Array.isArray(song?.tags) ? song.tags : [],
+              lyricsChordChart: song?.lyricsChordChart || song?.chordChart || '',
+              lyrics: song?.lyrics || '',
             }))
-            .filter((song) => song.title)
+            .filter((s) => s.title)
             .slice(0, 60)
         : [];
 
-      const res = await fetchWithRetry(`${SYNC_URL}/sync/ai/recommend`, {
+      // Current song full text for theme analysis
+      const currentChart = rawChart || currentSong?.lyricsChordChart || currentSong?.chordChart || '';
+
+      const res = await fetchWithRetry(`${CINESTAGE_URL}/ai/song-recommend`, {
         method: 'POST',
-        headers: syncHeaders(),
+        headers: { 'Content-Type': 'application/json', ...syncHeaders() },
         body: JSON.stringify({
           currentSong: {
+            id: currentSong?.id || '',
             title,
             artist,
             key,
             bpm: bpm ? parseInt(bpm, 10) : null,
+            lyricsChordChart: currentChart,
+            lyrics: currentSong?.lyrics || '',
+            tags: Array.isArray(currentSong?.tags) ? currentSong.tags : [],
           },
           setlistContext,
           songPool,
+          maxResults: 5,
         }),
       });
       if (!res.ok) {
@@ -1138,7 +1235,7 @@ export default function SongDetailScreen({ route, navigation }) {
       }
       const data = await res.json();
       if (data.recommendations?.length > 0) {
-        setAiRecommendations(data.recommendations);
+        setAiRecommendations({ recs: data.recommendations, themes: data.currentThemes || [] });
       } else {
         Alert.alert(
           'No results',
@@ -1154,236 +1251,26 @@ export default function SongDetailScreen({ route, navigation }) {
     }
   }
 
-  async function handleSmartAnalyze() {
-    const chartText =
-      rawChart ||
-      currentSong?.lyricsChordChart ||
-      currentSong?.chordChart ||
-      "";
-
-    if (!chartText.trim() && !title.trim()) {
-      Alert.alert("Nothing to analyze", "Add a title or paste your chord chart first.");
-      return;
-    }
-
-    const meta = extractMetaFromChart(chartText);
-    const effectiveKey = meta.key || key || currentSong?.key || "";
-    const effectiveBpm = meta.bpm || (bpm ? Number(bpm) : currentSong?.bpm || null);
-    const effectiveTimeSig = meta.timeSig || timeSig || currentSong?.timeSig || "4/4";
-    const effectiveTitle = title.trim() || currentSong?.title || "Untitled";
-    const effectiveArtist = artist.trim() || currentSong?.artist || "";
-
-    if (meta.key) setKey(meta.key);
-    if (meta.bpm) setBpm(String(meta.bpm));
-    if (meta.timeSig) setTimeSig(meta.timeSig);
-
-    const parsedSections = chartText.trim()
-      ? autoRecognizeSections(chartText)
-      : [];
-    const baseSections = ensureSmartSections(
-      parsedSections.length
-        ? parsedSections
-        : sections.length
-          ? sections
-          : [{ id: makeId("sec"), name: "Song", content: chartText, expanded: true, parts: {} }],
-    );
-    setSections(baseSections);
-
-    setAiChartLoading(true);
-    setAiChartResult(null);
-    try {
-      const bases = Array.from(
-        new Set(
-          [apiBase, CINESTAGE_URL]
-            .map((value) => String(value || "").trim().replace(/\/+$/, ""))
-            .filter(Boolean),
-        ),
-      );
-      const arrangement = await postCineStageJson(
-        "/ai/song-arrangement/analyze",
-        {
-          song_title: effectiveTitle,
-          artist: effectiveArtist,
-          key: effectiveKey,
-          bpm: effectiveBpm,
-          time_signature: effectiveTimeSig,
-          chord_chart: chartText,
-          lyrics: buildLyricsExcerpt(chartText, baseSections),
-          sections: baseSections.map((section) => ({
-            id: section.id,
-            name: section.name,
-            content: section.content,
-          })),
-        },
-        bases,
-      );
-
-      const mergedSections = mergeArrangedSections(baseSections, arrangement.sections || []);
-      const instrumentNotes =
-        arrangement.instrumentNotes ||
-        arrangement.instrument_notes ||
-        buildInstrumentNotesFromSections(mergedSections);
-      const lyrics =
-        String(arrangement.lyrics || "").trim() ||
-        buildLyricsExcerpt(chartText, mergedSections);
-
-      let waveformData = null;
-      const sourceUrl =
-        youtubeLink.trim() ||
-        currentSong?.youtubeLink ||
-        currentSong?.audioUrl ||
-        currentSong?.sourceUrl ||
-        "";
-      if (sourceUrl) {
-        try {
-          waveformData = await postCineStageJson(
-            "/api/waveform/analyze",
-            {
-              file_url: sourceUrl,
-              song_id: songId,
-              title: effectiveTitle,
-              waveform_points: 1280,
-              n_sections: Math.max(mergedSections.length, 6),
-            },
-            bases,
-          );
-        } catch {
-          waveformData = null;
-        }
-      }
-
-      const durationMs =
-        waveformData?.analysis?.duration_ms ||
-        waveformData?.duration_ms ||
-        arrangement.estimatedDurationMs ||
-        arrangement.estimated_duration_ms ||
-        estimateArrangementDurationMs(mergedSections, effectiveBpm);
-      const rawWaveformSections =
-        waveformData?.analysis?.sections ||
-        arrangement.waveformSections ||
-        arrangement.waveform_sections ||
-        buildFallbackWaveformSections(mergedSections, durationMs);
-      const waveformSections = (rawWaveformSections || []).map((section, index) => {
-        const timeSec = Number(
-          section?.timeSec ??
-          section?.positionSeconds ??
-          ((section?.start_ms ?? 0) / 1000),
-        );
-        const label =
-          section?.label ||
-          section?.name ||
-          mergedSections[index]?.name ||
-          `Section ${index + 1}`;
-        const startMs =
-          Number.isFinite(section?.start_ms) && section?.start_ms >= 0
-            ? Number(section.start_ms)
-            : Math.round(timeSec * 1000);
-        const endMs =
-          Number.isFinite(section?.end_ms) && section?.end_ms >= startMs
-            ? Number(section.end_ms)
-            : startMs;
-        return {
-          id: section?.id || mergedSections[index]?.id || `wf_${index}`,
-          label,
-          name: label,
-          type: section?.type || normalizeRoleKey(label),
-          color: section?.color || buildSectionColor(label, index),
-          timeSec,
-          positionSeconds: Number(section?.positionSeconds ?? timeSec),
-          start_ms: startMs,
-          end_ms: endMs,
-        };
-      });
-      const cueSource =
-        waveformData?.analysis?.cues ||
-        arrangement.cues ||
-        null;
-      const cues = cueSource
-        ? buildAlignedWaveformCues(cueSource, waveformSections, mergedSections)
-        : buildFallbackWaveformCues(mergedSections, waveformSections);
-      const waveformPeaks =
-        waveformData?.analysis?.waveformPeaks ||
-        waveformData?.analysis?.peaks ||
-        waveformData?.waveformPeaks ||
-        waveformData?.peaks ||
-        currentSong?.analysis?.waveformPeaks ||
-        currentSong?.analysis?.peaks;
-      const performanceGraph =
-        waveformData?.analysis?.performance_graph ||
-        waveformSections.map((section, index) => ({
-          section: section.label,
-          energy: mergedSections[index]?.energy || "medium",
-          cue: mergedSections[index]?.cue || "",
-        }));
-      const analysisMarkers = cueSource
-        ? buildAnalysisMarkersFromCues(cues, durationMs)
-        : currentSong?.analysis?.markers || [];
-      const roleCharts = arrangement.roleCharts || arrangement.role_charts || {};
-      const previewChart = getPreviewChartForInstrument(roleCharts, aiChartInstrument);
-
-      const saved = await addOrUpdateSong({
-        ...buildSongObject(),
-        title: effectiveTitle,
-        artist: effectiveArtist,
-        key: effectiveKey,
-        originalKey: effectiveKey,
-        bpm: effectiveBpm,
-        timeSig: effectiveTimeSig,
-        sections: mergedSections,
-        instrumentNotes,
-        lyrics,
-        cues,
-        analysis: {
-          ...(currentSong?.analysis || {}),
-          sections: waveformSections,
-          cues,
-          markers: analysisMarkers,
-          duration_ms: durationMs,
-          waveformPeaks,
-          peaks: waveformPeaks,
-          performance_graph: performanceGraph,
-          analyzedAt: new Date().toISOString(),
-        },
-        smartArrangement: arrangement,
-      });
-
-      setCurrentSong(saved);
-      setSections(saved.sections || mergedSections);
-      setDirty(false);
-      if (previewChart) {
-        setAiChartResult({ instrument: aiChartInstrument, text: previewChart });
-      }
-      if (isNew) navigation.setParams({ song: saved });
-      const warningText = Array.isArray(arrangement.warnings) && arrangement.warnings.length
-        ? `\n\nNotes:\n• ${arrangement.warnings.join("\n• ")}`
-        : "";
-      Alert.alert(
-        "Smart Analyze complete",
-        `Saved role charts, vocal lyrics, and waveform cues for "${effectiveTitle}".${warningText}`,
-      );
-    } catch (e) {
-      Alert.alert("AI Chart Error", e.message);
-    } finally {
-      setAiChartLoading(false);
-    }
-  }
-
   async function handleGenerateKeysPreset() {
     setKeysPresetLoading(true);
     setKeysPresetResult(null);
     try {
-      const res = await fetchWithRetry(`${CINESTAGE_URL}/ai/midi-presets/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instrument_type: keysPresetType,
-          song_title: title || '',
-          genre: 'worship',
-          style: keysPresetType.toLowerCase().replace(/\s+/g, '_'),
-        }),
+      const patchMap = {
+        "Worship Keys": { modx_patch: "Piano", nord_patch: "Piano", vst_patch: "Worship Keys" },
+        "Ambient Pad": { modx_patch: "Pad", nord_patch: "Strings", vst_patch: "Ambient Pad" },
+        "Strings": { modx_patch: "Strings", nord_patch: "Strings", vst_patch: "Strings" },
+        "Organ B3": { modx_patch: "Organ", nord_patch: "Organ", vst_patch: "Organ B3" },
+        "Synth Lead": { modx_patch: "EP", nord_patch: "EP", vst_patch: "Synth Lead" },
+      };
+
+      const data = await quickMidiSetup({
+        song_title: title.trim() || currentSong?.title || "Untitled Song",
+        artist: artist.trim() || currentSong?.artist || "Unknown",
+        key: key || currentSong?.key || currentSong?.originalKey || "C",
+        tempo: Number(bpm || currentSong?.bpm || 120),
+        ...(patchMap[keysPresetType] || patchMap["Worship Keys"]),
       });
-      if (!res.ok) throw new Error(`AI Preset ${res.status}`);
-      setKeysPresetResult(await res.json());
+      setKeysPresetResult(data);
     } catch (e) {
       Alert.alert('Preset Error', e.message);
     } finally {
@@ -1391,49 +1278,21 @@ export default function SongDetailScreen({ route, navigation }) {
     }
   }
 
-  async function handleAnalyzeWorshipFlow() {
-    if (!title.trim() && !rawChart.trim()) {
-      Alert.alert(
-        "Song needed",
-        "Add the song title or paste the chart before running Worship Flow AI.",
-      );
-      return;
-    }
+  function getRemoteStemUrlMap(song) {
+    const entries = normalizeBackendStemEntries(
+      song?.latestStemsJob?.result || {
+        stems: song?.stems || {},
+        harmonies: song?.harmonies || {},
+      },
+    );
 
-    setWorshipFlowLoading(true);
-    try {
-      const payload = {
-        title: title.trim() || currentSong?.title || "Untitled",
-        artist: artist.trim() || currentSong?.artist || "",
-        key: serviceTransposedKey || key || currentSong?.originalKey || "",
-        bpm: bpm ? Number(bpm) : currentSong?.bpm || null,
-        lyrics: buildLyricsExcerpt(rawChart, sections),
-        chordChart: (rawChart || "").slice(0, 2000),
-        teamRoles: (route?.params?.teamRoles || []).filter(Boolean),
-        serviceContext:
-          route?.params?.serviceContext ||
-          route?.params?.serviceName ||
-          route?.params?.service?.title ||
-          "Worship service",
-      };
-
-      const data = await analyzeWorshipSong(payload);
-      const insights = data?.insights || data || null;
-      setWorshipFlowInsights(insights);
-
-      if (title.trim()) {
-        const saved = await addOrUpdateSong({
-          ...buildSongObject(),
-          worshipFlowInsights: insights,
-        });
-        setCurrentSong(saved);
-        if (isNew) navigation.setParams({ song: saved });
+    return entries.reduce((acc, entry) => {
+      const url = entry?.url || entry?.uri || "";
+      if (/^https?:\/\//i.test(String(url))) {
+        acc[entry.id || entry.type || `stem_${Object.keys(acc).length}`] = url;
       }
-    } catch (e) {
-      Alert.alert("Worship Flow Error", String(e?.message || e));
-    } finally {
-      setWorshipFlowLoading(false);
-    }
+      return acc;
+    }, {});
   }
 
   function toggleSection(id) {
@@ -1554,10 +1413,13 @@ export default function SongDetailScreen({ route, navigation }) {
           ? serverSections
           : parseSectionsForWaveform(rawChart, dur);
 
+      // originalKey is set ONCE (first time CineStage detects it) and never overwritten
+      const newOriginalKey = songToProcess.originalKey || detectedKey || "";
       const updated = await addOrUpdateSong({
         ...songToProcess,
         sourceUrl: resolvedSourceUrl,
-        originalKey: detectedKey || songToProcess.originalKey || "",
+        originalKey: newOriginalKey,
+        key: detectedKey || songToProcess.key || newOriginalKey,
         bpm: detectedBpm || songToProcess.bpm || null,
         timeSig: detectedTimeSig || songToProcess.timeSig || "4/4",
         latestStemsJob: current,
@@ -1582,8 +1444,11 @@ export default function SongDetailScreen({ route, navigation }) {
         }).catch(() => {});
       }
 
-      // Update form fields
-      if (detectedKey) setKey(detectedKey);
+      // Update form fields — originalKey only set if it wasn't already
+      if (detectedKey) {
+        setKey(detectedKey);
+        if (!originalKey) setOriginalKey(detectedKey);
+      }
       if (detectedBpm) setBpm(String(Math.round(detectedBpm)));
       if (detectedTimeSig) setTimeSig(detectedTimeSig);
       setDirty(false);
@@ -1601,6 +1466,283 @@ export default function SongDetailScreen({ route, navigation }) {
     }
   }
 
+  // ── CineStage Brain — runs everything in one orchestrated pipeline ──────────
+  async function handleCineStageBrain() {
+    const sourceUrl =
+      youtubeLink.trim() ||
+      currentSong?.youtubeLink ||
+      currentSong?.audioUrl ||
+      currentSong?.sourceUrl ||
+      '';
+
+    // Save first so we have a valid songId
+    let songToProcess = currentSong;
+    if (dirty || isNew) {
+      try {
+        songToProcess = await addOrUpdateSong(buildSongObject());
+        setCurrentSong(songToProcess);
+        setDirty(false);
+      } catch { /* proceed anyway */ }
+    }
+
+    setBrainRunning(true);
+    setBrainResult(null);
+    setBrainProgress(0);
+
+    const bases = [apiBase, CINESTAGE_URL].filter(Boolean);
+    const effectiveTitle  = title.trim()  || currentSong?.title  || 'Untitled';
+    const effectiveArtist = artist.trim() || currentSong?.artist || '';
+    const chartText       = rawChart || currentSong?.lyricsChordChart || currentSong?.chordChart || '';
+    const meta            = extractMetaFromChart(chartText);
+    const effectiveKey    = meta.key    || key    || currentSong?.key    || '';
+    const effectiveBpm    = meta.bpm    || (bpm ? Number(bpm) : currentSong?.bpm || null);
+    const effectiveTimeSig = meta.timeSig || timeSig || currentSong?.timeSig || '4/4';
+
+    const brainData = {};
+
+    try {
+      // ── STAGE 1 · Smart Arrange (AI chord chart analysis) ─────────────────
+      setBrainStage('Smart Analyze — reading arrangement…');
+      setBrainProgress(5);
+
+      if (chartText.trim() || effectiveTitle) {
+        try {
+          const parsedSections  = chartText.trim() ? autoRecognizeSections(chartText) : [];
+          const baseSections    = ensureSmartSections(
+            parsedSections.length ? parsedSections :
+            sections.length       ? sections        :
+            [{ id: makeId('sec'), name: 'Song', content: chartText, expanded: true, parts: {} }],
+          );
+          setSections(baseSections);
+
+          const arrangement = await postCineStageJson('/ai/song-arrangement/analyze', {
+            song_title:     effectiveTitle,
+            artist:         effectiveArtist,
+            key:            effectiveKey,
+            bpm:            effectiveBpm,
+            time_signature: effectiveTimeSig,
+            chord_chart:    chartText,
+            lyrics:         buildLyricsExcerpt(chartText, baseSections),
+            sections:       baseSections.map(s => ({ id: s.id, name: s.name, content: s.content })),
+          }, bases);
+
+          brainData.arrangement = arrangement;
+          const merged = mergeArrangedSections(baseSections, arrangement.sections || []);
+          setSections(merged);
+          if (meta.key) setKey(meta.key);
+          if (meta.bpm) setBpm(String(meta.bpm));
+          if (meta.timeSig) setTimeSig(meta.timeSig);
+        } catch (e) {
+          brainData.arrangementError = String(e.message || e);
+        }
+      }
+      setBrainProgress(28);
+
+      // ── STAGE 2 · Waveform Analysis + Device Scan (parallel) ─────────────
+      setBrainStage('Analyzing waveform · scanning devices…');
+      setBrainProgress(32);
+
+      const [wfResult, devResult] = await Promise.allSettled([
+        sourceUrl
+          ? getWaveformAnalysis(
+              songToProcess?.id || songToProcess?.songId || null,
+              sourceUrl,
+              {
+                title: effectiveTitle,
+                waveformPoints: 1280,
+                nSections: 6,
+                includeCues: true,
+                includeRuntime: true,
+                force: true,
+              }
+            )
+          : Promise.resolve(null),
+        scanDevices().catch(() => null),
+      ]);
+
+      brainData.waveform = wfResult.status === 'fulfilled' ? wfResult.value : null;
+      brainData.devices  = devResult.status === 'fulfilled' ? devResult.value : null;
+      setBrainProgress(50);
+
+      // ── STAGE 3 · Worship Flow Intelligence ──────────────────────────────
+      setBrainStage('Reading worship flow and transition energy…');
+      setBrainProgress(56);
+
+      try {
+        const flowPayload = {
+          title: effectiveTitle,
+          artist: effectiveArtist,
+          key: serviceTransposedKey || effectiveKey || currentSong?.originalKey || '',
+          bpm: effectiveBpm,
+          lyrics: buildLyricsExcerpt(chartText, sections),
+          chordChart: chartText.slice(0, 2000),
+          teamRoles: (route?.params?.teamRoles || []).filter(Boolean),
+          serviceContext:
+            route?.params?.serviceContext ||
+            route?.params?.serviceName ||
+            route?.params?.service?.title ||
+            "Worship service",
+        };
+
+        const flowData = await analyzeWorshipSong(flowPayload);
+        const flowInsights = flowData?.insights || flowData || null;
+        brainData.worshipFlow = flowInsights;
+        setWorshipFlowInsights(flowInsights);
+      } catch (e) {
+        brainData.worshipFlowError = String(e.message || e);
+      }
+      setBrainProgress(64);
+
+      // ── STAGE 4 · Stem Separation ─────────────────────────────────────────
+      if (sourceUrl) {
+        setBrainStage('Submitting stems to CineStage…');
+        setBrainProgress(68);
+        try {
+          const { job } = await submitStemJob({
+            sourceUrl,
+            title:                  songToProcess?.title || effectiveTitle,
+            songId:                 songToProcess?.id,
+            separateHarmonies:      true,
+            voiceCount:             3,
+            enhanceInstrumentStems: true,
+          });
+
+          setBrainStage('Separating stems — GPU processing…');
+          const finalJob = await pollStemJob(job.id, {
+            initialJob: job,
+            onUpdate: (nextJob, { polls }) => {
+              const p = nextJob.status === 'PROCESSING'
+                ? Math.min(88, 72 + polls * 0.35)
+                : Math.min(76, 68 + polls * 0.45);
+              setBrainProgress(p);
+              const stageName = nextJob.result?.processingStage;
+              setBrainStage(
+                stageName        ? `Stems · ${stageName}` :
+                nextJob.status === 'PROCESSING' ? 'Separating stems…' :
+                'Queued — waiting for processor…',
+              );
+            },
+          });
+
+          brainData.stems = finalJob;
+
+          if (hasStemJobResult(finalJob)) {
+            const res = finalJob.result || {};
+            const detKey = finalJob.key || res.key || res.original_key || '';
+            const detBpm = finalJob.bpm || res.bpm || null;
+            const newOrigKey = songToProcess?.originalKey || detKey;
+            songToProcess = await addOrUpdateSong({
+              ...songToProcess,
+              sourceUrl,
+              originalKey: newOrigKey,
+              key:  detKey || songToProcess?.key || newOrigKey,
+              bpm:  detBpm || songToProcess?.bpm,
+              latestStemsJob: finalJob,
+            });
+            setCurrentSong(songToProcess);
+            if (detKey) { setKey(detKey); if (!originalKey) setOriginalKey(detKey); }
+            if (detBpm) setBpm(String(Math.round(detBpm)));
+            // Sync stems to Cloudflare KV so Ultimate Playback can access them
+            if (res.stems && Object.keys(res.stems).length > 0) {
+              fetch(`${SYNC_URL}/sync/stems-store`, {
+                method: 'POST', headers: syncHeaders(),
+                body: JSON.stringify({
+                  songId: songToProcess.id, title: songToProcess.title,
+                  stems: res.stems, harmonies: res.harmonies || {},
+                  key: detKey, bpm: detBpm, jobId: finalJob.id || '',
+                }),
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          brainData.stemsError = String(e.message || e);
+        }
+      }
+
+      // ── STAGE 5 · Save all enriched data ──────────────────────────────────
+      setBrainStage('Saving results…');
+      setBrainProgress(92);
+
+      const arr = brainData.arrangement || {};
+      const wf  = brainData.waveform;
+      if (arr.sections || wf) {
+        const wfSections  =
+          (Array.isArray(wf?.sections) && wf.sections.length > 0)
+            ? wf.sections
+            : arr.waveformSections || [];
+        const cues        =
+          (Array.isArray(wf?.cues) && wf.cues.length > 0)
+            ? wf.cues
+            : arr.cues || [];
+        const durationMs  = wf?.duration_ms || arr.estimatedDurationMs || 0;
+        const peaks       = wf?.waveformPeaks || wf?.peaks || null;
+        const instrNotes  = arr.instrumentNotes || arr.instrument_notes || {};
+
+        // Resolved metadata priority:
+        // 1. Stems (audio-detected, most accurate for key + BPM)
+        // 2. Waveform analysis (audio-detected, best for time signature)
+        // 3. AI arrangement (text-based analysis)
+        // 4. Existing chart metadata / song record
+        const stems     = brainData.stems;
+        const stemRes   = stems?.result || {};
+        const stemKey   = stems?.key || stemRes.key || stemRes.original_key || '';
+        const stemBpm   = stems?.bpm || stemRes.bpm || null;
+        const wfKey     = wf?.key || wf?.original_key || wf?.detectedKey || '';
+        const wfBpm     = wf?.bpm || wf?.estimated_bpm || null;
+        const wfTimeSig = wf?.time_signature || wf?.timeSig || wf?.meter || '';
+        const resolvedKey    = stemKey   || wfKey    || arr.key            || effectiveKey    || songToProcess?.key    || '';
+        const resolvedBpm    = stemBpm   || wfBpm    || arr.bpm            || effectiveBpm    || songToProcess?.bpm    || null;
+        const resolvedTimeSig = wfTimeSig || arr.time_signature || effectiveTimeSig || songToProcess?.timeSig || '4/4';
+
+        const saved = await addOrUpdateSong({
+          ...songToProcess,
+          instrumentNotes: instrNotes,
+          lyrics: arr.lyrics || songToProcess?.lyrics || '',
+          smartArrangement: arr,
+          worshipFlowInsights:
+            brainData.worshipFlow ||
+            songToProcess?.worshipFlowInsights ||
+            undefined,
+          // Auto-save metadata extracted/confirmed by Brain
+          ...(resolvedKey     && { key: resolvedKey }),
+          ...(resolvedBpm     && { bpm: resolvedBpm }),
+          ...(resolvedTimeSig && { timeSig: resolvedTimeSig }),
+          analysis: {
+            ...(songToProcess?.analysis || {}),
+            sections:    wfSections,
+            cues,
+            duration_ms: durationMs,
+            waveformPeaks: peaks,
+            peaks,
+            analyzedAt: new Date().toISOString(),
+          },
+        });
+        setCurrentSong(saved);
+        // Sync form fields so the UI reflects what was saved
+        if (saved.key)     setKey(saved.key);
+        if (saved.bpm)     setBpm(String(saved.bpm));
+        if (saved.timeSig) setTimeSig(saved.timeSig);
+        setDirty(false);
+
+        // Apply AI chart preview
+        const roleCharts = arr.roleCharts || arr.role_charts || {};
+        const previewChart = getPreviewChartForInstrument(roleCharts, aiChartInstrument);
+        if (previewChart) setAiChartResult({ instrument: aiChartInstrument, text: previewChart });
+      }
+
+      setBrainProgress(100);
+      setBrainStage('Complete ✓');
+      setBrainResult(brainData);
+
+    } catch (e) {
+      setBrainStage('Error — ' + String(e.message || e));
+      brainData.fatalError = String(e.message || e);
+      setBrainResult(brainData);
+    } finally {
+      setBrainRunning(false);
+    }
+  }
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -1612,6 +1754,18 @@ export default function SongDetailScreen({ route, navigation }) {
         <Text style={styles.sectionSub}>
           Only the fields below are required for planning and rehearsal.
         </Text>
+
+        {/* ── Waveform preview (only shown for existing songs) ── */}
+        {!isNew && songId ? (
+          <MiniWaveform
+            songId={songId}
+            width={_sdWidth - 32}
+            height={64}
+            color="#6366f1"
+            backgroundColor="#0f172a"
+            style={{ borderRadius: 8, marginVertical: 12 }}
+          />
+        ) : null}
 
         {/* Title */}
         <TextInput
@@ -1641,19 +1795,53 @@ export default function SongDetailScreen({ route, navigation }) {
 
         {/* Key + BPM row */}
         <View style={styles.row}>
-          <TextInput
-            style={[styles.input, styles.flex1]}
-            value={key}
-            onChangeText={(v) => {
-              setKey(v);
-              markDirty();
-            }}
-            placeholder="Key  (e.g. C, F#)"
-            placeholderTextColor="#4B5563"
-            autoCapitalize="characters"
-            maxLength={3}
-            returnKeyType="next"
-          />
+          <View style={styles.flex1}>
+            <TextInput
+              style={styles.input}
+              value={key}
+              onChangeText={(v) => {
+                setKey(v);
+                markDirty();
+              }}
+              placeholder="Key  (e.g. C, F#)"
+              placeholderTextColor="#4B5563"
+              autoCapitalize="characters"
+              maxLength={3}
+              returnKeyType="next"
+            />
+            {/* Original key — editable inline input */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 5 }}>
+              <Text style={{ fontSize: 9, color: '#4B5563', fontWeight: '800', letterSpacing: 0.8 }}>ORIG</Text>
+              <TextInput
+                style={{
+                  color: originalKey && originalKey === key ? '#34D399' : originalKey ? '#FCD34D' : '#6B7280',
+                  fontWeight: '900',
+                  fontSize: 12,
+                  backgroundColor: originalKey && originalKey === key ? '#1E3A2F' : originalKey ? '#1C1A07' : '#111827',
+                  borderRadius: 6,
+                  paddingHorizontal: 7,
+                  paddingVertical: 2,
+                  borderWidth: 1,
+                  borderColor: originalKey && originalKey === key ? '#10B981' : originalKey ? '#92400E' : '#374151',
+                  minWidth: 36,
+                  textAlign: 'center',
+                }}
+                value={originalKey}
+                onChangeText={(v) => {
+                  setOriginalKey(v.toUpperCase());
+                  markDirty();
+                }}
+                placeholder="—"
+                placeholderTextColor="#4B5563"
+                autoCapitalize="characters"
+                maxLength={3}
+                returnKeyType="done"
+              />
+              {!!originalKey && originalKey !== key && (
+                <Text style={{ fontSize: 9, color: '#6B7280' }}>≠ current</Text>
+              )}
+            </View>
+          </View>
           <TextInput
             style={[styles.input, styles.flex1]}
             value={bpm}
@@ -1753,205 +1941,6 @@ export default function SongDetailScreen({ route, navigation }) {
           returnKeyType="done"
           autoCorrect={false}
         />
-
-        {/* Audio Routing per-song overrides */}
-        {(() => {
-          const overrideCount = ROUTING_TRACKS.filter(
-            (t) => routing[t.key],
-          ).length;
-          const outputOptions = [
-            "Use Global",
-            ...getOutputOptions(settingsRouting.interfaceChannels),
-          ];
-          const pickerTrack = ROUTING_TRACKS.find(
-            (t) => t.key === routingPicker.key,
-          );
-
-          return (
-            <>
-              <TouchableOpacity
-                style={styles.routingToggleRow}
-                onPress={() => setRoutingExpanded((e) => !e)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-                >
-                  <Text style={styles.routingToggleLabel}>
-                    🔊 Audio Routing
-                  </Text>
-                  {overrideCount > 0 && (
-                    <View style={styles.routingOverrideBadge}>
-                      <Text style={styles.routingOverrideBadgeText}>
-                        {overrideCount} override{overrideCount !== 1 ? "s" : ""}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={{ color: "#4B5563", fontSize: 14 }}>
-                  {routingExpanded ? "∧" : "∨"}
-                </Text>
-              </TouchableOpacity>
-
-              {routingExpanded && (
-                <View style={styles.routingCard}>
-                  {["Timing", "Instruments", "Mix"].map((group, gi) => {
-                    const tracks = ROUTING_TRACKS.filter(
-                      (t) => t.group === group,
-                    );
-                    return (
-                      <View key={group}>
-                        {gi > 0 && <View style={styles.routingCardDivider} />}
-                        <Text style={styles.routingGroupName}>{group}</Text>
-                        {tracks.map((track) => {
-                          const override = routing[track.key];
-                          const globalVal =
-                            settingsRouting.global[track.key] || "Main L/R";
-                          const color = override
-                            ? OUTPUT_COLORS[override] || "#818CF8"
-                            : "#374151";
-                          return (
-                            <TouchableOpacity
-                              key={track.key}
-                              style={styles.songRoutingRow}
-                              onPress={() =>
-                                setRoutingPicker({ open: true, key: track.key })
-                              }
-                              activeOpacity={0.7}
-                            >
-                              <Text style={styles.songRoutingLabel}>
-                                {track.label}
-                              </Text>
-                              <View
-                                style={[
-                                  styles.songRoutingBadge,
-                                  override && {
-                                    borderColor: color + "55",
-                                    backgroundColor: color + "15",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.songRoutingValue,
-                                    { color: override ? color : "#4B5563" },
-                                  ]}
-                                >
-                                  {override || `Global · ${globalVal}`}
-                                </Text>
-                                <Text
-                                  style={{ color: "#374151", fontSize: 10 }}
-                                >
-                                  ▾
-                                </Text>
-                              </View>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-
-              {/* Routing picker modal */}
-              <Modal
-                visible={routingPicker.open}
-                transparent
-                animationType="fade"
-                onRequestClose={() =>
-                  setRoutingPicker({ open: false, key: null })
-                }
-              >
-                <Pressable
-                  style={styles.routingModalOverlay}
-                  onPress={() => setRoutingPicker({ open: false, key: null })}
-                >
-                  <View style={styles.routingPickerCard}>
-                    <Text style={styles.routingPickerTitle}>
-                      {pickerTrack?.label || ""}
-                    </Text>
-                    {outputOptions.map((opt) => {
-                      const trackKey = routingPicker.key;
-                      const currentVal = trackKey
-                        ? routing[trackKey] || "Use Global"
-                        : "Use Global";
-                      const isActive = currentVal === opt;
-                      const c =
-                        opt === "Use Global"
-                          ? "#6B7280"
-                          : OUTPUT_COLORS[opt] || "#818CF8";
-                      const globalVal = trackKey
-                        ? settingsRouting.global[trackKey] || "Main L/R"
-                        : "";
-                      return (
-                        <TouchableOpacity
-                          key={opt}
-                          style={[
-                            styles.routingPickerOption,
-                            isActive && {
-                              backgroundColor: c + "20",
-                              borderColor: c + "44",
-                            },
-                          ]}
-                          onPress={() => {
-                            if (trackKey) {
-                              setRouting((prev) => ({
-                                ...prev,
-                                [trackKey]: opt === "Use Global" ? null : opt,
-                              }));
-                              markDirty();
-                            }
-                            setRoutingPicker({ open: false, key: null });
-                          }}
-                        >
-                          <View
-                            style={[
-                              styles.routingPickerDot,
-                              { backgroundColor: isActive ? c : "#1F2937" },
-                            ]}
-                          />
-                          <View style={{ flex: 1 }}>
-                            <Text
-                              style={[
-                                styles.routingPickerOptText,
-                                isActive && { color: c, fontWeight: "800" },
-                              ]}
-                            >
-                              {opt}
-                            </Text>
-                            {opt === "Use Global" && (
-                              <Text
-                                style={{
-                                  color: "#374151",
-                                  fontSize: 11,
-                                  marginTop: 1,
-                                }}
-                              >
-                                → {globalVal}
-                              </Text>
-                            )}
-                          </View>
-                          {isActive && (
-                            <Text
-                              style={{
-                                color: c,
-                                fontWeight: "800",
-                                fontSize: 14,
-                              }}
-                            >
-                              ✓
-                            </Text>
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </Pressable>
-              </Modal>
-            </>
-          );
-        })()}
 
         {/* Cue Sync toggle */}
         <TouchableOpacity
@@ -2130,7 +2119,7 @@ export default function SongDetailScreen({ route, navigation }) {
           </View>
         )}
 
-        {/* Action buttons */}
+        {/* Action buttons — save + delete row */}
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={[styles.saveBtn, !dirty && styles.saveBtnDim]}
@@ -2141,397 +2130,225 @@ export default function SongDetailScreen({ route, navigation }) {
               {isNew ? "+ Add Song" : "Save Song"}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.cineBtn, !youtubeLink.trim() && styles.cineBtnDim]}
-            onPress={handleRunCineStage}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.cineBtnText}>Run CineStage™</Text>
-          </TouchableOpacity>
+          {canDeleteSong ? (
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={handleDeleteCurrentSong}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.deleteBtnText}>Delete</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
-        {canViewWorshipFlow(viewerRole) && (
-          <View
-            style={{
-              marginTop: 12,
-              backgroundColor: "#120A24",
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: "#6D28D9",
-              padding: 14,
-              gap: 10,
-            }}
+        <View style={styles.brainHubSection}>
+          {/* ── CineStage Brain — Unified Super-Analysis ─────────────────────── */}
+          <TouchableOpacity
+            style={[styles.brainSuperBtn, brainRunning && { opacity: 0.88 }]}
+            onPress={handleCineStageBrain}
+            disabled={brainRunning}
+            activeOpacity={0.85}
           >
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-              }}
-            >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Text style={{ fontSize: 30 }}>🧠</Text>
               <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    color: "#C4B5FD",
-                    fontSize: 11,
-                    fontWeight: "800",
-                    letterSpacing: 1,
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Worship Flow AI
-                </Text>
-                <Text
-                  style={{
-                    color: "#EDE9FE",
-                    fontSize: 15,
-                    fontWeight: "800",
-                    marginTop: 2,
-                  }}
-                >
-                  Live flow, arrangement, and FOH guidance
+                <Text style={styles.brainSuperBtnTitle}>CineStage Brain</Text>
+                <Text style={styles.brainSuperBtnSub} numberOfLines={1}>
+                  {brainRunning
+                    ? brainStage || 'Processing…'
+                    : 'One command · arrangement · waveform · stems · worship flow'}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 9,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: "#8B5CF6",
-                  backgroundColor: worshipFlowLoading ? "#2E1065" : "#3B1B71",
-                  opacity: worshipFlowLoading ? 0.75 : 1,
-                }}
-                onPress={handleAnalyzeWorshipFlow}
-                disabled={worshipFlowLoading}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={{ color: "#F5F3FF", fontSize: 12, fontWeight: "800" }}
-                >
-                  {worshipFlowLoading ? "Analyzing..." : "✦ Analyze"}
-                </Text>
-              </TouchableOpacity>
+              {brainRunning
+                ? <ActivityIndicator color="#818CF8" size="small" />
+                : <Text style={{ color: '#4F46E5', fontSize: 20, fontWeight: '300' }}>›</Text>
+              }
             </View>
 
-            {worshipFlowInsights ? (
-              <>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={{
-                        color: "#A78BFA",
-                        fontSize: 11,
-                        fontWeight: "700",
-                        marginBottom: 6,
-                      }}
-                    >
-                      Worship Freely Likelihood
-                    </Text>
-                    <View
-                      style={{
-                        height: 8,
-                        borderRadius: 999,
-                        backgroundColor: "#2E1065",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <View
-                        style={{
-                          height: "100%",
-                          width: `${Math.round(
-                            Math.max(
-                              0,
-                              Math.min(
-                                1,
-                                Number(
-                                  worshipFlowInsights.worshipFreelyLikelihood || 0,
-                                ),
-                              ),
-                            ) * 100,
-                          )}%`,
-                          borderRadius: 999,
-                          backgroundColor: "#A855F7",
-                        }}
-                      />
-                    </View>
-                  </View>
-                  <View
-                    style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 6,
-                      borderRadius: 999,
-                      backgroundColor: "#2E1065",
-                      borderWidth: 1,
-                      borderColor: "#8B5CF6",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#F5F3FF",
-                        fontSize: 12,
-                        fontWeight: "800",
-                      }}
-                    >
-                      {Math.round(
-                        Math.max(
-                          0,
-                          Math.min(
-                            1,
-                            Number(
-                              worshipFlowInsights.worshipFreelyLikelihood || 0,
-                            ),
-                          ),
-                        ) * 100,
-                      )}
-                      %
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  {worshipFlowInsights.tempoFeel ? (
-                    <View
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: 999,
-                        backgroundColor: "#1E1B4B",
-                        borderWidth: 1,
-                        borderColor: "#6366F1",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "#A5B4FC",
-                          fontSize: 11,
-                          fontWeight: "800",
-                        }}
-                      >
-                        {String(worshipFlowInsights.tempoFeel).toUpperCase()}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {worshipFlowInsights.worshipFreelyMoment ? (
-                    <View
-                      style={{
-                        flex: 1,
-                        minWidth: 180,
-                        paddingHorizontal: 10,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        backgroundColor: "#1B1235",
-                        borderWidth: 1,
-                        borderColor: "#4C1D95",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "#C4B5FD",
-                          fontSize: 10,
-                          fontWeight: "800",
-                          textTransform: "uppercase",
-                          marginBottom: 3,
-                        }}
-                      >
-                        Let It Flow
-                      </Text>
-                      <Text
-                        style={{
-                          color: "#F5F3FF",
-                          fontSize: 12,
-                          fontWeight: "700",
-                        }}
-                      >
-                        {worshipFlowInsights.worshipFreelyMoment}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {Array.isArray(worshipFlowInsights.energyFlow) &&
-                worshipFlowInsights.energyFlow.length > 0 ? (
-                  <View>
-                    <Text
-                      style={{
-                        color: "#A78BFA",
-                        fontSize: 11,
-                        fontWeight: "800",
-                        marginBottom: 6,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Section Energy
-                    </Text>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                      {worshipFlowInsights.energyFlow.map((entry, index) => {
-                        const energy = String(entry?.energy || "medium").toLowerCase();
-                        const dotColor =
-                          energy === "peak"
-                            ? "#EC4899"
-                            : energy === "high"
-                              ? "#8B5CF6"
-                              : energy === "low"
-                                ? "#38BDF8"
-                                : "#A855F7";
-                        return (
-                          <View
-                            key={`${entry?.section || "section"}_${index}`}
-                            style={{
-                              paddingHorizontal: 10,
-                              paddingVertical: 8,
-                              borderRadius: 12,
-                              backgroundColor: "#1B1235",
-                              borderWidth: 1,
-                              borderColor: "#4C1D95",
-                              minWidth: 110,
-                            }}
-                          >
-                            <View
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 6,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  width: 8,
-                                  height: 8,
-                                  borderRadius: 999,
-                                  backgroundColor: dotColor,
-                                }}
-                              />
-                              <Text
-                                style={{
-                                  color: "#F5F3FF",
-                                  fontSize: 12,
-                                  fontWeight: "800",
-                                }}
-                              >
-                                {entry?.section || `Section ${index + 1}`}
-                              </Text>
-                            </View>
-                            {entry?.note ? (
-                              <Text
-                                style={{
-                                  color: "#C4B5FD",
-                                  fontSize: 11,
-                                  marginTop: 5,
-                                  lineHeight: 16,
-                                }}
-                              >
-                                {entry.note}
-                              </Text>
-                            ) : null}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ) : null}
-
-                {Array.isArray(worshipFlowInsights.mixingTips) &&
-                worshipFlowInsights.mixingTips.length > 0 ? (
-                  <View>
-                    <Text
-                      style={{
-                        color: "#A78BFA",
-                        fontSize: 11,
-                        fontWeight: "800",
-                        marginBottom: 6,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      FOH Mixing Tips
-                    </Text>
-                    {worshipFlowInsights.mixingTips.slice(0, 5).map((tip, index) => (
-                      <Text
-                        key={`mix_tip_${index}`}
-                        style={{ color: "#E9D5FF", fontSize: 12, lineHeight: 18 }}
-                      >
-                        • {tip}
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
-
-                {Array.isArray(worshipFlowInsights.arrangementTips) &&
-                worshipFlowInsights.arrangementTips.length > 0 ? (
-                  <View>
-                    <Text
-                      style={{
-                        color: "#A78BFA",
-                        fontSize: 11,
-                        fontWeight: "800",
-                        marginBottom: 6,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Arrangement Tips
-                    </Text>
-                    {worshipFlowInsights.arrangementTips.slice(0, 4).map((tip, index) => (
-                      <Text
-                        key={`arrangement_tip_${index}`}
-                        style={{ color: "#E9D5FF", fontSize: 12, lineHeight: 18 }}
-                      >
-                        • {tip}
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
-
-                {worshipFlowInsights.transitionTip ? (
-                  <View
-                    style={{
-                      backgroundColor: "#1B1235",
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: "#4C1D95",
-                      padding: 10,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#A78BFA",
-                        fontSize: 11,
-                        fontWeight: "800",
-                        textTransform: "uppercase",
-                        marginBottom: 4,
-                      }}
-                    >
-                      Transition Advice
-                    </Text>
-                    <Text
-                      style={{ color: "#F5F3FF", fontSize: 12, lineHeight: 18 }}
-                    >
-                      {worshipFlowInsights.transitionTip}
-                    </Text>
-                  </View>
-                ) : null}
-              </>
-            ) : (
-              <Text
-                style={{
-                  color: "#C4B5FD",
-                  fontSize: 12,
-                  lineHeight: 18,
-                }}
-              >
-                Analyze this song to get Worship Freely probability, section energy,
-                FOH tips, arrangement advice, and transition guidance.
-              </Text>
+            {brainRunning && (
+              <View style={styles.brainProgressTrack}>
+                <View style={[styles.brainProgressFill, { width: `${Math.round(brainProgress)}%` }]} />
+              </View>
             )}
-          </View>
-        )}
+          </TouchableOpacity>
+
+          {/* ── Brain Results Panel ─────────────────────────────────────────── */}
+          {brainResult && !brainRunning && (() => {
+            const wf  = brainResult.waveform?.analysis || brainResult.waveform || {};
+            const arr = brainResult.arrangement || {};
+            const devList = brainResult.devices?.detected_devices || brainResult.devices || {};
+            const devNames = Object.keys(devList).filter(k => devList[k]);
+            const stemsJob = brainResult.stems;
+            const worship = brainResult.worshipFlow || worshipFlowInsights || null;
+            const waveformRuntime = brainResult.waveform?.runtime || null;
+            const waveformHealth = waveformRuntime?.health || null;
+            const abStatus = waveformRuntime?.abStatus || null;
+            const stemKeys = stemsJob?.result?.stems
+              ? Object.keys(stemsJob.result.stems)
+              : stemsJob?.result?.availableStems || [];
+            const hasStemsSuccess = stemKeys.length > 0;
+            const bpmVal = wf.bpm || arr.bpm || null;
+            const keyVal = wf.key || arr.key || null;
+            const sectionCount = (wf.sections || arr.sections || []).length;
+            const dur = wf.duration_ms ? `${Math.round(wf.duration_ms / 1000)}s` : null;
+            const worshipFreelyPct = worship?.worshipFreelyLikelihood != null
+              ? Math.round(
+                  Math.max(0, Math.min(1, Number(worship.worshipFreelyLikelihood || 0))) * 100,
+                )
+              : null;
+            const waveformHealthLabel =
+              waveformHealth?.status ||
+              waveformHealth?.state ||
+              waveformHealth?.health ||
+              (waveformHealth ? 'online' : null);
+            const waveformHealthTone = String(waveformHealthLabel || '').toLowerCase();
+            const activeRig =
+              abStatus?.activeRig ||
+              abStatus?.active_rig ||
+              abStatus?.active ||
+              null;
+            const cueCount = Array.isArray(wf?.cues) ? wf.cues.length : 0;
+
+            return (
+              <View style={styles.brainResultPanel}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                  <View style={styles.brainOnlineDot} />
+                  <Text style={styles.brainResultTitle}>Brain Analysis Complete</Text>
+                </View>
+
+                <View style={styles.brainMetricsRow}>
+                  {bpmVal ? (
+                    <View style={styles.brainMetricBox}>
+                      <Text style={styles.brainMetricVal}>{bpmVal}</Text>
+                      <Text style={styles.brainMetricLabel}>BPM</Text>
+                    </View>
+                  ) : null}
+                  {keyVal ? (
+                    <View style={styles.brainMetricBox}>
+                      <Text style={styles.brainMetricVal}>{keyVal}</Text>
+                      <Text style={styles.brainMetricLabel}>KEY</Text>
+                    </View>
+                  ) : null}
+                  {sectionCount > 0 ? (
+                    <View style={styles.brainMetricBox}>
+                      <Text style={styles.brainMetricVal}>{sectionCount}</Text>
+                      <Text style={styles.brainMetricLabel}>SECTIONS</Text>
+                    </View>
+                  ) : null}
+                  {dur ? (
+                    <View style={styles.brainMetricBox}>
+                      <Text style={styles.brainMetricVal}>{dur}</Text>
+                      <Text style={styles.brainMetricLabel}>DURATION</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {(waveformHealthLabel || activeRig || cueCount > 0) && (
+                  <View style={styles.brainRuntimePanel}>
+                    <Text style={styles.brainRuntimeTitle}>🌐 Waveform Runtime</Text>
+                    <View style={styles.brainRuntimePills}>
+                      {waveformHealthLabel ? (
+                        <View style={styles.brainRuntimePill}>
+                          <Text style={styles.brainRuntimePillLabel}>Health</Text>
+                          <Text
+                            style={[
+                              styles.brainRuntimePillValue,
+                              waveformHealthTone.includes('ok') || waveformHealthTone.includes('online') || waveformHealthTone.includes('healthy')
+                                ? styles.brainRuntimeGood
+                                : styles.brainRuntimeWarn,
+                            ]}
+                          >
+                            {String(waveformHealthLabel).toUpperCase()}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {activeRig ? (
+                        <View style={styles.brainRuntimePill}>
+                          <Text style={styles.brainRuntimePillLabel}>A/B</Text>
+                          <Text style={styles.brainRuntimePillValue}>
+                            Rig {String(activeRig).toUpperCase()}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {cueCount > 0 ? (
+                        <View style={styles.brainRuntimePill}>
+                          <Text style={styles.brainRuntimePillLabel}>Cues</Text>
+                          <Text style={styles.brainRuntimePillValue}>{cueCount}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                )}
+
+                {(hasStemsSuccess || brainResult.stemsError) && (
+                  <View style={styles.brainResultRow}>
+                    <Text style={styles.brainResultRowLabel}>🎚 Stems</Text>
+                    <Text style={[styles.brainResultRowVal, hasStemsSuccess ? { color: '#34D399' } : { color: '#F87171' }]}>
+                      {hasStemsSuccess
+                        ? stemKeys.join(' · ')
+                        : brainResult.stemsError || 'Failed'}
+                    </Text>
+                  </View>
+                )}
+                {stemsJob && hasStemsSuccess && (
+                  <TouchableOpacity
+                    style={styles.brainOpenStemsBtn}
+                    onPress={() => navigation.navigate('StemMixer', { song: currentSong, job: stemsJob })}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.brainOpenStemsBtnText}>Open Stem Mixer →</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.brainResultRow}>
+                  <Text style={styles.brainResultRowLabel}>🎛 Devices</Text>
+                  <Text style={[styles.brainResultRowVal, devNames.length > 0 ? { color: '#34D399' } : { color: '#6B7280' }]}>
+                    {devNames.length > 0
+                      ? devNames.join(', ')
+                      : 'No MIDI devices detected'}
+                  </Text>
+                </View>
+
+                {arr.instrumentNotes && Object.keys(arr.instrumentNotes).length > 0 && (
+                  <View style={styles.brainResultRow}>
+                    <Text style={styles.brainResultRowLabel}>🎼 AI Arrangement</Text>
+                    <Text style={[styles.brainResultRowVal, { color: '#818CF8' }]}>
+                      {Object.keys(arr.instrumentNotes).join(' · ')}
+                    </Text>
+                  </View>
+                )}
+
+                {(worshipFreelyPct !== null || worship?.tempoFeel || worship?.transitionTip) && (
+                  <View style={styles.brainResultRow}>
+                    <Text style={styles.brainResultRowLabel}>🙏 Worship Flow</Text>
+                    <Text style={[styles.brainResultRowVal, { color: '#C4B5FD' }]}>
+                      {[
+                        worshipFreelyPct !== null ? `${worshipFreelyPct}% freely` : null,
+                        worship?.tempoFeel ? String(worship.tempoFeel).toUpperCase() : null,
+                        worship?.transitionTip || null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                )}
+
+                {brainResult.worshipFlowError && (
+                  <Text style={{ color: '#F59E0B', fontSize: 11, marginTop: 6 }}>
+                    ⚠ Worship Flow: {brainResult.worshipFlowError}
+                  </Text>
+                )}
+
+                {brainResult.fatalError && (
+                  <Text style={{ color: '#F87171', fontSize: 11, marginTop: 6 }}>
+                    ⚠ {brainResult.fatalError}
+                  </Text>
+                )}
+              </View>
+            );
+          })()}
+
+        </View>
 
         {/* ── AI Song Recommendations ── */}
         <TouchableOpacity
@@ -2542,26 +2359,81 @@ export default function SongDetailScreen({ route, navigation }) {
           activeOpacity={0.8}
           disabled={aiRecommendLoading}
         >
+          {aiRecommendLoading
+            ? <ActivityIndicator size="small" color="#a5b4fc" />
+            : null}
           <Text style={{ color:'#c7d2fe', fontWeight:'700', fontSize:14 }}>
-            {aiRecommendLoading ? '⏳ Getting recommendations…' : '✨ AI: What plays well next?'}
+            {aiRecommendLoading ? 'Finding matches…' : '✨ What plays well next?'}
           </Text>
         </TouchableOpacity>
-        {Array.isArray(aiRecommendations) && aiRecommendations.length > 0 && (
-          <View style={{ backgroundColor:'#0f172a', borderRadius:16, padding:14, marginTop:8, gap:10,
+
+        {aiRecommendations?.recs?.length > 0 && (
+          <View style={{ backgroundColor:'#0f172a', borderRadius:16, padding:14, marginTop:8,
             borderWidth:1, borderColor:'#1e293b' }}>
-            <Text style={{ color:'#818cf8', fontWeight:'700', fontSize:12, letterSpacing:1, textTransform:'uppercase' }}>
-              AI Recommendations
-            </Text>
-            {aiRecommendations.map((r, i) => (
-              <View key={i} style={{ borderTopWidth: i > 0 ? 1 : 0, borderTopColor:'#1e293b', paddingTop: i > 0 ? 8 : 0 }}>
-                <Text style={{ color:'#f1f5f9', fontWeight:'700', fontSize:14 }}>{r.title}</Text>
-                <Text style={{ color:'#94a3b8', fontSize:12 }}>{r.artist}{r.suggestedKey ? `  •  Key: ${r.suggestedKey}` : ''}</Text>
-                {r.reason ? <Text style={{ color:'#64748b', fontSize:12, marginTop:2 }}>{r.reason}</Text> : null}
+            {/* Header row */}
+            <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+              <Text style={{ color:'#818cf8', fontWeight:'700', fontSize:12, letterSpacing:1, textTransform:'uppercase' }}>
+                Songs that flow well next
+              </Text>
+              <TouchableOpacity onPress={() => setAiRecommendations(null)}>
+                <Text style={{ color:'#475569', fontSize:12 }}>✕ Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Current themes row */}
+            {aiRecommendations.themes?.length > 0 && (
+              <View style={{ flexDirection:'row', flexWrap:'wrap', gap:4, marginBottom:10 }}>
+                <Text style={{ color:'#64748b', fontSize:11, marginRight:2 }}>This song:</Text>
+                {aiRecommendations.themes.slice(0, 4).map((theme, ti) => (
+                  <View key={ti} style={{ backgroundColor:'#1e1b4b', borderRadius:6, paddingHorizontal:7, paddingVertical:2 }}>
+                    <Text style={{ color:'#a5b4fc', fontSize:10, fontWeight:'600' }}>
+                      {theme.replace(/_/g, ' ')}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Recommendation list */}
+            {aiRecommendations.recs.map((r, i) => (
+              <View key={i} style={{
+                borderTopWidth: i > 0 ? 1 : 0, borderTopColor:'#1e293b',
+                paddingTop: i > 0 ? 10 : 0, marginTop: i > 0 ? 2 : 0,
+              }}>
+                <View style={{ flexDirection:'row', alignItems:'flex-start', justifyContent:'space-between' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={{ color:'#f1f5f9', fontWeight:'700', fontSize:14 }}>{r.title}</Text>
+                    <Text style={{ color:'#94a3b8', fontSize:12, marginTop:1 }}>
+                      {[r.artist, r.suggestedKey ? `Key: ${r.suggestedKey}` : null, r.bpm ? `${r.bpm} BPM` : null]
+                        .filter(Boolean).join('  •  ')}
+                    </Text>
+                    {r.reason ? (
+                      <Text style={{ color:'#7c8fa0', fontSize:12, marginTop:3, fontStyle:'italic' }}>
+                        "{r.reason}"
+                      </Text>
+                    ) : null}
+                    {r.themes?.length > 0 && (
+                      <View style={{ flexDirection:'row', flexWrap:'wrap', gap:3, marginTop:4 }}>
+                        {r.themes.slice(0, 3).map((t, ti) => (
+                          <View key={ti} style={{ backgroundColor:'#0c1a2e', borderRadius:5,
+                            paddingHorizontal:6, paddingVertical:1, borderWidth:1, borderColor:'#1e3a5f' }}>
+                            <Text style={{ color:'#60a5fa', fontSize:10 }}>{t.replace(/_/g, ' ')}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                  {/* Score indicator */}
+                  <View style={{ alignItems:'center', minWidth:36 }}>
+                    <Text style={{ color: r.score >= 0.7 ? '#34d399' : r.score >= 0.4 ? '#fbbf24' : '#64748b',
+                      fontSize:13, fontWeight:'800' }}>
+                      {r.score ? `${Math.round(r.score * 100)}%` : ''}
+                    </Text>
+                    <Text style={{ color:'#334155', fontSize:9 }}>match</Text>
+                  </View>
+                </View>
               </View>
             ))}
-            <TouchableOpacity onPress={() => setAiRecommendations(null)}>
-              <Text style={{ color:'#475569', fontSize:12, textAlign:'center', marginTop:4 }}>Dismiss</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -2636,17 +2508,9 @@ export default function SongDetailScreen({ route, navigation }) {
           autoCapitalize="none"
         />
 
-        {/* Chart action button — single smart action */}
-        <TouchableOpacity
-          style={[styles.autoRecognizeBtn, { marginTop: 10, opacity: aiChartLoading ? 0.6 : 1 }]}
-          onPress={handleSmartAnalyze}
-          disabled={aiChartLoading}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.autoRecognizeText}>
-            {aiChartLoading ? '⏳ Analyzing…' : '✦ Smart Analyze'}
-          </Text>
-        </TouchableOpacity>
+        <Text style={[styles.mediaSub, { marginTop: 10, marginBottom: 0 }]}>
+          CineStage Brain above handles all processing. This editor stays focused on manual chart edits and Brain-generated arrangement previews.
+        </Text>
 
         {/* AI instrument picker + result */}
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
@@ -3071,18 +2935,23 @@ export default function SongDetailScreen({ route, navigation }) {
                                 <View style={{ marginTop:8, backgroundColor:'#0f172a', borderRadius:8, padding:10,
                                                borderWidth:1, borderColor:'#1e3a5f' }}>
                                   <Text style={{ color:'#34d399', fontSize:12, fontWeight:'700', marginBottom:2 }}>
-                                    ✓ {keysPresetResult.preset_name || keysPresetResult.name || keysPresetType}
+                                    ✓ {keysPresetType}
                                   </Text>
-                                  {keysPresetResult.program_number !== undefined && (
+                                  {keysPresetResult.message ? (
                                     <Text style={{ color:'#94a3b8', fontSize:11 }}>
-                                      Program: {keysPresetResult.program_number} · Bank: {keysPresetResult.bank || 0}
+                                      {keysPresetResult.message}
                                     </Text>
-                                  )}
-                                  {(keysPresetResult.description || keysPresetResult.content) && (
+                                  ) : null}
+                                  {keysPresetResult.preset_path ? (
                                     <Text style={{ color:'#94a3b8', fontSize:11, marginTop:4 }}>
-                                      {keysPresetResult.description || keysPresetResult.content}
+                                      Preset: {keysPresetResult.preset_path}
                                     </Text>
-                                  )}
+                                  ) : null}
+                                  {keysPresetResult.midi_file_path ? (
+                                    <Text style={{ color:'#94a3b8', fontSize:11, marginTop:4 }}>
+                                      MIDI: {keysPresetResult.midi_file_path}
+                                    </Text>
+                                  ) : null}
                                 </View>
                               )}
                             </View>
@@ -3332,6 +3201,15 @@ const styles = StyleSheet.create({
   },
   cineBtnDim: { opacity: 0.4 },
   cineBtnText: { color: "#818CF8", fontWeight: "700", fontSize: 13 },
+  deleteBtn: {
+    backgroundColor: "#2A0F14",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: "#7F1D1D",
+  },
+  deleteBtnText: { color: "#FCA5A5", fontWeight: "700", fontSize: 13 },
 
   arrangeDivider: {
     height: 1,
@@ -3348,20 +3226,192 @@ const styles = StyleSheet.create({
     color: "#E5E7EB",
     fontSize: 13,
     lineHeight: 21,
-    fontFamily: "monospace",
-    minHeight: 160,
-    textAlignVertical: "top",
+  fontFamily: "monospace",
+  minHeight: 160,
+  textAlignVertical: "top",
   },
 
-  autoRecognizeBtn: {
-    marginTop: 10,
-    backgroundColor: "#166534",
-    borderRadius: 8,
-    paddingVertical: 11,
-    paddingHorizontal: 20,
-    alignSelf: "flex-start",
+  // ── CineStage Brain super-button ─────────────────────────────────────────
+  brainHubSection: {
+    marginTop: 14,
+    backgroundColor: "#050814",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1E1B4B",
+    padding: 12,
   },
-  autoRecognizeText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  brainSuperBtn: {
+    backgroundColor: '#080D18',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#3730A3',
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  brainSuperBtnTitle: {
+    color: '#C7D2FE',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  brainSuperBtnSub: {
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    marginTop: 2,
+  },
+  brainProgressTrack: {
+    marginTop: 12,
+    height: 3,
+    backgroundColor: '#1E293B',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  brainProgressFill: {
+    height: 3,
+    backgroundColor: '#6366F1',
+    borderRadius: 2,
+  },
+
+  // ── Brain Results Panel ──────────────────────────────────────────────────
+  brainResultPanel: {
+    marginTop: 12,
+    backgroundColor: '#080D18',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 16,
+  },
+  brainResultTitle: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  brainOnlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+    shadowColor: '#10B981',
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  brainMetricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  brainMetricBox: {
+    backgroundColor: '#0F172A',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+    minWidth: 56,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+  },
+  brainMetricVal: {
+    color: '#C7D2FE',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  brainMetricLabel: {
+    color: '#4B5563',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: 2,
+  },
+  brainRuntimePanel: {
+    marginBottom: 14,
+    backgroundColor: '#0B1220',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 10,
+  },
+  brainRuntimeTitle: {
+    color: '#CBD5E1',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  brainRuntimePills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  brainRuntimePill: {
+    backgroundColor: '#111827',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    minWidth: 78,
+  },
+  brainRuntimePillLabel: {
+    color: '#64748B',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  brainRuntimePillValue: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  brainRuntimeGood: {
+    color: '#34D399',
+  },
+  brainRuntimeWarn: {
+    color: '#F59E0B',
+  },
+  brainResultRow: {
+    marginBottom: 8,
+    gap: 4,
+  },
+  brainResultRowLabel: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  brainResultRowVal: {
+    color: '#D1D5DB',
+    fontSize: 12,
+    fontWeight: '600',
+    flexWrap: 'wrap',
+  },
+  brainOpenStemsBtn: {
+    marginTop: 4,
+    marginBottom: 12,
+    backgroundColor: '#1E1B4B',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#4338CA',
+  },
+  brainOpenStemsBtnText: {
+    color: '#818CF8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 
   parseChartBtn: {
     backgroundColor: "#1C1A00",

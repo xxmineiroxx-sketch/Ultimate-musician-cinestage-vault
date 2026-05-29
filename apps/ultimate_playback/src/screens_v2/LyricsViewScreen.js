@@ -4,7 +4,7 @@
  * Supports manual scroll and auto-scroll toggle
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,27 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ROLE_LABELS } from '../models_v2/models';
 import ChartReferencePanel from '../components/ChartReferencePanel';
-import { CINESTAGE_URL } from '../../config/syncConfig';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+import { transposeChordChart, transposeNote } from '../utils/transpose';
+
+// Chromatic scale used for display-key calculation
+const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const NOTES_FLAT  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const FLAT_KEYS   = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb']);
+
+/** Return the display key after shifting `baseKey` by `semitones`. */
+function shiftKey(baseKey, semitones) {
+  if (!baseKey || semitones === 0) return baseKey || '';
+  const arr = FLAT_KEYS.has(baseKey) ? NOTES_FLAT : NOTES_SHARP;
+  let idx = arr.indexOf(baseKey);
+  if (idx === -1) {
+    // Try the other array
+    const alt = arr === NOTES_FLAT ? NOTES_SHARP : NOTES_FLAT;
+    idx = alt.indexOf(baseKey);
+    if (idx === -1) return baseKey;
+  }
+  return arr[((idx + semitones) % 12 + 12) % 12];
+}
 
 // ── Chord / Lyric Renderer ──────────────────────────────────────────────────
 // Matches common chord tokens: C, Cm, C7, Cmaj7, C/E, C#m, Db7sus4, etc.
@@ -96,46 +116,78 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const AUTO_SCROLL_INTERVAL = 80; // ms between scroll steps
 const AUTO_SCROLL_STEP = 1;      // px per step
 
+// ── Section parsing (shared with SetlistRunnerScreen) ─────────────────────────
+const SECTION_RE = /^(verse|chorus|bridge|pre.?chorus|intro|outro|tag|vamp|refrain|hook|interlude|breakdown|turn|ending)\b/i;
+function parseSections(text) {
+  if (!text) return [];
+  const sections = [];
+  const lines = text.split('\n');
+  let charOffset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim().replace(/^\[|\]$/g, '');
+    if (SECTION_RE.test(trimmed)) {
+      sections.push({ name: trimmed, charOffset, lineIndex: i });
+    }
+    charOffset += lines[i].length + 1;
+  }
+  return sections;
+}
+
 export default function LyricsViewScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { song, userRole, capo = 0, concertKey, myPart } = route.params || {};
   const [autoScroll, setAutoScroll] = useState(false);
   const [fontSize, setFontSize] = useState(20);
-  const [bassChart, setBassChart] = useState(null);   // AI-generated bass chart text
-  const [bassLoading, setBassLoading] = useState(false);
+  // Semitone shift applied on top of whatever key the chart arrived in
+  const [transposeStep, setTransposeStep] = useState(0);
+  const [activeLiveCueLabel, setActiveLiveCueLabel] = useState(null);
   const scrollRef = useRef(null);
   const scrollPos = useRef(0);
+  const contentH = useRef(0);
   const intervalRef = useRef(null);
+  const liveCueTimer = useRef(null);
+  const lastCueTs = useRef(0);
 
-  // CineStage: convert chord chart → bass fingering chart
-  async function generateBassChart() {
-    if (bassLoading) return;
-    setBassLoading(true);
-    try {
-      const res = await fetch(`${CINESTAGE_URL}/ai/instrument-charts/generate-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          song_title: song.title || '',
-          key:        concertKey || song.key || '',
-          time_sig:   song.timeSig || song.timeSignature || '4/4',
-          chord_chart: song.lyrics || '',
-          lyrics:     song.lyrics || '',
-          instrument: 'Bass',
-        }),
-      });
-      if (res.ok) {
+  // ── Live section cue — scroll to section by label ─────────────────────────
+  const scrollToSectionByLabel = (label) => {
+    if (!label || !song) return;
+    const text = song.lyrics || '';
+    const secs = parseSections(text);
+    const idx = secs.findIndex(s => s.name.toLowerCase().startsWith(label.toLowerCase()));
+    if (idx < 0) return;
+    const totalLen = text.length || 1;
+    const targetY = Math.max(0, (secs[idx].charOffset / totalLen) * contentH.current - 40);
+    scrollRef.current?.scrollTo({ y: targetY, animated: true });
+    scrollPos.current = targetY;
+  };
+
+  // ── Poll for live section cues from the leader ─────────────────────────────
+  useEffect(() => {
+    if (!song?.id) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${SYNC_URL}/sync/live-cue`, { headers: syncHeaders() });
+        if (!res.ok) return;
         const data = await res.json();
-        setBassChart(data.chart_text || data.notes || data.content || '');
-      } else {
-        setBassChart('Could not generate bass chart — check CineStage connection.');
-      }
-    } catch {
-      setBassChart('CineStage unreachable. Check your connection.');
-    } finally {
-      setBassLoading(false);
-    }
-  }
+        if (
+          data?.type === 'SECTION_CUE' &&
+          data?.sectionLabel &&
+          data?.timestamp &&
+          data.timestamp > lastCueTs.current
+        ) {
+          lastCueTs.current = data.timestamp;
+          scrollToSectionByLabel(data.sectionLabel);
+          setActiveLiveCueLabel(data.sectionLabel);
+          clearTimeout(liveCueTimer.current);
+          liveCueTimer.current = setTimeout(() => setActiveLiveCueLabel(null), 5000);
+        }
+      } catch { /* network errors are expected when offline */ }
+    }, 4000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(liveCueTimer.current);
+    };
+  }, [song?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll logic
   useEffect(() => {
@@ -163,12 +215,35 @@ export default function LyricsViewScreen({ navigation, route }) {
     );
   }
 
-  const lyrics = song.lyrics || '';
   const isInstrumentChart = !ROLE_LABELS[userRole] && !!userRole;
   const isVocal = !isInstrumentChart;
   const isBassRole = (userRole || '').toLowerCase() === 'bass';
   const roleLabel = ROLE_LABELS[userRole] || userRole || 'Vocalist';
   const rolePillIcon = isInstrumentChart ? '🎼' : '🎤';
+
+  // ── Transpose derived values ──────────────────────────────────────────────
+  const baseKey = (song.key || '').trim();         // key as delivered by SetlistScreen
+  const hasKey  = !!baseKey;
+
+  // The key currently displayed (after user's ± steps)
+  const displayKey = hasKey ? shiftKey(baseKey, transposeStep) : '';
+
+  // When capo is in play the chart uses capo shapes — the "concert" (sounding) key
+  // comes from the concertKey param; we also shift it by transposeStep.
+  const baseConcertKey = (concertKey || '').trim();
+  const displayConcertKey = baseConcertKey && capo > 0
+    ? shiftKey(baseConcertKey, transposeStep)
+    : '';
+
+  // Determine if new key should prefer flats
+  const preferFlats = FLAT_KEYS.has(displayKey);
+
+  // Apply transposition to the raw lyrics/chart text
+  const rawLyrics = song.lyrics || '';
+  const lyrics = useMemo(() => {
+    if (!transposeStep || isVocal) return rawLyrics;
+    return transposeChordChart(rawLyrics, transposeStep, preferFlats);
+  }, [rawLyrics, transposeStep, isVocal, preferFlats]);
 
   return (
     <View style={styles.container}>
@@ -191,11 +266,17 @@ export default function LyricsViewScreen({ navigation, route }) {
           {capo > 0 ? (
             <View style={[styles.keyBadge, styles.capoBadge]}>
               <Text style={styles.capoBadgeText}>Capo {capo}</Text>
-              {song.key ? <Text style={styles.capoShapesText}>{song.key} shapes</Text> : null}
+              {displayKey ? (
+                <Text style={styles.capoShapesText}>
+                  {displayKey} shapes{transposeStep !== 0 ? ` (${transposeStep > 0 ? '+' : ''}${transposeStep})` : ''}
+                </Text>
+              ) : null}
             </View>
-          ) : song.key ? (
+          ) : displayKey ? (
             <View style={styles.keyBadge}>
-              <Text style={styles.keyBadgeText}>{song.key}</Text>
+              <Text style={styles.keyBadgeText}>
+                {displayKey}{transposeStep !== 0 ? ` (${transposeStep > 0 ? '+' : ''}${transposeStep})` : ''}
+              </Text>
             </View>
           ) : null}
         </View>
@@ -234,6 +315,57 @@ export default function LyricsViewScreen({ navigation, route }) {
         </View>
       </View>
 
+      {/* Transpose control — shown only when song has a known key */}
+      {hasKey ? (
+        <View style={styles.transposeBar}>
+          <TouchableOpacity
+            style={styles.transposeBtn}
+            onPress={() => setTransposeStep((s) => s - 1)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.transposeBtnText}>−</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.transposeKeyPill}
+            onLongPress={() => setTransposeStep(0)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.transposeKeyText}>
+              {displayKey || baseKey}
+            </Text>
+            {transposeStep !== 0 ? (
+              <Text style={styles.transposeStepBadge}>
+                {transposeStep > 0 ? '+' : ''}{transposeStep}
+              </Text>
+            ) : null}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.transposeBtn}
+            onPress={() => setTransposeStep((s) => s + 1)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.transposeBtnText}>+</Text>
+          </TouchableOpacity>
+
+          {displayConcertKey ? (
+            <Text style={styles.transposeConcertKey}>
+              Concert: {displayConcertKey}
+            </Text>
+          ) : null}
+
+          {transposeStep !== 0 ? (
+            <TouchableOpacity
+              style={styles.transposeResetBtn}
+              onPress={() => setTransposeStep(0)}
+            >
+              <Text style={styles.transposeResetText}>Reset</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Your Part badge — shown for vocalists when admin has assigned parts */}
       {myPart && isVocal ? (
         <View style={styles.partBanner}>
@@ -255,6 +387,15 @@ export default function LyricsViewScreen({ navigation, route }) {
         </View>
       ) : null}
 
+      {/* Live section cue indicator */}
+      {activeLiveCueLabel ? (
+        <View style={styles.liveCuePill}>
+          <Text style={styles.liveCuePillText}>
+            {'\uD83C\uDFAF'} {activeLiveCueLabel.charAt(0).toUpperCase() + activeLiveCueLabel.slice(1)}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Lyrics */}
       <ScrollView
         ref={scrollRef}
@@ -264,34 +405,10 @@ export default function LyricsViewScreen({ navigation, route }) {
         onScroll={(e) => {
           scrollPos.current = e.nativeEvent.contentOffset.y;
         }}
+        onContentSizeChange={(_, h) => { contentH.current = h; }}
         scrollEventThrottle={16}
       >
         {renderChartLines(lyrics, fontSize, isVocal)}
-
-        {/* ── Bass: CineStage AI conversion button ── */}
-        {isBassRole && (
-          <View style={styles.bassAiSection}>
-            <TouchableOpacity
-              style={[styles.bassAiBtn, bassLoading && { opacity: 0.6 }]}
-              onPress={generateBassChart}
-              disabled={bassLoading}
-            >
-              {bassLoading
-                ? <ActivityIndicator size="small" color="#14B8A6" />
-                : <Text style={styles.bassAiBtnText}>
-                    {bassChart ? '↻ Regenerate Bass Chart' : '✦ Convert to Bass Chart'}
-                  </Text>
-              }
-            </TouchableOpacity>
-
-            {bassChart ? (
-              <View style={styles.bassAiResult}>
-                <Text style={styles.bassAiLabel}>🎸 CINESTAGE™ BASS CHART</Text>
-                <Text style={styles.bassAiText}>{bassChart}</Text>
-              </View>
-            ) : null}
-          </View>
-        )}
 
         {/* Charts & Sheets reference panel — guitar & bass roles only */}
         {!isVocal && (
@@ -533,46 +650,97 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Bass AI conversion
-  bassAiSection: {
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  bassAiBtn: {
+  // ── Transpose control bar ────────────────────────────────────────────────
+  transposeBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 13,
-    backgroundColor: '#042F2E',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#14B8A6',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#0C0C0C',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
     gap: 8,
   },
-  bassAiBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#14B8A6',
-  },
-  bassAiResult: {
-    marginTop: 14,
-    padding: 14,
-    backgroundColor: '#022020',
-    borderRadius: 12,
+  transposeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#1F2937',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#0F766E',
+    borderColor: '#374151',
   },
-  bassAiLabel: {
-    fontSize: 10,
+  transposeBtnText: {
+    fontSize: 20,
     fontWeight: '700',
-    color: '#14B8A6',
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-  bassAiText: {
-    fontSize: 14,
-    color: '#CCFBF1',
+    color: '#E5E7EB',
     lineHeight: 24,
-    fontFamily: 'Courier',
+  },
+  transposeKeyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    backgroundColor: '#1E1B4B',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#4F46E5',
+    gap: 6,
+    minWidth: 72,
+    justifyContent: 'center',
+  },
+  transposeKeyText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#C4B5FD',
+    letterSpacing: 0.5,
+  },
+  transposeStepBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+  transposeConcertKey: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  transposeResetBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: '#1F2937',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  transposeResetText: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '600',
+  },
+
+  // Live section cue indicator
+  liveCuePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginHorizontal: 16,
+    marginTop: 6,
+    marginBottom: 2,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    backgroundColor: '#2E1065',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#7C3AED',
+  },
+  liveCuePillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#DDD6FE',
+    letterSpacing: 0.3,
   },
 });

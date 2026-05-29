@@ -7,7 +7,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 
 const REMOTE_AUDIO_RE = /^https?:\/\//i;
-const AUDIO_CACHE_DIR = `${FileSystem.cacheDirectory || ''}up_practice_audio/`;
+const AUDIO_CACHE_DIR = `${FileSystem?.cacheDirectory ?? ''}up_practice_audio/`;
 
 class AudioEngine {
   constructor() {

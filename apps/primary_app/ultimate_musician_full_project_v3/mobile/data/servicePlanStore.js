@@ -17,10 +17,14 @@
  * }
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import { transposeChordChart, stripChordsForVocals } from "./chordTranspose";
 import { CHORD_CHART_INSTRUMENTS } from "./models";
+import { getScopedItem, setScopedItem } from "./orgScopedStorage";
+import {
+  recordSongServiceUsage,
+  removeSongServiceUsage,
+} from "./storage";
+import { upsertPlan } from "../services/cinestageDataAPI";
 
 const KEY = "um/service_plans/v2";
 
@@ -49,7 +53,7 @@ function normalizePlan(serviceId, plan) {
 
 async function getAll() {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await getScopedItem(KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -60,7 +64,7 @@ async function getAll() {
 
 async function saveAll(data) {
   try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(data));
+    await setScopedItem(KEY, JSON.stringify(data));
   } catch (err) {
     console.warn("[servicePlanStore] Failed to save:", err);
   }
@@ -72,7 +76,7 @@ export async function getPlanForService(serviceId) {
   return normalizePlan(serviceId, all[serviceId] || makePlan(serviceId));
 }
 
-/** Persist any plan shape for a service. */
+/** Persist any plan shape for a service (local + cloud). */
 export async function savePlanForService(serviceId, plan) {
   const all = await getAll();
   all[serviceId] = {
@@ -81,11 +85,15 @@ export async function savePlanForService(serviceId, plan) {
     updatedAt: Date.now(),
   };
   await saveAll(all);
+  // Cloud sync — fire-and-forget, won't break if offline
+  upsertPlan(serviceId, all[serviceId]).catch((e) =>
+    console.warn('[ServicePlan] Cloud sync failed:', e.message),
+  );
   return all[serviceId];
 }
 
 /** Add a song from the library to this service's setlist (no duplicates). */
-export async function addSongToService(serviceId, song) {
+export async function addSongToService(serviceId, song, serviceMeta = {}) {
   if (!serviceId) {
     throw new Error("Missing service id for this setlist.");
   }
@@ -111,19 +119,34 @@ export async function addSongToService(serviceId, song) {
     vocalAssignments: [],
     voicePartAudio: {},
   };
-  return savePlanForService(serviceId, {
+  const nextPlan = await savePlanForService(serviceId, {
     ...plan,
     songs: [...plan.songs, item],
   });
+  recordSongServiceUsage(songId, {
+    serviceId,
+    serviceDate: serviceMeta?.serviceDate || serviceMeta?.date || "",
+    serviceTitle: serviceMeta?.serviceTitle || serviceMeta?.title || "",
+  }).catch((error) =>
+    console.warn("[servicePlanStore] Failed to record song usage:", error),
+  );
+  return nextPlan;
 }
 
 /** Remove a song item by its plan item id. */
 export async function removeSongFromService(serviceId, itemId) {
   const plan = await getPlanForService(serviceId);
-  return savePlanForService(serviceId, {
+  const removedSong = plan.songs.find((s) => s.id === itemId);
+  const nextPlan = await savePlanForService(serviceId, {
     ...plan,
     songs: plan.songs.filter((s) => s.id !== itemId),
   });
+  if (removedSong?.songId) {
+    removeSongServiceUsage(removedSong.songId, serviceId).catch((error) =>
+      console.warn("[servicePlanStore] Failed to remove song usage:", error),
+    );
+  }
+  return nextPlan;
 }
 
 /** Update a song item's transposedKey or notes. */

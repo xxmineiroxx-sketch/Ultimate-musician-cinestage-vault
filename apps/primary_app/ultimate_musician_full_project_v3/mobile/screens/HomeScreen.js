@@ -14,6 +14,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 
+import {
+  getScopedItem,
+  getScopedRecordKey,
+  getScopedRecordPrefix,
+  getScopedStorageKey,
+  listScopedRecordKeys,
+  setScopedItem,
+} from "../data/orgScopedStorage";
 import { SYNC_URL, syncHeaders } from "./config";
 import { useAuth } from "../context/AuthContext";
 import { getPlanForService } from "../data/servicePlanStore";
@@ -29,6 +37,7 @@ const SERVICES_KEY = "um/services/v1";
 const PLANS_KEY = "um/service_plans/v2";
 const BLOCKOUTS_KEY = "um/blockouts/v1";
 const DELETED_SERVICES_KEY = "um/services/deleted/v1";
+const VOCAL_ASSIGNMENTS_PREFIX = "um/vocals/v1";
 
 function normalizeOrgRole(role) {
   if (role === "owner" || role === "org_owner") return "org_owner";
@@ -70,21 +79,23 @@ function normalizePlansMap(rawPlans) {
 async function pushLibraryToServer() {
   const [songsRaw, peopleRaw, servicesRaw, plansRaw, blockoutsRaw, deletedServicesRaw] =
     await Promise.all([
-      AsyncStorage.getItem(SONGS_KEY),
-      AsyncStorage.getItem(PEOPLE_KEY),
-      AsyncStorage.getItem(SERVICES_KEY),
-      AsyncStorage.getItem(PLANS_KEY),
-      AsyncStorage.getItem(BLOCKOUTS_KEY),
-      AsyncStorage.getItem(DELETED_SERVICES_KEY),
+      getScopedItem(SONGS_KEY),
+      getScopedItem(PEOPLE_KEY),
+      getScopedItem(SERVICES_KEY),
+      getScopedItem(PLANS_KEY),
+      getScopedItem(BLOCKOUTS_KEY),
+      getScopedItem(DELETED_SERVICES_KEY),
     ]);
   // Collect all vocal assignment keys (um/vocals/v1/{serviceId})
-  const allKeys = await AsyncStorage.getAllKeys();
-  const vocalKeys = allKeys.filter((k) => k.startsWith("um/vocals/v1/"));
+  const [vocalKeys, vocalPrefix] = await Promise.all([
+    listScopedRecordKeys(VOCAL_ASSIGNMENTS_PREFIX),
+    getScopedRecordPrefix(VOCAL_ASSIGNMENTS_PREFIX),
+  ]);
   const vocalPairs =
     vocalKeys.length > 0 ? await AsyncStorage.multiGet(vocalKeys) : [];
   const vocalAssignments = {};
   for (const [key, val] of vocalPairs) {
-    const serviceId = key.replace("um/vocals/v1/", "");
+    const serviceId = key.replace(vocalPrefix, "");
     vocalAssignments[serviceId] = safeParse(val, {});
   }
   const res = await fetch(`${SYNC_SERVER}/sync/library-push`, {
@@ -102,7 +113,7 @@ async function pushLibraryToServer() {
   });
   const data = await res.json();
   if (res.ok) {
-    await AsyncStorage.setItem(DELETED_SERVICES_KEY, JSON.stringify([]));
+    await setScopedItem(DELETED_SERVICES_KEY, JSON.stringify([]));
   }
   return data;
 }
@@ -121,24 +132,29 @@ async function pullLibraryFromServer() {
   } = await res.json();
 
   const writes = [];
+  const songsStorageKey = await getScopedStorageKey(SONGS_KEY);
+  const peopleStorageKey = await getScopedStorageKey(PEOPLE_KEY);
+  const servicesStorageKey = await getScopedStorageKey(SERVICES_KEY);
+  const plansStorageKey = await getScopedStorageKey(PLANS_KEY);
+  const blockoutsStorageKey = await getScopedStorageKey(BLOCKOUTS_KEY);
 
   // Songs — merge by id
   if (songs.length > 0) {
-    const existing = safeParse(await AsyncStorage.getItem(SONGS_KEY), []);
+    const existing = safeParse(await getScopedItem(SONGS_KEY), []);
     const map = Object.fromEntries(existing.map((s) => [s.id, s]));
     for (const s of songs) {
       if (s?.id) map[s.id] = s;
     }
-    writes.push([SONGS_KEY, JSON.stringify(Object.values(map))]);
+    writes.push([songsStorageKey, JSON.stringify(Object.values(map))]);
   }
   // People — merge by id
   if (people.length > 0) {
-    const existing = safeParse(await AsyncStorage.getItem(PEOPLE_KEY), []);
+    const existing = safeParse(await getScopedItem(PEOPLE_KEY), []);
     const map = Object.fromEntries(existing.map((p) => [p.id, p]));
     for (const p of people) {
       if (p?.id) map[p.id] = p;
     }
-    writes.push([PEOPLE_KEY, JSON.stringify(Object.values(map))]);
+    writes.push([peopleStorageKey, JSON.stringify(Object.values(map))]);
   }
   const normalizedServices = Array.isArray(services)
     ? services.filter((service) => service?.id)
@@ -146,12 +162,12 @@ async function pullLibraryFromServer() {
   const serviceIds = new Set(normalizedServices.map((service) => service.id));
 
   // Services — authoritative replace so remote deletions remove stale local rows.
-  writes.push([SERVICES_KEY, JSON.stringify(normalizedServices)]);
+  writes.push([servicesStorageKey, JSON.stringify(normalizedServices)]);
 
   // Service plans — merge with server payload, then prune plans for deleted services.
   {
     const existing = normalizePlansMap(
-      safeParse(await AsyncStorage.getItem(PLANS_KEY), {}),
+      safeParse(await getScopedItem(PLANS_KEY), {}),
     );
     const remotePlans = normalizePlansMap(plans);
     const nextPlans = {};
@@ -159,24 +175,27 @@ async function pullLibraryFromServer() {
     for (const [serviceId, plan] of Object.entries(mergedPlans)) {
       if (serviceIds.has(serviceId)) nextPlans[serviceId] = plan;
     }
-    writes.push([PLANS_KEY, JSON.stringify(nextPlans)]);
+    writes.push([plansStorageKey, JSON.stringify(nextPlans)]);
   }
   // Vocal assignments — each serviceId is its own key
   for (const [serviceId, data] of Object.entries(vocalAssignments)) {
     if (data && Object.keys(data).length > 0) {
-      writes.push([`um/vocals/v1/${serviceId}`, JSON.stringify(data)]);
+      writes.push([
+        await getScopedRecordKey(VOCAL_ASSIGNMENTS_PREFIX, serviceId),
+        JSON.stringify(data),
+      ]);
     }
   }
   // Blockouts — merge by email+date
   if (blockouts.length > 0) {
-    const existing = safeParse(await AsyncStorage.getItem(BLOCKOUTS_KEY), []);
+    const existing = safeParse(await getScopedItem(BLOCKOUTS_KEY), []);
     const seen = new Set(existing.map((b) => `${b.email}|${b.date}`));
     const merged = [...existing];
     for (const b of blockouts) {
       if (b?.email && b?.date && !seen.has(`${b.email}|${b.date}`))
         merged.push(b);
     }
-    writes.push([BLOCKOUTS_KEY, JSON.stringify(merged)]);
+    writes.push([blockoutsStorageKey, JSON.stringify(merged)]);
   }
 
   if (writes.length > 0) await AsyncStorage.multiSet(writes);
@@ -314,6 +333,9 @@ export default function HomeScreen({ navigation }) {
   const [pendingProposals, setPendingProposals] = useState(0);
   const [upcomingService, setUpcomingService] = useState(null);
   const [upcomingSongCount, setUpcomingSongCount] = useState(0);
+  const [isParentOrg, setIsParentOrg] = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null); // null | "past_due" | "active" | "free"
+  const [orgPrimaryColor, setOrgPrimaryColor] = useState(null); // null means use default #6366F1
 
   async function fetchPendingProposals() {
     try {
@@ -398,10 +420,33 @@ export default function HomeScreen({ navigation }) {
         if (res.ok) {
           const data = await res.json();
           if (data.role) setUserRole(normalizeOrgRole(data.role));
+          // isParentOrg: true when this org has child orgs (multi-campus director)
+          if (data.isParentOrg) setIsParentOrg(true);
         }
       } catch {
         /* keep default */
       }
+    })();
+    // Also check AsyncStorage flag for parent org (set during onboarding / org profile)
+    (async () => {
+      try {
+        const flag = await AsyncStorage.getItem("um_is_parent_org");
+        if (flag === "true") setIsParentOrg(true);
+      } catch { /* skip */ }
+    })();
+    // Load subscription status from cache (BillingScreen keeps it up to date)
+    (async () => {
+      try {
+        const status = await AsyncStorage.getItem("um_subscription_status");
+        if (status) setSubscriptionStatus(status);
+      } catch { /* skip */ }
+    })();
+    // Load org primary branding color (set by OrganizationScreen after branding save)
+    (async () => {
+      try {
+        const color = await AsyncStorage.getItem("um_primary_color");
+        if (color) setOrgPrimaryColor(color);
+      } catch { /* skip */ }
     })();
     fetchPendingProposals();
   }, [loadUpcomingService]);
@@ -456,6 +501,21 @@ export default function HomeScreen({ navigation }) {
         />
       }
     >
+      {/* Past-due billing warning banner */}
+      {subscriptionStatus === "past_due" && (
+        <TouchableOpacity
+          style={styles.pastDueBanner}
+          onPress={() => navigation.navigate("Billing")}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.pastDueBannerIcon}>⚠️</Text>
+          <Text style={styles.pastDueBannerText}>
+            Payment past due — some features may be restricted.
+          </Text>
+          <Text style={styles.pastDueBannerLink}>Update Payment →</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Header */}
       <View style={[styles.header, R.isAnyTablet && styles.headerTablet]}>
         <View>
@@ -500,7 +560,7 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.heroTitle}>{heroTitle}</Text>
             <Text style={styles.heroDesc}>{heroDesc}</Text>
           </View>
-          <View style={styles.heroBtn}>
+          <View style={[styles.heroBtn, orgPrimaryColor && { backgroundColor: orgPrimaryColor, shadowColor: orgPrimaryColor }]}>
             <Text style={styles.heroBtnText}>{heroButtonLabel}</Text>
           </View>
         </TouchableOpacity>
@@ -518,31 +578,35 @@ export default function HomeScreen({ navigation }) {
 
       {/* Grid Layout for Tablet (2x2 or 4x1) */}
       <View style={styles.tileGrid}>
-        {MODES.map((m) => (
-          <TouchableOpacity
-            key={m.route}
-            style={[
-              styles.modeCard,
-              { borderColor: m.border, backgroundColor: m.gradient[0] + "99" },
-              R.isAnyTablet && styles.modeCardTablet,
-            ]}
-            activeOpacity={0.8}
-            onPress={() => navigation.navigate(m.route, m.params || {})}
-          >
-            <View style={styles.modeCardInner}>
-              <View
-                style={[
-                  styles.modeIconWrapTablet,
-                  { backgroundColor: m.accent + "33", borderColor: m.accent + "80" },
-                ]}
-              >
-                <Text style={styles.modeIconTablet}>{m.icon}</Text>
+        {MODES.map((m) => {
+          // Apply org primary color to the Planning Center tile only
+          const tileAccent = (orgPrimaryColor && m.route === "PlanningCenter") ? orgPrimaryColor : m.accent;
+          return (
+            <TouchableOpacity
+              key={m.route}
+              style={[
+                styles.modeCard,
+                { borderColor: m.border, backgroundColor: m.gradient[0] + "99" },
+                R.isAnyTablet && styles.modeCardTablet,
+              ]}
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate(m.route, m.params || {})}
+            >
+              <View style={styles.modeCardInner}>
+                <View
+                  style={[
+                    styles.modeIconWrapTablet,
+                    { backgroundColor: tileAccent + "33", borderColor: tileAccent + "80" },
+                  ]}
+                >
+                  <Text style={styles.modeIconTablet}>{m.icon}</Text>
+                </View>
+                <Text style={styles.modeTitleTablet}>{m.title}</Text>
+                <Text style={styles.modeSubTablet}>{m.subtitle}</Text>
               </View>
-              <Text style={styles.modeTitleTablet}>{m.title}</Text>
-              <Text style={styles.modeSubTablet}>{m.subtitle}</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Quick tools */}
@@ -558,55 +622,68 @@ export default function HomeScreen({ navigation }) {
       >
         System Configuration
       </Text>
-      <View style={[styles.quickRow, R.isAnyTablet && styles.quickRowTablet]}>
-        {[
-          { label: "Library", icon: "📚", route: "Library" },
-          { label: "Setlist", icon: "🎵", route: "Setlist" },
-          { label: "Stems", icon: "🎚️", route: "StemsCenter" },
-          { label: "Bridge", icon: "🌉", route: "BridgeSetup" },
-          ...(userRole === "org_owner" || userRole === "admin"
-            ? [{ label: "Organization", icon: "🏢", route: "Organization" }]
-            : []),
-          { label: "Messages", icon: "✉️", route: "MessageCenter" },
-          { label: "Proposals", icon: "📝", route: "Proposals", badge: pendingProposals },
-          { label: "My Availability", icon: "📅", route: "BlockoutCalendar" },
-          { label: "Settings", icon: "⚙️", route: "Settings" },
-          {
-            label: "Sign Out",
-            icon: "🚪",
-            onPress: async () => {
-              await logout();
-              navigation.reset({ index: 0, routes: [{ name: "Landing" }] });
-            },
-          },
-        ].map((item) => (
-          <TouchableOpacity
-            key={item.label}
-            style={[styles.quickPill, R.isAnyTablet && styles.quickPillTablet]}
-            onPress={item.onPress || (() => navigation.navigate(item.route))}
-          >
-            {R.isAnyTablet && (
-              <Text style={styles.quickPillIcon}>{item.icon}</Text>
-            )}
-            <Text
-              style={[
-                styles.quickPillText,
-                R.isAnyTablet && { fontSize: R.font(14) },
-                item.label === "Sign Out" && { color: "#EF4444" },
-              ]}
-            >
-              {item.label}
-            </Text>
-            {item.badge > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>
-                  {item.badge > 99 ? "99+" : item.badge}
+      {isParentOrg && (
+        <TouchableOpacity
+          style={styles.centralCommandBanner}
+          onPress={() => navigation.navigate("CentralAdmin")}
+          activeOpacity={0.8}
+        >
+          <View style={styles.centralCommandBannerInner}>
+            <Text style={styles.centralCommandIcon}>🏛️</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.centralCommandTitle}>Central Command</Text>
+              <Text style={styles.centralCommandSub}>Manage all campuses from here</Text>
+            </View>
+            <Text style={styles.centralCommandArrow}>›</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+      {(() => {
+        const isAdmin = userRole === "org_owner" || userRole === "admin";
+        const signOut = {
+          label: "Sign Out", icon: "🚪",
+          onPress: async () => { await logout(); navigation.reset({ index: 0, routes: [{ name: "Landing" }] }); },
+        };
+        const sysItems = [
+          { label: "Library",          icon: "📚", route: "Library" },
+          { label: "Setlist",          icon: "🎵", route: "Setlist" },
+          { label: "Stems",            icon: "🎚️", route: "StemsCenter" },
+          { label: "Bridge",           icon: "🌉", route: "BridgeSetup" },
+          ...(isAdmin ? [{ label: "Organization", icon: "🏢", route: "Organization" }] : []),
+          { label: "Messages",         icon: "✉️", route: "MessageCenter" },
+          { label: "Proposals",        icon: "📝", route: "Proposals", badge: pendingProposals },
+          { label: "My Availability",  icon: "📅", route: "BlockoutCalendar" },
+          { label: "Notifications",    icon: "🔔", route: "NotificationPrefs" },
+          { label: "Settings",         icon: "⚙️", route: "Settings" },
+          signOut,
+        ];
+        const rows = [sysItems.slice(0, 5), sysItems.slice(5)];
+        return rows.map((row, ri) => (
+          <View key={ri} style={styles.sysGridRow}>
+            {row.map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                style={styles.sysTile}
+                onPress={item.onPress || (() => navigation.navigate(item.route))}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sysTileIcon}>{item.icon}</Text>
+                <Text style={[styles.sysTileLabel, item.label === "Sign Out" && { color: "#EF4444" }]}>
+                  {item.label}
                 </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        ))}
-      </View>
+                {item.badge > 0 && (
+                  <View style={styles.sysBadge}>
+                    <Text style={styles.sysBadgeText}>{item.badge > 99 ? "99+" : item.badge}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+            {row.length < 5 && Array.from({ length: 5 - row.length }).map((_, i) => (
+              <View key={`empty-${i}`} style={[styles.sysTile, { opacity: 0 }]} />
+            ))}
+          </View>
+        ));
+      })()}
     </ScrollView>
   );
 }
@@ -826,22 +903,89 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   heroBtnText: { color: "#FFF", fontSize: 16, fontWeight: "800" },
-  quickRow: {
+  sysGridRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
+    marginBottom: 8,
   },
-  quickRowTablet: { gap: 10 },
-  quickPill: {
+  sysTile: {
+    flex: 1,
     backgroundColor: "#0B1120",
-    borderRadius: 999,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#1F2937",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderColor: "#1E2A40",
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 90,
+    position: "relative",
+  },
+  sysTileIcon: {
+    fontSize: 26,
+  },
+  sysTileLabel: {
+    color: "#6B7280",
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+    letterSpacing: 0.2,
+  },
+  sysBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    backgroundColor: "#EF4444",
+    borderRadius: 999,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sysBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  centralCommandBanner: {
+    backgroundColor: "#1E1B4B",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#4F46E5",
+    marginBottom: 16,
+    shadowColor: "#6366F1",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  centralCommandBannerInner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  centralCommandIcon: {
+    fontSize: 28,
+  },
+  centralCommandTitle: {
+    color: "#E0E7FF",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  centralCommandSub: {
+    color: "#818CF8",
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  centralCommandArrow: {
+    color: "#6366F1",
+    fontSize: 26,
+    fontWeight: "300",
   },
   notifBadge: {
     backgroundColor: "#EF4444",
@@ -858,18 +1002,33 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 13,
   },
-  quickPillTablet: {
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+  // Past-due billing banner
+  pastDueBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    backgroundColor: "#450A0A",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#EF4444",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    marginBottom: 16,
+    gap: 8,
   },
-  quickPillIcon: { fontSize: 16 },
-  quickPillText: {
-    color: "#9CA3AF",
+  pastDueBannerIcon: {
+    fontSize: 16,
+  },
+  pastDueBannerText: {
+    flex: 1,
+    color: "#FCA5A5",
     fontSize: 13,
     fontWeight: "600",
+    lineHeight: 18,
+  },
+  pastDueBannerLink: {
+    color: "#EF4444",
+    fontSize: 13,
+    fontWeight: "800",
+    textDecorationLine: "underline",
   },
 });

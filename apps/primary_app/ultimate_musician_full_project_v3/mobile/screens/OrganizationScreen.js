@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, ScrollView, Modal, Platform,
+  ActivityIndicator, Alert, ScrollView, Modal, Platform, Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
 
 import BranchManagerScreen from "./BranchManagerScreen";
 import {
-  SYNC_URL, syncHeaders, SYNC_ORG_ID, hasBranchConfig, getActiveOrgId,
+  SYNC_URL, syncHeaders, SYNC_ORG_ID, hasBranchConfig, getActiveOrgId, API_URL,
 } from "./config";
 
 const PIN_KEY = "org.owner.pin";
@@ -52,6 +53,17 @@ export default function OrganizationScreen({ navigation }) {
   const [pinConfirm,       setPinConfirm]       = useState("");
   const [storedPin,        setStoredPin]        = useState(null);
 
+  // Branding state
+  const [logoUrl,         setLogoUrl]         = useState("");
+  const [primaryColor,    setPrimaryColor]    = useState("");
+  const [secondaryColor,  setSecondaryColor]  = useState("");
+  const [churchWebsite,   setChurchWebsite]   = useState("");
+  const [timezone,        setTimezone]        = useState("America/New_York");
+  const [languagePref,    setLanguagePref]    = useState("en");
+  const [brandingSaving,  setBrandingSaving]  = useState(false);
+  const [showTzPicker,    setShowTzPicker]    = useState(false);
+  const [showLangPicker,  setShowLangPicker]  = useState(false);
+
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,13 +75,15 @@ export default function OrganizationScreen({ navigation }) {
       const pin = await AsyncStorage.getItem(PIN_KEY).catch(() => null);
       setStoredPin(pin);
 
-      const [profile, library, rolesMap, roleInfo] = await Promise.all([
+      const [profile, library, rolesMap, roleInfo, csProfile] = await Promise.all([
         fetchJson(`${SYNC_URL}/sync/org/profile`,  { headers: syncHeaders() }),
         fetchJson(`${SYNC_URL}/sync/library-pull`, { headers: syncHeaders() }),
         fetchJson(`${SYNC_URL}/sync/roles`,        { headers: syncHeaders() }),
         myEmail
           ? fetchJson(`${SYNC_URL}/sync/role?email=${encodeURIComponent(myEmail)}`, { headers: syncHeaders() })
           : Promise.resolve({ role: null }),
+        // CineStage backend — branding fields live here
+        fetchJson(`${API_URL}/api/orgs/profile`, { headers: syncHeaders() }).catch(() => ({})),
       ]);
 
       const name = profile.name || "";
@@ -77,6 +91,14 @@ export default function OrganizationScreen({ navigation }) {
       setEditName(name);
       setOrgId(profile.orgId || SYNC_ORG_ID || "");
       setCreatedAt(profile.createdAt || "");
+
+      // Branding fields from CineStage backend
+      setLogoUrl(csProfile.logoUrl || "");
+      setPrimaryColor(csProfile.primaryColor || "");
+      setSecondaryColor(csProfile.secondaryColor || "");
+      setChurchWebsite(csProfile.churchWebsite || "");
+      setTimezone(csProfile.timezone || "America/New_York");
+      setLanguagePref(csProfile.languagePref || "en");
 
       const people = library.people || [];
       setMembers(people);
@@ -183,6 +205,65 @@ export default function OrganizationScreen({ navigation }) {
     }
   }
 
+  // ── Branding functions ────────────────────────────────────────────────────
+  async function pickLogo() {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission needed", "Allow photo library access to pick a logo.");
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+        base64: false,
+      });
+      if (result.canceled) return;
+      const uri = result.assets?.[0]?.uri || result.uri;
+      if (!uri) return;
+      // For now we store the local URI as a placeholder and save via PATCH.
+      // A real upload would POST to /api/upload/logo and get back a CDN URL.
+      setLogoUrl(uri);
+      await saveBranding({ logoUrl: uri });
+    } catch (err) {
+      Alert.alert("Error", "Could not open photo library.");
+    }
+  }
+
+  async function saveBranding(overrides = {}) {
+    setBrandingSaving(true);
+    try {
+      const payload = {
+        logoUrl:       overrides.logoUrl       !== undefined ? overrides.logoUrl       : logoUrl,
+        primaryColor:  overrides.primaryColor  !== undefined ? overrides.primaryColor  : primaryColor,
+        secondaryColor:overrides.secondaryColor!== undefined ? overrides.secondaryColor: secondaryColor,
+        churchWebsite: overrides.churchWebsite !== undefined ? overrides.churchWebsite : churchWebsite,
+        timezone:      overrides.timezone      !== undefined ? overrides.timezone      : timezone,
+        languagePref:  overrides.languagePref  !== undefined ? overrides.languagePref  : languagePref,
+      };
+      const res = await fetch(`${API_URL}/api/orgs/branding`, {
+        method: "PATCH",
+        headers: syncHeaders(),
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = await res.json();
+      // Persist primary color for HomeScreen to pick up
+      if (updated.primaryColor) {
+        await AsyncStorage.setItem("um_primary_color", updated.primaryColor);
+      } else {
+        await AsyncStorage.removeItem("um_primary_color");
+      }
+      Alert.alert("Saved", "Branding settings updated.");
+    } catch {
+      Alert.alert("Error", "Could not save branding. Check your connection.");
+    } finally {
+      setBrandingSaving(false);
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const since = createdAt
     ? new Date(createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
@@ -197,6 +278,36 @@ export default function OrganizationScreen({ navigation }) {
     admin: "#F59E0B", org_owner: "#EF4444",
   };
   const ROLE_ICON = { worship_leader: "🎵", md: "🎛", admin: "👑", org_owner: "🏛" };
+
+  const BRAND_COLORS = [
+    { hex: "#6366F1", label: "Indigo"  },
+    { hex: "#7C3AED", label: "Purple"  },
+    { hex: "#2563EB", label: "Blue"    },
+    { hex: "#0D9488", label: "Teal"    },
+    { hex: "#16A34A", label: "Green"   },
+    { hex: "#D97706", label: "Amber"   },
+    { hex: "#DC2626", label: "Red"     },
+    { hex: "#6B7280", label: "Gray"    },
+  ];
+
+  const TIMEZONES = [
+    { value: "America/New_York",    label: "Eastern (ET)"    },
+    { value: "America/Chicago",     label: "Central (CT)"    },
+    { value: "America/Denver",      label: "Mountain (MT)"   },
+    { value: "America/Los_Angeles", label: "Pacific (PT)"    },
+    { value: "America/Phoenix",     label: "Arizona (AZ)"    },
+    { value: "America/Anchorage",   label: "Alaska (AKT)"    },
+    { value: "Pacific/Honolulu",    label: "Hawaii (HST)"    },
+    { value: "Europe/London",       label: "London (GMT/BST)"},
+    { value: "Europe/Berlin",       label: "Berlin (CET)"    },
+    { value: "America/Sao_Paulo",   label: "São Paulo (BRT)" },
+  ];
+
+  const LANGUAGES = [
+    { value: "en", label: "English"    },
+    { value: "pt", label: "Portuguese" },
+    { value: "es", label: "Spanish"    },
+  ];
 
   const isOwner = viewerRole === "org_owner";
   const canManagePermissions = viewerRole === "org_owner" || viewerRole === "admin";
@@ -452,6 +563,171 @@ export default function OrganizationScreen({ navigation }) {
         </>
       )}
 
+      {/* ── BRANDING SECTION (org_owner only) ─────────────────────────── */}
+      {isOwner && (
+        <>
+          {/* Timezone picker modal */}
+          <Modal visible={showTzPicker} transparent animationType="fade" onRequestClose={() => setShowTzPicker(false)}>
+            <View style={s.overlay}>
+              <View style={s.modalBox}>
+                <Text style={s.modalTitle}>Select Timezone</Text>
+                {TIMEZONES.map((tz) => (
+                  <TouchableOpacity
+                    key={tz.value}
+                    style={[s.pickerRow, timezone === tz.value && s.pickerRowSelected]}
+                    onPress={() => { setTimezone(tz.value); setShowTzPicker(false); }}
+                  >
+                    <Text style={[s.pickerRowText, timezone === tz.value && s.pickerRowTextSelected]}>
+                      {tz.label}
+                    </Text>
+                    {timezone === tz.value && <Text style={s.pickerCheck}>✓</Text>}
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={[s.modalBtnSecondary, { marginTop: 8 }]} onPress={() => setShowTzPicker(false)}>
+                  <Text style={s.modalBtnSecondaryTxt}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Language picker modal */}
+          <Modal visible={showLangPicker} transparent animationType="fade" onRequestClose={() => setShowLangPicker(false)}>
+            <View style={s.overlay}>
+              <View style={s.modalBox}>
+                <Text style={s.modalTitle}>Select Language</Text>
+                {LANGUAGES.map((lang) => (
+                  <TouchableOpacity
+                    key={lang.value}
+                    style={[s.pickerRow, languagePref === lang.value && s.pickerRowSelected]}
+                    onPress={() => { setLanguagePref(lang.value); setShowLangPicker(false); }}
+                  >
+                    <Text style={[s.pickerRowText, languagePref === lang.value && s.pickerRowTextSelected]}>
+                      {lang.label}
+                    </Text>
+                    {languagePref === lang.value && <Text style={s.pickerCheck}>✓</Text>}
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity style={[s.modalBtnSecondary, { marginTop: 8 }]} onPress={() => setShowLangPicker(false)}>
+                  <Text style={s.modalBtnSecondaryTxt}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          <View style={s.brandingHeader}>
+            <Text style={s.brandingHeaderIcon}>🎨</Text>
+            <View>
+              <Text style={s.brandingHeaderTitle}>Branding</Text>
+              <Text style={s.brandingHeaderSub}>Customize how your team sees the app</Text>
+            </View>
+          </View>
+
+          {/* Logo */}
+          <View style={s.card}>
+            <Text style={s.cardLabel}>Church Logo</Text>
+            <View style={s.logoRow}>
+              {logoUrl ? (
+                <Image source={{ uri: logoUrl }} style={s.logoImage} resizeMode="cover" />
+              ) : (
+                <View style={s.logoPlaceholder}>
+                  <Text style={s.logoPlaceholderText}>
+                    {(orgName || "?").charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={{ flex: 1, gap: 8 }}>
+                <TouchableOpacity style={s.changeLogoBtn} onPress={pickLogo}>
+                  <Text style={s.changeLogoBtnText}>Change Logo</Text>
+                </TouchableOpacity>
+                {logoUrl ? (
+                  <TouchableOpacity
+                    style={[s.changeLogoBtn, { borderColor: "#374151" }]}
+                    onPress={() => { setLogoUrl(""); saveBranding({ logoUrl: "" }); }}
+                  >
+                    <Text style={[s.changeLogoBtnText, { color: "#6B7280" }]}>Remove</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          </View>
+
+          {/* Primary Color */}
+          <View style={s.card}>
+            <Text style={s.cardLabel}>Primary Color</Text>
+            <View style={s.swatchRow}>
+              {BRAND_COLORS.map((c) => (
+                <TouchableOpacity
+                  key={c.hex}
+                  style={[s.swatch, { backgroundColor: c.hex }, primaryColor === c.hex && s.swatchSelected]}
+                  onPress={() => setPrimaryColor(c.hex)}
+                  activeOpacity={0.8}
+                >
+                  {primaryColor === c.hex && <Text style={s.swatchCheck}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </View>
+            {primaryColor ? (
+              <View style={s.colorPreviewRow}>
+                <View style={[s.colorPreviewDot, { backgroundColor: primaryColor }]} />
+                <Text style={s.colorPreviewText}>{primaryColor}</Text>
+                <TouchableOpacity onPress={() => setPrimaryColor("")}>
+                  <Text style={s.colorClearBtn}>✕ Clear</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Church Website */}
+          <View style={s.card}>
+            <Text style={s.cardLabel}>Church Website</Text>
+            <TextInput
+              style={s.input}
+              value={churchWebsite}
+              onChangeText={setChurchWebsite}
+              placeholder="https://yourchurch.com"
+              placeholderTextColor="#4B5563"
+              autoCapitalize="none"
+              keyboardType="url"
+              returnKeyType="done"
+            />
+          </View>
+
+          {/* Timezone */}
+          <View style={s.card}>
+            <Text style={s.cardLabel}>Timezone</Text>
+            <TouchableOpacity style={s.pickerTrigger} onPress={() => setShowTzPicker(true)}>
+              <Text style={s.pickerTriggerText}>
+                {TIMEZONES.find((t) => t.value === timezone)?.label || timezone}
+              </Text>
+              <Text style={s.pickerTriggerArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Language */}
+          <View style={s.card}>
+            <Text style={s.cardLabel}>Language</Text>
+            <TouchableOpacity style={s.pickerTrigger} onPress={() => setShowLangPicker(true)}>
+              <Text style={s.pickerTriggerText}>
+                {LANGUAGES.find((l) => l.value === languagePref)?.label || languagePref}
+              </Text>
+              <Text style={s.pickerTriggerArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Save branding button */}
+          <TouchableOpacity
+            style={[s.saveBtn, brandingSaving && s.saveBtnDisabled, { marginBottom: 24 }]}
+            onPress={() => saveBranding()}
+            disabled={brandingSaving}
+          >
+            {brandingSaving
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={s.saveBtnText}>💾 Save Branding</Text>
+            }
+          </TouchableOpacity>
+        </>
+      )}
+
     </ScrollView>
   );
 }
@@ -570,6 +846,34 @@ const s = StyleSheet.create({
   memberEmail:      { color: "#6B7280", fontSize: 12 },
   roleChip:         { backgroundColor: "#1E293B", borderRadius: 4, paddingHorizontal: 7, paddingVertical: 3 },
   roleChipText:     { color: "#9CA3AF", fontSize: 11, fontWeight: "500" },
+
+  // ── Branding ──
+  brandingHeader:     { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8, marginBottom: 16 },
+  brandingHeaderIcon: { fontSize: 32 },
+  brandingHeaderTitle:{ color: "#F9FAFB", fontSize: 18, fontWeight: "700" },
+  brandingHeaderSub:  { color: "#6B7280", fontSize: 13, marginTop: 2 },
+  logoRow:            { flexDirection: "row", alignItems: "center", gap: 16 },
+  logoImage:          { width: 72, height: 72, borderRadius: 12, backgroundColor: "#1E293B" },
+  logoPlaceholder:    { width: 72, height: 72, borderRadius: 12, backgroundColor: "#1E1B4B", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#4F46E5" },
+  logoPlaceholderText:{ color: "#818CF8", fontSize: 28, fontWeight: "900" },
+  changeLogoBtn:      { borderRadius: 8, borderWidth: 1, borderColor: "#818CF8", paddingVertical: 9, paddingHorizontal: 14, alignItems: "center" },
+  changeLogoBtnText:  { color: "#818CF8", fontSize: 13, fontWeight: "700" },
+  swatchRow:          { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
+  swatch:             { width: 36, height: 36, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  swatchSelected:     { borderWidth: 2.5, borderColor: "#FFF" },
+  swatchCheck:        { color: "#FFF", fontSize: 16, fontWeight: "900" },
+  colorPreviewRow:    { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  colorPreviewDot:    { width: 18, height: 18, borderRadius: 9 },
+  colorPreviewText:   { color: "#9CA3AF", fontSize: 13, fontFamily: "monospace", flex: 1 },
+  colorClearBtn:      { color: "#6B7280", fontSize: 12, fontWeight: "600" },
+  pickerTrigger:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#1E293B", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12 },
+  pickerTriggerText:  { color: "#F9FAFB", fontSize: 15 },
+  pickerTriggerArrow: { color: "#6B7280", fontSize: 22, fontWeight: "300" },
+  pickerRow:          { paddingVertical: 13, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: "#1E293B", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  pickerRowSelected:  { backgroundColor: "#1E1B4B", borderRadius: 6 },
+  pickerRowText:      { color: "#9CA3AF", fontSize: 15 },
+  pickerRowTextSelected:{ color: "#E0E7FF", fontWeight: "700" },
+  pickerCheck:        { color: "#818CF8", fontSize: 16, fontWeight: "900" },
 
   // ── Admin info grid ──
   infoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginBottom: 16 },

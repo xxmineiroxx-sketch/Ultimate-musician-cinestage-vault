@@ -1,7 +1,7 @@
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
+import { FileSystem, DocumentPicker, pickDocument, getFileInfo } from '../utils/platformFs';
+import { isDesktop, bridge, pickAudioFileDesktop } from '../utils/desktopBridge';
 import { unzip } from "fflate";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -161,6 +161,10 @@ export default function StemsCenterScreen({ navigation, route }) {
   const [scanningMt, setScanningMt] = useState(false);
   const [scanStep, setScanStep] = useState("");
 
+  // ── Poll attempt guard — resets on each new job submission ──
+  const pollAttemptsRef = useRef(0);
+  const MAX_POLL_ATTEMPTS = 30; // 5 min at 10s intervals
+
   const entitlements = getEntitlements(planTier);
 
   const loadSongs = useCallback(async () => {
@@ -243,10 +247,20 @@ export default function StemsCenterScreen({ navigation, route }) {
   // ── Local file import with ID3 auto-fill ──
   async function handlePickLocalAudio() {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "audio/*",
-        copyToCacheDirectory: true,
-      });
+      // If on desktop, use native Electron file picker
+      if (isDesktop && bridge) {
+        const file = await pickAudioFileDesktop();
+        if (file) {
+          setSourceUrl(file.uri);
+          if (!title) {
+            const nameNoExt = (file.name || "").replace(/\.[^.]+$/, "");
+            if (nameNoExt) setTitle(nameNoExt);
+          }
+        }
+        return;
+      }
+      // Otherwise use cross-platform picker
+      const res = await pickDocument({ type: ['audio/*'], copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
       setSourceUrl(asset.uri);
@@ -275,10 +289,7 @@ export default function StemsCenterScreen({ navigation, route }) {
 
   async function pickStemFile(slotName) {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "audio/*",
-        copyToCacheDirectory: true,
-      });
+      const res = await pickDocument({ type: ['audio/*'], copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
 
@@ -439,11 +450,7 @@ export default function StemsCenterScreen({ navigation, route }) {
   async function handlePickMultipleStems() {
     setPickingMt(true);
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "audio/*",
-        multiple: true,
-        copyToCacheDirectory: true,
-      });
+      const res = await pickDocument({ type: ['audio/*'], multiple: true, copyToCacheDirectory: true });
       if (res.canceled || !res.assets?.length) return;
 
       const detected = {};
@@ -516,7 +523,7 @@ export default function StemsCenterScreen({ navigation, route }) {
   async function handlePickZip() {
     setPickingMt(true);
     try {
-      const res = await DocumentPicker.getDocumentAsync({
+      const res = await pickDocument({
         type: ["application/zip", "application/x-zip-compressed", "application/octet-stream", "public.zip-archive"],
         copyToCacheDirectory: true,
       });
@@ -526,7 +533,7 @@ export default function StemsCenterScreen({ navigation, route }) {
 
       // Check file size — large ZIPs can't be held in JS memory
       const SIZE_LIMIT = 60 * 1024 * 1024; // 60 MB
-      const info = await FileSystem.getInfoAsync(asset.uri, { size: true }).catch(() => ({}));
+      const info = await getFileInfo(asset.uri, { size: true }).catch(() => ({}));
       if (info.size && info.size > SIZE_LIMIT) {
         const mb = Math.round(info.size / 1024 / 1024);
         const meta = parseMetaFromName(zipName);
@@ -826,6 +833,9 @@ export default function StemsCenterScreen({ navigation, route }) {
     setCineStageStatus("Separating stems");
 
     try {
+      // Reset poll counter for this new job
+      pollAttemptsRef.current = 0;
+
       const { job, fileUrl: resolvedSourceUrl } = await submitStemJob({
         sourceUrl: sourceUrl.trim(),
         title: title || "Imported Stems",
@@ -837,7 +847,12 @@ export default function StemsCenterScreen({ navigation, route }) {
       setProcessingProgress(20);
       const current = await pollStemJob(job.id, {
         initialJob: job,
+        maxPolls: MAX_POLL_ATTEMPTS,
         onUpdate: (nextJob, { polls, previousStatus }) => {
+          pollAttemptsRef.current = polls;
+          if (polls >= MAX_POLL_ATTEMPTS) {
+            throw new Error('Job timed out after 5 minutes. Please try again.');
+          }
           if (nextJob.status === "PENDING") {
             setProcessingStep(0);
             setProcessingProgress(Math.min(28, 20 + polls * 2));

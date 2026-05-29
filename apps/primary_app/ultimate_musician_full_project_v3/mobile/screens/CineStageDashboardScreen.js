@@ -189,14 +189,7 @@ export default function CineStageDashboardScreen({ navigation }) {
           <Text style={styles.emptyIcon}>🎛️</Text>
           <Text style={styles.emptyTitle}>No jobs yet</Text>
           <Text style={styles.emptyCaption}>
-            Run your first CineStage job from the{" "}
-            <Text
-              style={styles.emptyLink}
-              onPress={() => navigation.navigate("CineStage")}
-            >
-              CineStage screen
-            </Text>{" "}
-            or the{" "}
+            Run your first CineStage job from Song Details or the{" "}
             <Text
               style={styles.emptyLink}
               onPress={() => navigation.navigate("StemsCenter")}

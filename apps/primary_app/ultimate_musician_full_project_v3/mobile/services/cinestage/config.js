@@ -5,6 +5,8 @@ export const CINESTAGE_API_BASE_URL =
   global.__CINESTAGE_API_BASE_URL ||
   CINESTAGE_URL;
 
+export const CINESTAGE_REMOTE_API_BASE_URL = CINESTAGE_URL;
+
 export const CINESTAGE_WS_BASE_URL = CINESTAGE_API_BASE_URL
   .replace(/^https:/, "wss:")
   .replace(/^http:/, "ws:");

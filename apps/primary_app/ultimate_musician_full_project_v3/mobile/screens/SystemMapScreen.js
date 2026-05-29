@@ -183,7 +183,7 @@ export default function SystemMapScreen({ navigation }) {
         {/* Network info */}
         <View style={s.netBanner}>
           <Text style={s.netText}>
-            📡 Sync: ultimatelabs.pages.dev | CineStage: cinestage.studio-cinestage.workers.dev
+            📡 Sync: ultimatelabs.pages.dev | CineStage: cinestage.ultimatelabs.co
           </Text>
         </View>
 

@@ -9,9 +9,9 @@ import {
 
 const HTTP_URL_RE = /^https?:\/\/\S+$/i;
 const LOCAL_FILE_RE = /^(file|content|ph):\/\//i;
-const STEM_JOB_PENDING_INTERVAL_MS = 2000;
-const STEM_JOB_PROCESSING_INTERVAL_MS = 6000;
-const STEM_JOB_MAX_POLLS = 450;
+const STEM_JOB_PENDING_INTERVAL_MS   = 4000;   // 4s between PENDING polls
+const STEM_JOB_PROCESSING_INTERVAL_MS = 8000;   // 8s between PROCESSING polls
+const STEM_JOB_MAX_POLLS = 225;                  // 225 × ~8s ≈ 30 min max
 
 function sanitizeName(value, fallback = "audio") {
   const cleaned = String(value || "")
@@ -202,14 +202,30 @@ export async function kickStemJob({
 }
 
 export async function getStemJob(jobId) {
-  const response = await fetch(`${SYNC_URL}/sync/stems/job/${jobId}`, {
-    headers: syncHeaders(),
-  });
-  const job = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(job.error || JSON.stringify(job));
+  // 1. Try CF KV (authoritative for queue-submitted jobs)
+  try {
+    const response = await fetch(`${SYNC_URL}/sync/stems/job/${jobId}`, {
+      headers: syncHeaders(),
+    });
+    const job = await response.json().catch(() => null);
+    // If KV has a meaningful status (not just a default PENDING), use it
+    if (response.ok && job && job.status && job.status !== 'PENDING') {
+      return job;
+    }
+  } catch {
+    // CF KV unreachable — fall through to Container
   }
-  return job;
+
+  // 2. Fallback: query Container directly (DB-backed, works for legacy /jobs jobs)
+  try {
+    const r = await fetch(`${CINESTAGE_URL}/jobs/${encodeURIComponent(jobId)}`);
+    const job = await r.json().catch(() => ({}));
+    if (r.ok && job) return job;
+  } catch {
+    // Container unreachable
+  }
+
+  return { id: jobId, status: 'PENDING', result: null };
 }
 
 function getStemResultCount(job) {

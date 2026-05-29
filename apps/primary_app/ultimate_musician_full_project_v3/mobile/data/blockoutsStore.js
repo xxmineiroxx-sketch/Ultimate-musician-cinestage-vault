@@ -4,8 +4,7 @@
  * stay aligned, while keeping a local cache for offline fallback.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import { getScopedItem, setScopedItem } from "./orgScopedStorage";
 import { SYNC_URL, syncHeaders } from "../screens/config";
 
 const KEY = "um/blockouts/v1";
@@ -80,7 +79,7 @@ function mergeBlockouts(...lists) {
 
 async function getJSON(fallback) {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await getScopedItem(KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? mergeBlockouts(parsed) : fallback;
@@ -90,7 +89,7 @@ async function getJSON(fallback) {
 }
 
 async function setJSON(value) {
-  await AsyncStorage.setItem(KEY, JSON.stringify(mergeBlockouts(value)));
+  await setScopedItem(KEY, JSON.stringify(mergeBlockouts(value)));
 }
 
 async function fetchRemoteBlockouts(params = {}) {

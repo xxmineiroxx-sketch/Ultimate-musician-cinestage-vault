@@ -3,7 +3,7 @@
  * Live setlist from sync server — role-aware, with lyrics for vocalists
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,10 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
-  Linking,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserProfile, getAssignments } from '../services/storage';
 
 import { ROLE_LABELS } from '../models_v2/models';
@@ -30,52 +31,8 @@ import {
   isYouTubeUrl,
   mergeSetlistWithLibrary,
 } from '../utils/songMedia';
-
-function normalizeRoleKey(role) {
-  const raw = String(role || '').trim();
-  if (!raw) return '';
-
-  const lower = raw.toLowerCase();
-  const aliases = {
-    leader: 'worship_leader',
-    'worship leader': 'worship_leader',
-    'music director': 'music_director',
-    'vocal lead': 'lead_vocal',
-    'lead vocal': 'lead_vocal',
-    'lead vocals': 'lead_vocal',
-    'vocal bgv': 'bgv_1',
-    'bgv 1': 'bgv_1',
-    'bgv 2': 'bgv_2',
-    'bgv 3': 'bgv_3',
-    keys: 'keyboard',
-    keyboardist: 'keyboard',
-    'synth/pad': 'synth',
-    'electric guitar': 'electric_guitar',
-    guitarist: 'electric_guitar',
-    'acoustic guitar': 'acoustic_guitar',
-    'acoustic guitarist': 'acoustic_guitar',
-    bassist: 'bass',
-    drummer: 'drums',
-    vocalist: 'lead_vocal',
-    sound: 'sound_tech',
-    'sound tech': 'sound_tech',
-    'sound technician': 'sound_tech',
-    'sound engineer': 'sound_tech',
-    'foh engineer': 'foh_engineer',
-    'front of house': 'foh_engineer',
-    'monitor engineer': 'monitor_engineer',
-    'stream engineer': 'stream_engineer',
-    media: 'media_tech',
-    'media tech': 'media_tech',
-    'media technician': 'media_tech',
-    propresenter: 'media_tech',
-    'pro presenter': 'media_tech',
-    slides: 'media_tech',
-    lighting: 'media_tech',
-  };
-
-  return aliases[lower] || lower.replace(/\s+/g, '_');
-}
+import { normalizeRoleKey } from '../utils/roleUtils';
+import { promptCrossPlatform } from '../utils/promptCrossPlatform';
 
 // Roles that get lyrics / vocal part access.
 const VOCAL_ROLES = new Set([
@@ -397,7 +354,7 @@ function pickPreferredAssignment(assignments = []) {
   }, null);
 }
 
-const SETLIST_HIDE_AFTER_SERVICE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SETLIST_HIDE_AFTER_SERVICE_MS = 0; // expires at end of service day
 
 // ── Chord transposition & capo engine (ported from UM's chordTranspose.js) ──
 const NOTES_SHARP = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -520,38 +477,12 @@ function stripChordsForVocals(text) {
 }
 
 function parseServiceEndMs(assignment) {
-  const explicitEnd = assignment?.service_end_at || assignment?.end_at || assignment?.completed_at || assignment?.serviceDateTime;
-  if (explicitEnd) {
-    const endMs = new Date(explicitEnd).getTime();
-    if (Number.isFinite(endMs)) return endMs;
-  }
-
   const serviceDate = assignment?.service_date || assignment?.date;
   if (!serviceDate) return null;
-
-  // If service_date already has time (ISO), use it directly.
-  if (String(serviceDate).includes('T')) {
-    const withTimeMs = new Date(serviceDate).getTime();
-    if (Number.isFinite(withTimeMs)) return withTimeMs;
-  }
-
-  const timeRaw = assignment?.service_time || assignment?.time || '';
-  const m = String(timeRaw).match(/(\d{1,2}):(\d{2})/);
-  if (m) {
-    const hh = Math.max(0, Math.min(23, Number(m[1] || 0)));
-    const mm = Math.max(0, Math.min(59, Number(m[2] || 0)));
-    const dt = new Date(serviceDate);
-    if (Number.isFinite(dt.getTime())) {
-      dt.setHours(hh, mm, 0, 0);
-      return dt.getTime();
-    }
-  }
-
-  // Safe fallback: if no time exists, treat service end as end-of-day local.
-  const dt = new Date(serviceDate);
-  if (!Number.isFinite(dt.getTime())) return null;
-  dt.setHours(23, 59, 59, 999);
-  return dt.getTime();
+  // Always expire at end of the service calendar day (local time), regardless of service time.
+  const datePart = String(serviceDate).split('T')[0];
+  const dt = new Date(datePart + 'T23:59:59.999');
+  return Number.isFinite(dt.getTime()) ? dt.getTime() : null;
 }
 
 function isSetlistExpired(assignment, nowMs = Date.now()) {
@@ -587,8 +518,57 @@ export default function SetlistScreen({ navigation, route }) {
   const [worshipFlowInsights, setWorshipFlowInsights] = useState({});
   const [worshipFlowLoading, setWorshipFlowLoading]   = useState({});
   const [worshipFreelyActive, setWorshipFreelyActive] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const worshipFreelyTapCount = React.useRef(0);
   const worshipFreelyTapTimer = React.useRef(null);
+
+  // ── "We're Live" banner ───────────────────────────────────────────────────
+  const [liveBannerVisible, setLiveBannerVisible] = useState(false);
+  const [liveBannerTitle, setLiveBannerTitle] = useState('');
+  const liveBannerAnim = useRef(new Animated.Value(-60)).current;
+  const liveBannerOpacity = useRef(new Animated.Value(1)).current;
+  const liveBannerShown = useRef(false); // don't re-show for same arm event
+  const liveBannerHideTimer = useRef(null);
+
+  const showLiveBanner = useCallback((title) => {
+    clearTimeout(liveBannerHideTimer.current);
+    liveBannerOpacity.setValue(1);
+    setLiveBannerTitle(title || 'Service');
+    setLiveBannerVisible(true);
+    // Slide down from above
+    Animated.spring(liveBannerAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
+    // Auto-hide after 8 seconds
+    liveBannerHideTimer.current = setTimeout(() => {
+      Animated.timing(liveBannerOpacity, { toValue: 0, duration: 500, useNativeDriver: true }).start(() => {
+        setLiveBannerVisible(false);
+        liveBannerAnim.setValue(-60);
+        liveBannerOpacity.setValue(1);
+      });
+    }, 8000);
+  }, [liveBannerAnim, liveBannerOpacity]);
+
+  // Poll /sync/live-status every 10 seconds
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch(`${SYNC_URL}/sync/live-status`, { headers: syncHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.isLive && !liveBannerShown.current) {
+          liveBannerShown.current = true;
+          showLiveBanner(data.title || 'Service');
+        } else if (!data?.isLive) {
+          liveBannerShown.current = false;
+        }
+      } catch (_) {}
+    };
+    poll(); // immediate first check
+    const interval = setInterval(poll, 10000);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(liveBannerHideTimer.current);
+    };
+  }, [showLiveBanner]);
 
   useEffect(() => {
     loadData();
@@ -599,6 +579,70 @@ export default function SetlistScreen({ navigation, route }) {
     const unsubscribe = navigation.addListener('focus', loadData);
     return unsubscribe;
   }, [navigation]);
+
+  const fetchSetlist = useCallback(async (serviceId) => {
+    if (!serviceId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 8000);
+      try {
+        const [songsRes, pullRes] = await Promise.all([
+          fetch(
+            `${SYNC_URL}/sync/setlist?serviceId=${encodeURIComponent(serviceId)}`,
+            { signal: controller.signal, headers: syncHeaders() }
+          ),
+          fetch(
+            `${SYNC_URL}/sync/library-pull`,
+            { signal: controller.signal, headers: syncHeaders() }
+          ),
+        ]);
+        if (!songsRes.ok) throw new Error('Server error');
+        const songs = await songsRes.json();
+        if (pullRes.ok) {
+          const lib = await pullRes.json();
+          const _s = lib?.songs; const librarySongs = Array.isArray(_s) ? _s : Object.values(_s || lib?.library || {});
+          const merged = mergeSetlistWithLibrary(songs, librarySongs);
+          setSetlist(merged);
+          setVocalAssignments(lib.vocalAssignments?.[serviceId] || {});
+          setPeopleById(buildPeopleById(lib.people || []));
+          // Cache successful fetch for offline use
+          await AsyncStorage.setItem(`up/cache/setlist/${serviceId}`, JSON.stringify(songs)).catch(() => {});
+          await AsyncStorage.setItem('up/cache/library', JSON.stringify(librarySongs)).catch(() => {});
+          setIsOffline(false);
+        } else {
+          const merged = mergeSetlistWithLibrary(songs, []);
+          setSetlist(merged);
+          setPeopleById({});
+          // Cache at least the songs even if library-pull failed
+          await AsyncStorage.setItem(`up/cache/setlist/${serviceId}`, JSON.stringify(songs)).catch(() => {});
+          setIsOffline(false);
+        }
+      } finally {
+        clearTimeout(tid);
+      }
+    } catch (e) {
+      setPeopleById({});
+      // Network failed — try to load from cache
+      try {
+        const cachedSetlist = await AsyncStorage.getItem(`up/cache/setlist/${serviceId}`).catch(() => null);
+        const cachedLib = await AsyncStorage.getItem('up/cache/library').catch(() => null);
+        if (cachedSetlist) {
+          const songs = JSON.parse(cachedSetlist);
+          const lib = cachedLib ? JSON.parse(cachedLib) : [];
+          setSetlist(mergeSetlistWithLibrary(songs, lib));
+          setIsOffline(true);
+        } else {
+          setError('Could not load setlist.\nMake sure the sync server is running.');
+        }
+      } catch (_ce) {
+        setError('Could not load setlist.\nMake sure the sync server is running.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // When UM sends a playback trigger, params.serviceId changes — load that setlist directly
   useEffect(() => {
@@ -662,47 +706,6 @@ export default function SetlistScreen({ navigation, route }) {
       setSelectedInstrument(mapped);
     }
   };
-
-  const fetchSetlist = useCallback(async (serviceId) => {
-    if (!serviceId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 8000);
-      try {
-        const [songsRes, pullRes] = await Promise.all([
-          fetch(
-            `${SYNC_URL}/sync/setlist?serviceId=${encodeURIComponent(serviceId)}`,
-            { signal: controller.signal, headers: syncHeaders() }
-          ),
-          fetch(
-            `${SYNC_URL}/sync/library-pull`,
-            { signal: controller.signal, headers: syncHeaders() }
-          ),
-        ]);
-        if (!songsRes.ok) throw new Error('Server error');
-        const songs = await songsRes.json();
-        if (pullRes.ok) {
-          const lib = await pullRes.json();
-          const librarySongs = lib?.songs || lib?.library || [];
-          setSetlist(mergeSetlistWithLibrary(songs, librarySongs));
-          setVocalAssignments(lib.vocalAssignments?.[serviceId] || {});
-          setPeopleById(buildPeopleById(lib.people || []));
-        } else {
-          setSetlist(mergeSetlistWithLibrary(songs, []));
-          setPeopleById({});
-        }
-      } finally {
-        clearTimeout(tid);
-      }
-    } catch (e) {
-      setPeopleById({});
-      setError('Could not load setlist.\nMake sure the sync server is running.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const selectAssignment = (assignment) => {
     const svcAsns = assignments.filter(a => a.service_id === assignment.service_id);
@@ -771,21 +774,44 @@ export default function SetlistScreen({ navigation, route }) {
       });
   }, [vocalAssignments, peopleById]);
 
-  const openMediaReference = useCallback(async (song) => {
-    const mediaUrl = getSongMediaReferenceUrl(song, song?.stems, song?.harmonies);
-    if (!mediaUrl) {
-      Alert.alert('No Media Link', 'This song does not have a media reference link yet.');
-      return;
-    }
+  const openSongPlayback = useCallback((song, options = {}) => {
+    if (!song) return;
+    navigation.navigate('PersonalPractice', {
+      serviceId: selectedAssignment?.service_id,
+      songId: getSongLookupId(song) || song.id,
+      userRole: selectedAssignment?.role,
+      autoPlay: !!options.autoPlay,
+      autoPlayToken: options.autoPlay ? Date.now() : null,
+    });
+  }, [navigation, selectedAssignment?.role, selectedAssignment?.service_id]);
 
-    try {
-      const supported = await Linking.canOpenURL(mediaUrl);
-      if (!supported) throw new Error('unsupported');
-      await Linking.openURL(mediaUrl);
-    } catch {
-      Alert.alert('Open Media Failed', 'Could not open the song media link on this device.');
-    }
-  }, []);
+  const openSongMediaMode = useCallback((song) => {
+    if (!song) return;
+    const songStatusKey = getSongStatusKey(song);
+    const startIndex = Math.max(
+      0,
+      setlist.findIndex((entry) => getSongStatusKey(entry) === songStatusKey)
+    );
+    navigation.navigate('SetlistRunner', {
+      serviceId: selectedAssignment?.service_id,
+      songs: setlist,
+      startIndex,
+      songId: getSongLookupId(song) || song.id,
+      userRole: selectedAssignment?.role,
+      userRoles: serviceAssignments.map((assignment) => assignment?.role).filter(Boolean),
+      userProfile: profile,
+      vocalAssignments,
+      autoStartMedia: true,
+    });
+  }, [
+    navigation,
+    profile,
+    selectedAssignment?.role,
+    selectedAssignment?.service_id,
+    serviceAssignments,
+    setlist,
+    vocalAssignments,
+  ]);
 
   const checkStemsStatus = useCallback(async (song) => {
     const statusKey = getSongStatusKey(song);
@@ -818,25 +844,17 @@ export default function SetlistScreen({ navigation, route }) {
     const sourceUrl = urlOverride || song.youtubeLink || song.youtubeUrl || song.youtube || song.sourceUrl || '';
     const targetSongId = getSongLookupId(song) || song.id;
     if (!sourceUrl) {
-      // Prompt for a URL
-      Alert.prompt(
-        '🎚️ Request Stems',
-        `Paste a YouTube or audio URL for "${song.title || 'this song'}":`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Submit',
-            onPress: (url) => {
-              const trimmed = (url || '').trim();
-              if (!trimmed) return;
-              submitStemsJob(song, trimmed);
-            },
-          },
-        ],
-        'plain-text',
-        '',
-        'url'
-      );
+      // Prompt for a URL (cross-platform — Alert.prompt is iOS-only)
+      promptCrossPlatform({
+        title: '🎚️ Request Stems',
+        message: `Paste a YouTube or audio URL for "${song.title || 'this song'}":`,
+        onSubmit: (url) => {
+          const trimmed = (url || '').trim();
+          if (!trimmed) return;
+          submitStemsJob(song, trimmed);
+        },
+        onCancel: () => {},
+      });
       return;
     }
     setStemsSubmitting(prev => ({ ...prev, [getSongStatusKey(song)]: true }));
@@ -963,7 +981,10 @@ export default function SetlistScreen({ navigation, route }) {
     const myPart = !isSoundTech ? getMyVocalPart(lookupSongId) : null;
     const vocalLineup = (isSoundTech || isMediaTech) ? getSongVocalLineup(lookupSongId) : [];
     const statusKey = getSongStatusKey(song);
+    const mediaStatus = stemsStatus[statusKey] || null;
     const mediaUrl = getSongMediaReferenceUrl(song, song?.stems, song?.harmonies);
+    const hasStemPlayback = mediaStatus === 'available';
+    const hasMediaReference = !!mediaUrl;
     const tempoValue = song.tempo || song.bpm || null;
 
     // Resolve base chart: instrument-specific first, then master
@@ -1446,13 +1467,7 @@ export default function SetlistScreen({ navigation, route }) {
           {!isSoundTech && !isMediaTech && (
             <TouchableOpacity
               style={styles.practiceBtn}
-              onPress={() =>
-                navigation.navigate('PersonalPractice', {
-                  serviceId: selectedAssignment?.service_id,
-                  songId: getSongLookupId(song) || song.id,
-                  userRole: selectedAssignment?.role,
-                })
-              }
+              onPress={() => openSongPlayback(song, { autoPlay: true })}
               activeOpacity={0.8}
             >
               <Text style={styles.practiceBtnText}>🎧  Practice This Song</Text>
@@ -1462,11 +1477,11 @@ export default function SetlistScreen({ navigation, route }) {
           {!isSoundTech && !isMediaTech && mediaUrl ? (
             <TouchableOpacity
               style={[styles.practiceBtn, { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}
-              onPress={() => openMediaReference(song)}
+              onPress={() => openSongMediaMode(song)}
               activeOpacity={0.8}
             >
               <Text style={[styles.practiceBtnText, { color: '#93c5fd' }]}>
-                {isYouTubeUrl(mediaUrl) ? '▶  Open Song Media' : '▶  Play Song Audio'}
+                ▶  Media Player
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -1481,8 +1496,12 @@ export default function SetlistScreen({ navigation, route }) {
               <TouchableOpacity
                 style={[styles.practiceBtn, { backgroundColor: '#1e3a5f', borderColor: '#3b82f6' }]}
                 onPress={() => {
-                  if (mediaUrl) {
-                    openMediaReference(song);
+                  if (hasMediaReference) {
+                    openSongMediaMode(song);
+                    return;
+                  }
+                  if (hasStemPlayback) {
+                    openSongPlayback(song, { autoPlay: true });
                     return;
                   }
                   navigation.navigate('SetlistRunner', {
@@ -1499,7 +1518,11 @@ export default function SetlistScreen({ navigation, route }) {
                 activeOpacity={0.8}
               >
                 <Text style={[styles.practiceBtnText, { color: '#93c5fd' }]}>
-                  {mediaUrl ? (isYouTubeUrl(mediaUrl) ? '▶  Open Song Media' : '▶  Play Song Audio') : '▶  Play Setlist'}
+                  {hasMediaReference
+                    ? '▶  Media Player'
+                    : hasStemPlayback
+                      ? '▶  Practice Mode'
+                      : '▶  Play Setlist'}
                 </Text>
               </TouchableOpacity>
             );
@@ -1531,6 +1554,7 @@ export default function SetlistScreen({ navigation, route }) {
   }
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
@@ -1560,6 +1584,25 @@ export default function SetlistScreen({ navigation, route }) {
           <Text style={styles.wfActiveTxt}>WORSHIP FREELY — Tap to end</Text>
         </TouchableOpacity>
       )}
+
+      {isOffline && (
+        <View style={{ backgroundColor: '#78350F', paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ color: '#FDE68A', fontSize: 12, fontWeight: '700' }}>📡 Offline — showing cached data</Text>
+        </View>
+      )}
+
+      {/* We're Live animated banner */}
+      {liveBannerVisible ? (
+        <Animated.View
+          style={[
+            styles.liveBanner,
+            { transform: [{ translateY: liveBannerAnim }], opacity: liveBannerOpacity },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.liveBannerText}>🔴 LIVE — {liveBannerTitle}</Text>
+        </Animated.View>
+      ) : null}
 
       {/* Service selector pills — one per unique service_id */}
       {(() => {
@@ -1766,6 +1809,7 @@ export default function SetlistScreen({ navigation, route }) {
         </View>
       )}
     </ScrollView>
+    </View>
   );
 }
 
@@ -2434,4 +2478,48 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#DDD6FE',
   },
+
+  // We're Live banner
+  liveBanner: {
+    backgroundColor: '#065F46',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#34D399',
+  },
+  liveBannerText: {
+    color: '#ECFDF5',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+
+  // In-app media player modal
+  mediaModal: { flex: 1, backgroundColor: '#080C14' },
+  mediaModalHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingTop: 20, paddingBottom: 14,
+    borderBottomWidth: 1, borderBottomColor: '#1F2937',
+  },
+  mediaModalTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: '#E5E7EB' },
+  mediaModalClose: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#1F2937', alignItems: 'center', justifyContent: 'center',
+  },
+  mediaModalCloseText: { fontSize: 14, color: '#9CA3AF', fontWeight: '700' },
+  mediaHiddenWebView: { position: 'absolute', top: -9999, left: -9999, width: 1, height: 1 },
+  mediaAudioCard: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 32,
+  },
+  mediaAudioSong: { fontSize: 22, fontWeight: '800', color: '#F9FAFB', textAlign: 'center' },
+  mediaAudioArtist: { fontSize: 15, color: '#9CA3AF', textAlign: 'center' },
+  mediaPlayBtn: {
+    width: 90, height: 90, borderRadius: 45,
+    backgroundColor: '#1E1B4B', borderWidth: 2, borderColor: '#6366F1',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  mediaPlayIcon: { fontSize: 38, color: '#A78BFA' },
+  mediaHint: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
 });

@@ -1,6 +1,7 @@
-// CineStage REST API — start with ~/Desktop/start_cinestage.sh
-// On simulator: localhost:8000 | On device: 10.0.0.34:8000
+import { CINESTAGE_URL } from "../screens/config";
+
+// Keep legacy service consumers aligned with the shared production config.
 export const CINESTAGE_API_BASE_URL =
   process.env.EXPO_PUBLIC_CINESTAGE_API_BASE ||
   global.__CINESTAGE_API_BASE_URL ||
-  "http://10.0.0.34:8000";
+  CINESTAGE_URL;

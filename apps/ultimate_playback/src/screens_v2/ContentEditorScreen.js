@@ -133,6 +133,27 @@ async function fetchJson(url, opts = {}) {
   } finally { clearTimeout(tid); }
 }
 
+function resolveSongSyncIds(song) {
+  if (!song) {
+    return { librarySongId: '', planItemId: '' };
+  }
+
+  return {
+    librarySongId: String(
+      song.songId ||
+      song.librarySongId ||
+      song.sourceSongId ||
+      (!(song.planItemId || song.serviceItemId) ? song.id : '') ||
+      ''
+    ).trim(),
+    planItemId: String(
+      song.planItemId ||
+      song.serviceItemId ||
+      ''
+    ).trim(),
+  };
+}
+
 // ── Main screen ────────────────────────────────────────────────────────────────
 export default function ContentEditorScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -220,6 +241,7 @@ export default function ContentEditorScreen({ navigation, route }) {
     try {
       const profile = await getUserProfile();
       const hdrs = { ...syncHeaders(), 'Content-Type': 'application/json' };
+      const { librarySongId, planItemId } = resolveSongSyncIds(song);
 
       // Worship Leader role also gets direct-apply access (same as admin)
       const wpRole = userRole || profile?.assignmentRole || '';
@@ -234,12 +256,16 @@ export default function ContentEditorScreen({ navigation, route }) {
           headers: hdrs,
           body: JSON.stringify({
             serviceId:    serviceId || '',
-            songId:       song?.id  || '',
+            songId:       librarySongId,
+            planItemId,
+            librarySongId,
             field,
             value:        content.trim(),
             instrument:   instrument || undefined,
             keyboardRigs: isKeys && selRigs.length ? selRigs : undefined,
             senderRole,
+            songTitle:    song?.title  || '',
+            songArtist:   song?.artist || '',
           }),
         });
         // Show auto-detected metadata if any
@@ -256,7 +282,9 @@ export default function ContentEditorScreen({ navigation, route }) {
           method: 'POST',
           headers: hdrs,
           body: JSON.stringify({
-            songId:       song?.id     || '',
+            songId:       librarySongId,
+            planItemId,
+            librarySongId,
             serviceId:    serviceId    || '',
             type,
             instrument:   isLyrics ? 'Vocals' : instrument,

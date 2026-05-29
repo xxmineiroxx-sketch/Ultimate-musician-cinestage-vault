@@ -1,6 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -18,8 +17,10 @@ import {
 } from "react-native";
 
 import { SYNC_URL, CINESTAGE_URL, syncHeaders } from "./config";
+import { useAuth } from "../context/AuthContext";
 import { getBlockoutsForDate } from "../data/blockoutsStore";
 import { ROLE_OPTIONS, formatRoleLabel } from "../data/models";
+import { getScopedRecordItem, setScopedRecordItem } from "../data/orgScopedStorage";
 import {
   getPlanForService,
   addSongToService,
@@ -38,18 +39,42 @@ import {
   humanStatus,
   getActiveServiceId,
 } from "../data/servicesStore";
-import { getSongs, getPeople, addOrUpdateSong } from "../data/storage";
-import { generateVocalParts as cinestageGenerateParts } from "../services/cinestage/client";
+import {
+  addOrUpdateSong,
+  buildSongUsageLookupKey,
+  getPeople,
+  getSongUsageStats,
+  getSongs,
+} from "../data/storage";
+import {
+  analyzeAudio as cinestageAnalyzeAudio,
+  analyzeWaveform as cinestageAnalyzeWaveform,
+  generateVocalParts as cinestageGenerateParts,
+  listMidiDevices as cinestageListMidiDevices,
+} from "../services/cinestage/client";
 import {
   recordAssignments as brainRecordAssignments,
   getBrainStats,
   suggestAssignments as brainSuggest,
+  upsertPlan,
+  saveVocalAssignments,
 } from "../services/cinestageDataAPI";
 import {
   setCineStageStatus,
   clearCineStageStatus,
 } from "../services/cinestageStatus";
+import {
+  formatStemJobFailure,
+  hasStemJobResult,
+  pollStemJob,
+  submitStemJob,
+} from "../services/stemJobService";
 import { calculateSemitoneShift } from "../src/utils/transpose";
+import ServiceFeedbackModal from "../components/ServiceFeedbackModal";
+import { getPCOCredentials } from "../services/planningCenterService";
+
+const VOCAL_ASSIGNMENTS_PREFIX = "um/vocals/v1";
+const READINESS_HINTS_PREFIX = "um/hints/v1";
 
 // ─── Readiness helpers ────────────────────────────────────────────────────────
 const THEME_MAP = {
@@ -207,6 +232,63 @@ function toISO(display) {
   return y && m && d ? `${y}-${m}-${d}` : display;
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function resolveSongSourceUrl(song) {
+  return firstNonEmptyString(
+    song?.sourceUrl,
+    song?.source_url,
+    song?.audioUrl,
+    song?.audio_url,
+    song?.fileUrl,
+    song?.file_url,
+    song?.youtubeLink,
+    song?.youtube_url,
+    song?.mediaUrl,
+    song?.media_url,
+  );
+}
+
+function hasWaveformAnalysis(song) {
+  return Boolean(
+    song?.analysis?.waveformPeaks
+      || song?.analysis?.peaks
+      || song?.waveformPeaks
+      || song?.latestStemsJob?.result?.waveformPeaks
+      || song?.latestStemsJob?.result?.waveform_peaks,
+  );
+}
+
+function hasStemResult(song) {
+  const stems = song?.latestStemsJob?.result?.stems;
+  return Boolean(stems && typeof stems === "object" && Object.keys(stems).length > 0);
+}
+
+function getStemStatusLabel(song) {
+  if (hasStemResult(song)) return "Ready";
+  const status = String(song?.latestStemsJob?.status || "").trim().toUpperCase();
+  if (status === "PROCESSING") return "Processing";
+  if (status === "PENDING") return "Queued";
+  if (status === "FAILED" || status === "ERROR") return "Failed";
+  return "Not run";
+}
+
+function normalizeMidiDevices(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.devices)) return payload.devices;
+  if (Array.isArray(payload?.outputs)) return payload.outputs;
+  if (Array.isArray(payload?.inputs)) return payload.inputs;
+  if (payload?.detected_devices && typeof payload.detected_devices === "object") {
+    return Object.keys(payload.detected_devices);
+  }
+  return [];
+}
+
 // ─── Status cycle ─────────────────────────────────────────────────────────────
 const STATUS_CYCLE = ["draft", "ready", "locked"];
 const STATUS_COLORS = { draft: "#D97706", ready: "#16A34A", locked: "#4F46E5" };
@@ -347,7 +429,16 @@ const tb = StyleSheet.create({
 });
 
 // ─── Song row ─────────────────────────────────────────────────────────────────
-function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
+function SongRow({
+  item,
+  index,
+  onRemove,
+  onKeyEdit,
+  onPress,
+  hasConflict,
+  onEditingChange,
+  nextMatches,
+}) {
   const [editing, setEditing] = useState(false);
   const [transposedKey, setTransposedKey] = useState(item.transposedKey || "");
 
@@ -360,6 +451,7 @@ function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
   function save() {
     onKeyEdit(item.id, transposedKey.trim());
     setEditing(false);
+    onEditingChange?.(null);
   }
 
   return (
@@ -376,6 +468,11 @@ function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
         <View style={styles.songHeaderRow}>
           <Text style={styles.songTitle} numberOfLines={1}>{item.title}</Text>
           <View style={styles.badgeRow}>
+            {hasConflict && (
+              <View style={[styles.proBadge, { borderColor: '#F59E0B', backgroundColor: '#451A03' }]}>
+                <Text style={[styles.proBadgeText, { color: '#FCD34D' }]}>⚠ Conflict</Text>
+              </View>
+            )}
             {hasVocals && (
               <View style={[styles.proBadge, { borderColor: '#F43F5E' }]}>
                 <Text style={[styles.proBadgeText, { color: '#FDA4AF' }]}>🎤 {item.vocalAssignments.length}</Text>
@@ -402,6 +499,31 @@ function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
           {item.bpm ? `  •  ${item.bpm} BPM` : ""}
         </Text>
 
+        {nextMatches?.recs?.length > 0 && (
+          <View style={styles.songFlowBlock}>
+            <Text style={styles.songFlowLabel}>This plays well next</Text>
+            {nextMatches.recs.slice(0, 4).map((rec, recIndex) => (
+              <View key={`${rec.id || rec.title || recIndex}`} style={styles.songFlowRow}>
+                <View style={styles.songFlowScoreWrap}>
+                  <Text style={styles.songFlowScore}>
+                    {typeof rec.score === "number" ? `${Math.round(rec.score * 100)}%` : "—"}
+                  </Text>
+                </View>
+                <View style={styles.songFlowSongWrap}>
+                  <Text style={styles.songFlowSongTitle} numberOfLines={1}>
+                    {rec.title || "Untitled Song"}
+                  </Text>
+                  <Text style={styles.songFlowSongMeta} numberOfLines={1}>
+                    {[rec.artist, rec.suggestedKey ? `Key: ${rec.suggestedKey}` : null]
+                      .filter(Boolean)
+                      .join("  •  ")}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.songActionRow}>
           {editing ? (
             <View style={styles.keyEditRow}>
@@ -417,12 +539,12 @@ function SongRow({ item, index, onRemove, onKeyEdit, onPress }) {
               <TouchableOpacity style={styles.keyEditSave} onPress={save}>
                 <Text style={styles.keyEditSaveText}>Save</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.keyEditCancel} onPress={() => setEditing(false)}>
+              <TouchableOpacity style={styles.keyEditCancel} onPress={() => { setEditing(false); onEditingChange?.(null); }}>
                 <Text style={styles.keyEditCancelText}>✕</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity onPress={() => setEditing(true)} style={styles.keyEditBtn}>
+            <TouchableOpacity onPress={() => { setEditing(true); onEditingChange?.(item.id); }} style={styles.keyEditBtn}>
               <Text style={styles.keyEditBtnText}>
                 {item.transposedKey ? "⚡ Change Key" : "+ Set Transposed Key"}
               </Text>
@@ -592,11 +714,124 @@ function TeamRow({ assignment, isBlocked, onRemove, respStatus, declineReason, s
   );
 }
 
+// ─── Collab helpers ───────────────────────────────────────────────────────────
+function avatarColor(userId) {
+  // Deterministic color from userId hash
+  const COLORS = ['#6366F1','#EC4899','#10B981','#F59E0B','#3B82F6','#8B5CF6','#EF4444','#14B8A6'];
+  let hash = 0;
+  for (let i = 0; i < (userId || '').length; i++) hash = (hash * 31 + (userId || '').charCodeAt(i)) | 0;
+  return COLORS[Math.abs(hash) % COLORS.length];
+}
+
+function initials(name) {
+  const parts = (name || '?').trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getSongUsageForRecommendation(stats, song = {}) {
+  if (!stats) return { timesUsed: 0, lastUsedAt: null, serviceHistory: [] };
+  const byId = stats.byId || {};
+  const byLookupKey = stats.byLookupKey || {};
+  const songId = String(song?.id || song?.songId || "").trim();
+  const byIdMatch = songId ? byId[songId] : null;
+  if (byIdMatch) return byIdMatch;
+  return byLookupKey[buildSongUsageLookupKey(song)] || {
+    timesUsed: 0,
+    lastUsedAt: null,
+    serviceHistory: [],
+  };
+}
+
+function applySongRepeatPenalty(recommendations, usageStats) {
+  return (Array.isArray(recommendations) ? recommendations : [])
+    .map((rec) => {
+      const usage = getSongUsageForRecommendation(usageStats, rec);
+      const lastUsedTime = usage?.lastUsedAt ? Date.parse(usage.lastUsedAt) : 0;
+      const daysSinceLastUse = lastUsedTime > 0
+        ? Math.floor((Date.now() - lastUsedTime) / 86400000)
+        : null;
+      const recentPenalty =
+        daysSinceLastUse == null ? 0 :
+        daysSinceLastUse <= 14 ? 0.22 :
+        daysSinceLastUse <= 30 ? 0.14 :
+        daysSinceLastUse <= 60 ? 0.08 :
+        0;
+      const frequencyPenalty = Math.min(
+        0.12,
+        Math.max(0, Number(usage?.timesUsed || 0) - 3) * 0.02,
+      );
+      const baseScore = Number(rec?.score || 0);
+      const adjustedScore = Math.max(
+        0,
+        Math.min(1, baseScore - recentPenalty - frequencyPenalty),
+      );
+
+      return {
+        ...rec,
+        score: adjustedScore,
+        originalScore: baseScore,
+        timesUsed: Number(usage?.timesUsed || 0),
+        lastUsedAt: usage?.lastUsedAt || null,
+      };
+    })
+    .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
+}
+
+function PresenceBar({ users }) {
+  if (!users || users.length === 0) return null;
+  return (
+    <View style={pb.bar}>
+      <Text style={pb.label}>Editing now:</Text>
+      {users.map((u) => (
+        <View key={u.userId} style={[pb.avatar, { backgroundColor: avatarColor(u.userId) }]}>
+          <Text style={pb.avatarText}>{initials(u.userName)}</Text>
+          <View style={pb.greenDot} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const pb = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0B1120',
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+    gap: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1E293B',
+  },
+  label: { color: '#475569', fontSize: 11, fontWeight: '600', marginRight: 4 },
+  avatar: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#1E293B',
+  },
+  avatarText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  greenDot: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: '#22C55E',
+    borderWidth: 1.5, borderColor: '#0B1120',
+  },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ServicePlanScreen({ route, navigation }) {
   const { width: _spWidth } = useWindowDimensions();
   const _spIsIPad = _spWidth >= 768;
   const paramServiceId = route?.params?.serviceId;
+
+  // ── Collab identity ──────────────────────────────────────────────────────
+  const auth = useAuth();
+  // Collab state
+  const [collabUsers, setCollabUsers] = useState([]); // other editors currently present
+  const [collabToast, setCollabToast] = useState(null); // { msg, id } transient notification
+  const [editingSongId, setEditingSongId] = useState(null); // tracks which song card is active
+  const patchSinceRef = useRef(new Date().toISOString()); // poll cursor — ref avoids stale closure
 
   const [loading, setLoading] = useState(true);
   const [resolvedServiceId, setResolvedServiceId] = useState(
@@ -675,10 +910,38 @@ export default function ServicePlanScreen({ route, navigation }) {
   // Readiness hints (auto-suggested from song themes — hidden until relevant)
   const [readinessHints, setReadinessHints] = useState([]);
   const [hintsExpanded, setHintsExpanded] = useState(true);
+
+  // Suggest Next Song
+  const [suggestNextLoading, setSuggestNextLoading] = useState(false);
+  const [suggestNextResults, setSuggestNextResults] = useState(null); // { byItemId, generatedAt }
+
+  // Post-service feedback modal
+  const [feedbackModal, setFeedbackModal] = useState(false);
   const blockedMemberCount = useMemo(
     () => countBlockedMembers(blockedEntries),
     [blockedEntries],
   );
+  const setlistSignature = useMemo(
+    () =>
+      plan.songs
+        .map((item) =>
+          [
+            item.id,
+            item.songId,
+            item.title,
+            item.key,
+            item.transposedKey,
+          ]
+            .filter(Boolean)
+            .join(":"),
+        )
+        .join("|"),
+    [plan.songs],
+  );
+
+  useEffect(() => {
+    setSuggestNextResults(null);
+  }, [setlistSignature]);
 
   const refresh = useCallback(async () => {
     try {
@@ -727,7 +990,7 @@ export default function ServicePlanScreen({ route, navigation }) {
           tagsList,
         );
         let hintsDoneMap = {};
-        const raw = await AsyncStorage.getItem(`um/hints/v1/${id}`);
+        const raw = await getScopedRecordItem(READINESS_HINTS_PREFIX, id);
         if (raw) {
           const saved = JSON.parse(raw);
           if (Array.isArray(saved))
@@ -746,7 +1009,7 @@ export default function ServicePlanScreen({ route, navigation }) {
 
       // Load vocal assignments
       try {
-        const vRaw = await AsyncStorage.getItem(`um/vocals/v1/${id}`);
+        const vRaw = await getScopedRecordItem(VOCAL_ASSIGNMENTS_PREFIX, id);
         if (vRaw) setVocalAssignments(JSON.parse(vRaw));
       } catch { /* ignore */ }
 
@@ -788,6 +1051,109 @@ export default function ServicePlanScreen({ route, navigation }) {
     refresh();
     return unsub;
   }, [navigation, refresh]);
+
+  // ── Collab presence + patch polling ──────────────────────────────────────
+  useEffect(() => {
+    if (!resolvedServiceId) return;
+
+    const collabUserId   = auth?.userId   || auth?.userEmail || 'admin';
+    const collabUserName = auth?.userName || collabUserId;
+    const collabRole     = auth?.userRole || 'admin';
+
+    // Join
+    fetch(`${SYNC_URL}/sync/collab/join`, {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify({ serviceId: resolvedServiceId, userId: collabUserId, userName: collabUserName, role: collabRole }),
+    }).catch(() => {});
+
+    // Poll presence every 8 s
+    const presenceTimer = setInterval(async () => {
+      try {
+        const r = await fetch(`${SYNC_URL}/sync/collab/presence?serviceId=${resolvedServiceId}`, { headers: syncHeaders() });
+        if (!r.ok) return;
+        const all = await r.json();
+        // Exclude self
+        setCollabUsers((all || []).filter((u) => u.userId !== collabUserId));
+      } catch { /* offline */ }
+    }, 8000);
+
+    // Poll patches every 5 s
+    const patchTimer = setInterval(async () => {
+      try {
+        const cursor = patchSinceRef.current;
+        const r = await fetch(`${SYNC_URL}/sync/collab/patches?serviceId=${resolvedServiceId}&since=${encodeURIComponent(cursor)}`, { headers: syncHeaders() });
+        if (!r.ok) return;
+        const patches = await r.json();
+        if (!Array.isArray(patches) || patches.length === 0) return;
+
+        // Advance cursor to latest patch ts
+        const latestTs = patches[patches.length - 1]?.ts || cursor;
+        patchSinceRef.current = latestTs;
+
+        // Apply patches from OTHER users
+        for (const patch of patches) {
+          if (patch.userId === collabUserId) continue; // skip own patches
+
+          const { op, payload, userName: patchUser } = patch;
+
+          // Show toast
+          const opLabel = op === 'reorder' ? 'reordered songs'
+            : op === 'add'    ? `added "${payload?.title || 'a song'}"`
+            : op === 'remove' ? `removed a song`
+            : op === 'update' ? `changed ${payload?.field || 'a field'}${payload?.songTitle ? ` of "${payload.songTitle}"` : ''}`
+            : `updated the plan`;
+          const toastId = `toast_${Date.now()}`;
+          setCollabToast({ msg: `${patchUser || 'Someone'} ${opLabel}`, id: toastId });
+          setTimeout(() => setCollabToast((t) => t?.id === toastId ? null : t), 3500);
+
+          // Apply the patch to local plan state
+          if (op === 'reorder' && Array.isArray(payload?.songs)) {
+            setRawPlan((prev) => normalizePlanState({ ...prev, songs: payload.songs }));
+          } else if (op === 'add' && payload?.song) {
+            setRawPlan((prev) => {
+              const already = (prev?.songs || []).some((s) => s.id === payload.song.id || s.songId === payload.song.songId);
+              if (already) return prev;
+              return normalizePlanState({ ...prev, songs: [...(prev?.songs || []), payload.song] });
+            });
+          } else if (op === 'remove' && payload?.itemId) {
+            setRawPlan((prev) => normalizePlanState({ ...prev, songs: (prev?.songs || []).filter((s) => s.id !== payload.itemId) }));
+          } else if (op === 'update' && payload?.itemId) {
+            setRawPlan((prev) => normalizePlanState({
+              ...prev,
+              songs: (prev?.songs || []).map((s) =>
+                s.id === payload.itemId ? { ...s, ...payload.fields } : s,
+              ),
+            }));
+          }
+        }
+      } catch { /* offline */ }
+    }, 5000);
+
+    return () => {
+      clearInterval(presenceTimer);
+      clearInterval(patchTimer);
+      // Leave (fire-and-forget)
+      fetch(`${SYNC_URL}/sync/collab/leave`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({ serviceId: resolvedServiceId, userId: collabUserId }),
+      }).catch(() => {});
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedServiceId]);
+
+  // ── Fire-and-forget patch broadcast ──────────────────────────────────────
+  function postCollabPatch(op, payload) {
+    if (!resolvedServiceId) return;
+    const collabUserId   = auth?.userId   || auth?.userEmail || 'admin';
+    const collabUserName = auth?.userName || collabUserId;
+    fetch(`${SYNC_URL}/sync/collab/patch`, {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify({ serviceId: resolvedServiceId, userId: collabUserId, userName: collabUserName, op, payload }),
+    }).catch(() => {});
+  }
 
   // Songs already in the plan
   const planSongIds = useMemo(
@@ -852,19 +1218,25 @@ export default function ServicePlanScreen({ route, navigation }) {
   // Persist hints to AsyncStorage whenever they change
   useEffect(() => {
     if (resolvedServiceId) {
-      AsyncStorage.setItem(
-        `um/hints/v1/${resolvedServiceId}`,
+      setScopedRecordItem(
+        READINESS_HINTS_PREFIX,
+        resolvedServiceId,
         JSON.stringify(readinessHints),
-      );
+      ).catch(() => {});
     }
   }, [readinessHints, resolvedServiceId]);
 
-  // Persist vocal assignments
+  // Persist vocal assignments (local + cloud)
   useEffect(() => {
     if (resolvedServiceId && Object.keys(vocalAssignments).length > 0) {
-      AsyncStorage.setItem(
-        `um/vocals/v1/${resolvedServiceId}`,
+      setScopedRecordItem(
+        VOCAL_ASSIGNMENTS_PREFIX,
+        resolvedServiceId,
         JSON.stringify(vocalAssignments),
+      ).catch(() => {});
+      // Cloud sync — fire-and-forget, won't break if offline
+      saveVocalAssignments(resolvedServiceId, vocalAssignments).catch((e) =>
+        console.warn('[VocalAssignments] Cloud sync failed:', e.message),
       );
     }
   }, [vocalAssignments, resolvedServiceId]);
@@ -925,12 +1297,18 @@ export default function ServicePlanScreen({ route, navigation }) {
     try {
       const targetServiceId = resolvedServiceId || service?.id;
       const next = normalizePlanState(
-        await addSongToService(targetServiceId, song),
+        await addSongToService(targetServiceId, song, {
+          serviceDate: service?.date || "",
+          serviceTitle: service?.title || "",
+        }),
       );
       setPlan(next);
       rebuildHints(next.songs);
       setSongSearch("");
       setSongModal(false);
+      // Broadcast to co-editors
+      const addedItem = next.songs[next.songs.length - 1];
+      postCollabPatch('add', { song: addedItem, title: song.title });
     } catch (error) {
       Alert.alert(
         "Could not add song",
@@ -951,6 +1329,7 @@ export default function ServicePlanScreen({ route, navigation }) {
           );
           setPlan(next);
           rebuildHints(next.songs);
+          postCollabPatch('remove', { itemId });
         },
       },
     ]);
@@ -970,6 +1349,12 @@ export default function ServicePlanScreen({ route, navigation }) {
       ));
       setPlan(redistributed);
     }
+    postCollabPatch('update', {
+      itemId,
+      fields: { transposedKey: key },
+      field: 'key',
+      songTitle: updatedItem?.title || '',
+    });
   }
 
   async function handleAssignPerson(person) {
@@ -1044,6 +1429,7 @@ export default function ServicePlanScreen({ route, navigation }) {
     );
     setPlan(next);
     setNotesModal(false);
+    postCollabPatch('update', { field: 'notes', fields: { notes: editNotes } });
   }
 
   function handleVocalAssign(person) {
@@ -1130,12 +1516,14 @@ export default function ServicePlanScreen({ route, navigation }) {
 
     setCineStageStatus("Generating vocal parts");
     try {
-      // Try CineStage local server first (faster, richer AI stack)
       let data;
       try {
+        // Try CineStage container first (uses Anthropic SDK directly)
         data = await cinestageGenerateParts(payload);
+        // Container may return HTTP 200 with {error:"..."} on config issues — treat as failure
+        if (data?.error) throw new Error(data.error);
       } catch {
-        // CineStage server not running — fall back to Cloudflare
+        // Container unavailable or errored — fall back to Cloudflare Pages AI endpoint
         const res = await fetch(`${SYNC_URL}/sync/ai/vocal-parts`, {
           method: "POST",
           headers: { ...syncHeaders(), "Content-Type": "application/json" },
@@ -1272,6 +1660,15 @@ export default function ServicePlanScreen({ route, navigation }) {
       headers: syncHeaders(),
       body: JSON.stringify({
         serviceId: resolvedServiceId,
+        // Send service metadata so the server can create the service record if it
+        // doesn't exist yet (e.g. backgroundSync hasn't run since service was created).
+        service: {
+          id:   resolvedServiceId,
+          name: service?.name || service?.title || plan?.title || "Service",
+          date: service?.date || service?.serviceDate || "",
+          time: service?.time || service?.startTime || "",
+          type: service?.serviceType || service?.type || "standard",
+        },
         plan: nextPlan,
         vocalAssignments: publishedVocalAssignments,
         people: teamPeople,
@@ -1701,6 +2098,106 @@ export default function ServicePlanScreen({ route, navigation }) {
     }
   }
 
+  async function handleSuggestNextSong() {
+    if (suggestNextLoading) return;
+    if (plan.songs.length < 2) {
+      Alert.alert('Not enough songs', 'Add at least two songs to compare the setlist flow.');
+      return;
+    }
+    setSuggestNextLoading(true);
+    setSuggestNextResults(null);
+    try {
+      const librarySongs = library.length > 0 ? library : await getSongs();
+      const songUsageStats = await getSongUsageStats();
+      const setlistSongs = plan.songs
+        .map((item) => {
+          const song = librarySongs.find((lib) => lib.id === item.songId) || {};
+          return {
+            itemId: item.id,
+            id: item.songId || item.id || '',
+            title: song.title || item.title || '',
+            artist: song.artist || '',
+            key: item.transposedKey || item.key || song.key || '',
+            bpm: song.bpm || null,
+            tags: Array.isArray(song.tags) ? song.tags : [],
+            lyricsChordChart: song.lyricsChordChart || song.chordChart || '',
+            lyrics: song.lyrics || '',
+          };
+        })
+        .filter((song) => song.title);
+
+      if (setlistSongs.length < 2) {
+        Alert.alert('Not enough songs', 'Add at least two saved songs to compare the setlist flow.');
+        return;
+      }
+
+      const setlistContext = setlistSongs.map(({ itemId, ...song }) => song);
+      const suggestionEntries = await Promise.all(
+        setlistSongs.map(async (currentSong) => {
+          const songPool = setlistSongs
+            .filter((song) => song.itemId !== currentSong.itemId)
+            .map(({ itemId, ...song }) => song);
+
+          if (songPool.length === 0) {
+            return [currentSong.itemId, { afterTitle: currentSong.title, recs: [], themes: [] }];
+          }
+
+          const res = await fetch(`${CINESTAGE_URL}/ai/song-recommend`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              currentSong: {
+                id: currentSong.id,
+                title: currentSong.title,
+                artist: currentSong.artist,
+                key: currentSong.key,
+                bpm: currentSong.bpm,
+                lyricsChordChart: currentSong.lyricsChordChart,
+                lyrics: currentSong.lyrics,
+              },
+              setlistContext,
+              songPool,
+              maxResults: Math.min(songPool.length, 5),
+            }),
+          });
+
+          if (!res.ok) throw new Error(`AI recommend ${res.status}`);
+          const data = await res.json();
+          return [
+            currentSong.itemId,
+            {
+              afterTitle: currentSong.title,
+              recs: applySongRepeatPenalty(
+                Array.isArray(data.recommendations) ? data.recommendations : [],
+                songUsageStats,
+              ),
+              themes: Array.isArray(data.currentThemes) ? data.currentThemes : [],
+            },
+          ];
+        }),
+      );
+
+      const byItemId = Object.fromEntries(suggestionEntries);
+      const hasAnySuggestions = Object.values(byItemId).some(
+        (result) => Array.isArray(result?.recs) && result.recs.length > 0,
+      );
+
+      if (!hasAnySuggestions) {
+        Alert.alert('No suggestions', 'Could not find strong flow matches inside this setlist yet.');
+        return;
+      }
+
+      setSuggestNextResults({
+        byItemId,
+        generatedAt: Date.now(),
+      });
+    } catch (err) {
+      Alert.alert('Error', String(err?.message || 'Could not reach AI service.'));
+    } finally {
+      setSuggestNextLoading(false);
+    }
+  }
+
   async function handleDeleteService() {
     Alert.alert(
       "Delete service?",
@@ -1858,6 +2355,12 @@ export default function ServicePlanScreen({ route, navigation }) {
   const isLocked = service.status === "locked";
   const statusColor = STATUS_COLORS[service.status] || STATUS_COLORS.draft;
 
+  // ── Post-service feedback helpers ──────────────────────────────────────────
+  const _adminRoles = new Set(["admin", "central_admin", "worship_leader", "md", "music_director", "worship leader", "Music Director"]);
+  const isAdmin = _adminRoles.has(auth?.userRole || "");
+  const serviceDate = service?.date ? new Date(service.date) : null;
+  const serviceIsInPast = serviceDate ? serviceDate < new Date() : false;
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
@@ -1917,6 +2420,46 @@ export default function ServicePlanScreen({ route, navigation }) {
         </View>
       </View>
 
+      {/* ── Collab Presence Bar ─────────────────────────────────── */}
+      <PresenceBar users={collabUsers} />
+
+      {/* ── Collab Toast (in-flow below presence bar) ────────────── */}
+      {collabToast ? (
+        <View style={styles.collabToast}>
+          <Text style={styles.collabToastText}>📝 {collabToast.msg}</Text>
+        </View>
+      ) : null}
+
+      {/* ── Post-Service Feedback Banner ────────────────────────── */}
+      {serviceIsInPast && (
+        <View style={styles.feedbackBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.feedbackBannerText}>
+              Service complete — share your feedback
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.feedbackRateBtn}
+            onPress={() => setFeedbackModal(true)}
+          >
+            <Text style={styles.feedbackRateBtnText}>Rate It</Text>
+          </TouchableOpacity>
+          {isAdmin && (
+            <TouchableOpacity
+              style={styles.feedbackViewBtn}
+              onPress={() =>
+                navigation.navigate("ServiceFeedback", {
+                  serviceId: resolvedServiceId,
+                  serviceName: service.title,
+                })
+              }
+            >
+              <Text style={styles.feedbackViewBtnText}>View Feedback</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       {/* ── Tab Bar ─────────────────────────────────────────────── */}
       <TabBar active={tab} onChange={setTab} />
       {tab === "setlist" && (
@@ -1954,21 +2497,74 @@ export default function ServicePlanScreen({ route, navigation }) {
               </TouchableOpacity>
             </View>
           ) : (
-            plan.songs.map((item, idx) => (
-              <SongRow
-                key={item.id}
-                item={item}
-                index={idx}
-                onRemove={() => handleRemoveSong(item.id)}
-                onKeyEdit={handleKeyEdit}
-                onPress={() =>
-                  navigation.navigate("SongPlanDetail", {
-                    serviceId: resolvedServiceId,
-                    itemId: item.id,
-                  })
-                }
-              />
-            ))
+            plan.songs.map((item, idx) => {
+              const libSong = library.find((entry) => entry.id === item.songId) || null;
+              const songForDetail = {
+                ...(libSong || {}),
+                ...(item || {}),
+                id: item.songId || libSong?.id || item.id,
+                songId: item.songId || libSong?.id || item.id,
+                title: libSong?.title || item.title || "Untitled",
+                artist: libSong?.artist || item.artist || "",
+                key: libSong?.key || item.key || "",
+                originalKey: libSong?.originalKey || libSong?.key || "",
+                youtubeLink: libSong?.youtubeLink || libSong?.sourceUrl || item.youtubeLink || "",
+                sourceUrl: libSong?.sourceUrl || libSong?.youtubeLink || item.sourceUrl || "",
+                lyricsChordChart:
+                  libSong?.lyricsChordChart ||
+                  item.chordChart ||
+                  libSong?.chordChart ||
+                  "",
+                chordChart: item.chordChart || libSong?.chordChart || "",
+                sections: libSong?.sections || item.sections || [],
+              };
+
+              return (
+                <SongRow
+                  key={item.id}
+                  item={item}
+                  index={idx}
+                  nextMatches={suggestNextResults?.byItemId?.[item.id] || null}
+                  onRemove={() => handleRemoveSong(item.id)}
+                  onKeyEdit={handleKeyEdit}
+                  hasConflict={editingSongId === item.id && collabUsers.length > 0}
+                  onEditingChange={setEditingSongId}
+                  onPress={() =>
+                    navigation.navigate("SongDetail", {
+                      song: songForDetail,
+                      songId: songForDetail.id,
+                      transposedKey: item.transposedKey || "",
+                    })
+                  }
+                />
+              );
+            })
+          )}
+
+          {/* ── Suggest Next Song ── */}
+          {plan.songs.length > 1 && !isLocked && (
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                backgroundColor: '#1e1b4b', borderRadius: 14, paddingVertical: 11,
+                marginTop: 10, borderWidth: 1, borderColor: '#3730a3',
+                opacity: suggestNextLoading ? 0.7 : 1,
+              }}
+              onPress={handleSuggestNextSong}
+              disabled={suggestNextLoading}
+              activeOpacity={0.8}
+            >
+              {suggestNextLoading
+                ? <ActivityIndicator size="small" color="#a5b4fc" />
+                : <Text style={{ fontSize: 14 }}>✨</Text>}
+              <Text style={{ color: '#c7d2fe', fontWeight: '700', fontSize: 13 }}>
+                {suggestNextLoading
+                  ? 'Finding matches…'
+                  : suggestNextResults?.generatedAt
+                    ? 'Refresh flow matches'
+                    : 'What plays well next?'}
+              </Text>
+            </TouchableOpacity>
           )}
 
           {/* Readiness hints — auto-surfaces when song themes are detected */}
@@ -3402,6 +3998,15 @@ export default function ServicePlanScreen({ route, navigation }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Service Feedback Modal ───────────────────────────────── */}
+      <ServiceFeedbackModal
+        visible={feedbackModal}
+        onClose={() => setFeedbackModal(false)}
+        serviceId={resolvedServiceId}
+        personId={auth?.userId}
+        serviceName={service?.title}
+      />
     </View>
   );
 }
@@ -3409,6 +4014,46 @@ export default function ServicePlanScreen({ route, navigation }) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#020617" },
+  // Collab toast — in-flow banner just below presence bar
+  collabToast: {
+    backgroundColor: '#1E1B4B', borderBottomWidth: 1, borderBottomColor: '#4F46E5',
+    paddingHorizontal: 20, paddingVertical: 8,
+    alignItems: 'center',
+  },
+  collabToastText: { color: '#C7D2FE', fontSize: 13, fontWeight: '700' },
+  // Post-service feedback banner
+  feedbackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F2A1A',
+    borderBottomWidth: 1,
+    borderBottomColor: '#166534',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  feedbackBannerText: {
+    color: '#86EFAC',
+    fontSize: 13,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  feedbackRateBtn: {
+    backgroundColor: '#16A34A',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  feedbackRateBtnText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  feedbackViewBtn: {
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  feedbackViewBtnText: { color: '#94A3B8', fontSize: 13, fontWeight: '700' },
   centered: {
     flex: 1,
     alignItems: "center",
@@ -3549,6 +4194,59 @@ const styles = StyleSheet.create({
   },
   proBadgeText: { fontSize: 11, fontWeight: "800" },
   songMeta: { color: "#94A3B8", fontSize: 13, fontWeight: "500", marginBottom: 12 },
+  songFlowBlock: {
+    marginTop: -2,
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: "#0B1220",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    gap: 8,
+  },
+  songFlowLabel: {
+    color: "#93C5FD",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  songFlowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  songFlowScoreWrap: {
+    width: 58,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#1D4ED8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  songFlowScore: {
+    color: "#BFDBFE",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  songFlowSongWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  songFlowSongTitle: {
+    color: "#F8FAFC",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  songFlowSongMeta: {
+    color: "#64748B",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 1,
+  },
   songActionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   
   keyEditBtn: {

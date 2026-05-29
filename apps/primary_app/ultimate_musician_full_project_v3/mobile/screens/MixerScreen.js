@@ -9,7 +9,7 @@ import {
 
 import * as audioEngine from "../audioEngine";
 import CineStageProcessingOverlay from "../components/CineStageProcessingOverlay";
-import TrackFader from "../components/TrackFader";
+import ProTrackFader from "../components/ProTrackFader";
 import { useTheme } from "../context/ThemeContext";
 
 export default function MixerScreen({ route, navigation }) {
@@ -108,10 +108,13 @@ export default function MixerScreen({ route, navigation }) {
 
       <FlatList
         data={tracksState}
+        horizontal
+        showsHorizontalScrollIndicator={false}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TrackFader track={item} onChange={updateTrack} />
+          <ProTrackFader track={item} onChange={updateTrack} />
         )}
+        contentContainerStyle={{ paddingVertical: 20, paddingHorizontal: 8 }}
         style={{ marginTop: 12 }}
       />
 

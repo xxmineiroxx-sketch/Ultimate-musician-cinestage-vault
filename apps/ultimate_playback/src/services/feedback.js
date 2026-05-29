@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Updates from 'expo-updates';
 import { Platform } from 'react-native';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { getUserProfile } from './storage';
@@ -56,6 +57,20 @@ function serializeError(error) {
   };
 }
 
+function getUpdateMetadata() {
+  const createdAt = Updates.createdAt;
+  return {
+    expoUpdateId: Updates.updateId || '',
+    expoUpdateChannel: Updates.channel || '',
+    expoRuntimeVersion: Updates.runtimeVersion || '',
+    expoIsEmbeddedLaunch: Boolean(Updates.isEmbeddedLaunch),
+    expoUpdateCreatedAt:
+      createdAt && typeof createdAt.toISOString === 'function'
+        ? createdAt.toISOString()
+        : '',
+  };
+}
+
 async function readQueue() {
   try {
     const raw = await AsyncStorage.getItem(FEEDBACK_QUEUE_KEY);
@@ -87,6 +102,7 @@ async function enrichReporter(reporter = {}) {
 }
 
 async function buildPayload(draft) {
+  const draftMetadata = draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {};
   return {
     id: draft.id,
     type: draft.type || 'manual',
@@ -100,11 +116,14 @@ async function buildPayload(draft) {
       platform: Platform.OS,
       platformVersion: String(Platform.Version ?? ''),
       jsEngine: global.HermesInternal ? 'hermes' : 'unknown',
-      releaseChannel: __DEV__ ? 'development' : 'production',
+      releaseChannel: Updates.channel || (__DEV__ ? 'development' : 'production'),
       ...(draft.app || {}),
     },
     reporter: await enrichReporter(draft.reporter),
-    metadata: draft.metadata && typeof draft.metadata === 'object' ? draft.metadata : {},
+    metadata: {
+      ...getUpdateMetadata(),
+      ...draftMetadata,
+    },
   };
 }
 

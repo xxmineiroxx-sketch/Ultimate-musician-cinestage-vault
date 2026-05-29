@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
+
+import CineStageBrainLogo from "./CineStageBrainLogo";
 
 /**
  * Full-screen processing overlay.
  *
  * Designed for "CineStage is processing" UX:
- * - Spinner
+ * - CineStage Brain animation
  * - Animated dots
  * - Step list with current step highlight
  * - Optional progress bar (0..100)
@@ -45,14 +47,17 @@ export default function CineStageProcessingOverlay({
   return (
     <View style={styles.overlay}>
       <View style={styles.card}>
-        <View style={styles.titleRow}>
-          <ActivityIndicator color="#F9FAFB" />
-          <Text style={styles.title}>
-            {title}
-            <Text> </Text>
-            <Text>{dotCount ? ".".repeat(dotCount) : ""}</Text>
-          </Text>
+        <View style={styles.hero}>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>CineStage Brain</Text>
+          </View>
+          <CineStageBrainLogo mode="processing" size="large" />
         </View>
+
+        <Text style={styles.title}>
+          {title}
+          {dotCount ? ` ${".".repeat(dotCount)}` : ""}
+        </Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
 
         <View style={styles.stepsWrap}>
@@ -111,7 +116,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "rgba(2,6,23,0.78)",
     alignItems: "center",
     justifyContent: "center",
     padding: 16,
@@ -119,30 +124,57 @@ const styles = StyleSheet.create({
   card: {
     width: "100%",
     maxWidth: 520,
-    backgroundColor: "#0B1220",
-    borderRadius: 16,
+    backgroundColor: "#081120",
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: "#263245",
-    padding: 16,
+    borderColor: "rgba(99,102,241,0.28)",
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    shadowColor: "#000000",
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 18 },
   },
-  titleRow: {
-    flexDirection: "row",
+  hero: {
     alignItems: "center",
-    gap: 10,
+    justifyContent: "center",
+    paddingBottom: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(148,163,184,0.14)",
+  },
+  badge: {
+    marginBottom: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(79,70,229,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(129,140,248,0.28)",
+  },
+  badgeText: {
+    color: "#C7D2FE",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
   },
   title: {
-    color: "#F9FAFB",
-    fontSize: 16,
-    fontWeight: "700",
+    marginTop: 18,
+    color: "#F8FAFC",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
   },
   subtitle: {
     marginTop: 8,
     color: "#B6C2D1",
     fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
   },
   stepsWrap: {
-    marginTop: 14,
-    gap: 8,
+    marginTop: 20,
+    gap: 10,
   },
   stepRow: {
     flexDirection: "row",
@@ -164,7 +196,7 @@ const styles = StyleSheet.create({
   stepDone: { color: "#9CA3AF" },
   stepActive: { color: "#F9FAFB", fontWeight: "600" },
   progressWrap: {
-    marginTop: 14,
+    marginTop: 18,
     gap: 8,
   },
   progressBarBg: {

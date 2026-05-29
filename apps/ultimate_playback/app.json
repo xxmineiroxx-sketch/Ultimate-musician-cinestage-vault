@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ultimate Playback",
     "slug": "ultimate-playback",
-    "version": "1.0.0",
+    "version": "1.3.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ultimatemusician.playback",
-      "buildNumber": "32",
+      "buildNumber": "37",
       "entitlements": {
         "com.apple.security.application-groups": [
           "group.com.ultimatemusician.playback"
@@ -44,7 +44,8 @@
             ]
           }
         ]
-      }
+      },
+      "runtimeVersion": "1.0.0"
     },
     "android": {
       "adaptiveIcon": {
@@ -65,10 +66,19 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "Ultimate Playback",
+      "shortName": "Playback",
+      "backgroundColor": "#020617",
+      "themeColor": "#020617"
     },
     "extra": {
       "eas": {

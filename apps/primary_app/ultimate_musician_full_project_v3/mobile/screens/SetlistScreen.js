@@ -21,6 +21,7 @@ import {
   getServices,
   updateService,
 } from "../data/servicesStore";
+import { getSongs } from "../data/storage";
 import {
   analyzeWorshipSession,
   broadcastWorshipFreelyEvent,
@@ -143,11 +144,10 @@ export default function SetlistScreen({ navigation, route }) {
 
       const [nextPlan, libRaw] = await Promise.all([
         getPlanForService(id),
-        AsyncStorage.getItem("um.songs.v2"),
+        getSongs(),
       ]);
-      const lib = libRaw ? JSON.parse(libRaw) : [];
       setPlan(nextPlan);
-      setLibrary(lib);
+      setLibrary(Array.isArray(libRaw) ? libRaw : []);
       setSongs(nextPlan?.songs || []);
     } catch {
       setSongs([]);

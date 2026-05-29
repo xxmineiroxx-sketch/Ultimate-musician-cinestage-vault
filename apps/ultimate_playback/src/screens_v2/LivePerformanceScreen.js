@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import audioEngine from '../services/audioEngine';
 import sceneManager from '../services/sceneManager';
-import { getSongById } from '../services/storage';
+import { getSongById } from '../data/storage';
 
 const { width } = Dimensions.get('window');
 

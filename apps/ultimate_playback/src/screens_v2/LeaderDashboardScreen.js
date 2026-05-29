@@ -188,7 +188,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
       setProfile(prof);
       setAllServices(lib.services || []);
       setPeople(lib.people   || []);
-      setSongs(lib.songs     || []);
+      setSongs(Array.isArray(lib.songs) ? lib.songs : Object.values(lib.songs || {}));
       setPlans(lib.plans     || {});
 
       const myEmail = (prof?.email || paramEmail || '').toLowerCase();

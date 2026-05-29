@@ -11,7 +11,15 @@
  *   • iPad-optimized layout (width ≥ 680pt)
  */
 import Slider from "@react-native-community/slider";
-import * as FileSystem from "expo-file-system/legacy";
+import { FileSystem, getFileInfo } from '../utils/platformFs';
+import { createStemPlayer } from '../utils/platformAudio';
+import { isDesktop, downloadStemsToDesktop } from '../utils/desktopBridge';
+import {
+  DEFAULT_SECTIONS,
+  parseSectionsFromChart,
+  getAISectionSuggestion,
+  colorForSection,
+} from '../utils/sectionUtils';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -25,10 +33,17 @@ import {
 
 import * as audioEngine from "../audioEngine";
 import CineStageProcessingOverlay from "../components/CineStageProcessingOverlay";
+import ProMixerConsole from "../components/ProMixerConsole";
 import { fetchWithRetry } from "../utils/fetchRetry";
 import WaveformView from "../components/WaveformView";
+import StemWaveformView from "../components/StemWaveformView";
+import { getStemWaveformData, buildActiveStems } from "../services/stemWaveformService";
+import {
+  loadSongWavePipeline,
+  resolveSongWaveformSourceUrl,
+} from "../services/songWavePipeline";
 import { normalizeWaveformPeaks } from "../services/wavePipelineEngine";
-import { CINESTAGE_URL, syncRoomWsUrl } from "./config";
+import { CINESTAGE_URL, syncRoomWsUrl, syncHeaders } from "./config";
 
 // ─── Engine State Machine ─────────────────────────────────────────────────────
 const ENGINE_STATE = {
@@ -50,6 +65,7 @@ const STATE_META = {
 // ─── Stem Roles (from Kimi engine) ───────────────────────────────────────────
 function getStemRole(name) {
   const n = (name || '').toLowerCase();
+  if (n === 'no_vocals' || n === 'no vocals' || n === 'instrumental') return 'OTHER';
   if (/pad|synth|atmo|ambient/i.test(n)) return 'PAD';
   if (/drum|perc|kit|beat/i.test(n))     return 'RHYTHM';
   if (/bass/i.test(n))                   return 'BASS';
@@ -63,32 +79,25 @@ const ROLE_COLOR = { PAD: '#A78BFA', RHYTHM: '#34D399', BASS: '#60A5FA', LEAD: '
 
 // ─── Stem Colors (by name) ────────────────────────────────────────────────────
 const STEM_COLORS = {
-  vocals: '#F472B6', drums: '#34D399', bass: '#60A5FA',
-  keys: '#A78BFA',  guitars: '#FB923C', pads: '#C084FC', other: '#FBBF24',
+  vocals:    '#F472B6',
+  no_vocals: '#94A3B8',   // karaoke / full instrumental
+  drums:     '#34D399',
+  bass:      '#60A5FA',
+  guitar:    '#FB923C',
+  guitars:   '#FB923C',
+  piano:     '#A78BFA',
+  keys:      '#A78BFA',
+  pads:      '#C084FC',
+  other:     '#FBBF24',
 };
 function stemColorFor(n) {
   return STEM_COLORS[(n || '').toLowerCase()] || '#94A3B8';
 }
 
-// ─── Section Parsing (from song chord chart / lyrics) ────────────────────────
-const DEFAULT_SECTIONS = ['Intro', 'Verse', 'Chorus', 'Bridge', 'Outro'];
-
+// ─── Section Parsing — delegates to shared sectionUtils (EN + PT-BR) ─────────
 function parseSectionsFromSong(song) {
   const text = song?.chordChart || song?.chordSheet || song?.lyrics || '';
-  if (!text) return DEFAULT_SECTIONS;
-  const seen = new Set();
-  const found = [];
-  for (const line of text.split('\n')) {
-    const m = line.trim().match(
-      /^(intro|verse\s*\d*|pre-?chorus\s*\d*|chorus\s*\d*|bridge|tag|vamp|outro|interlude)/i,
-    );
-    if (m) {
-      const base = m[1].replace(/\s*\d+$/i, '').trim();
-      const cap = base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
-      if (!seen.has(cap.toLowerCase())) { seen.add(cap.toLowerCase()); found.push(cap); }
-    }
-  }
-  return found.length >= 2 ? found : DEFAULT_SECTIONS;
+  return parseSectionsFromChart(text) || DEFAULT_SECTIONS;
 }
 
 function buildSectionWindows(sectionList = [], totalDuration = 0) {
@@ -113,34 +122,8 @@ function getSectionWindow(sectionList = [], sectionLabel = '', totalDuration = 0
     .find((section) => section.label === sectionLabel) || null;
 }
 
-// ─── AI Flow Suggestion (from Kimi engine — chorus fatigue, bridge rules) ─────
-function getAISuggestion(currentSection, history, sections) {
-  if (!currentSection || !sections?.length) return null;
-  let repeatCount = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i] === currentSection) repeatCount++;
-    else break;
-  }
-  const sec = currentSection.toLowerCase();
-  if (sec.includes('chorus') && repeatCount >= 2) {
-    const next = sections.find(s => s.toLowerCase().includes('bridge'))
-               || sections.find(s => s.toLowerCase().includes('outro'));
-    return next ? { section: next, reason: 'Chorus fatigue' } : null;
-  }
-  if (sec.includes('bridge')) {
-    const chorus = sections.find(s => s.toLowerCase().includes('chorus'));
-    return chorus ? { section: chorus, reason: 'Post-bridge energy' } : null;
-  }
-  if (sec.includes('verse')) {
-    const chorus = sections.find(s => s.toLowerCase().includes('chorus'));
-    return chorus ? { section: chorus, reason: 'Verse → Chorus' } : null;
-  }
-  if (sec.includes('intro')) {
-    const verse = sections.find(s => s.toLowerCase().includes('verse'));
-    return verse ? { section: verse, reason: 'Intro complete' } : null;
-  }
-  return null;
-}
+// ─── AI Flow Suggestion — delegates to shared sectionUtils (EN + PT-BR) ──────
+const getAISuggestion = getAISectionSuggestion;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const LOAD_STEPS = [
@@ -155,6 +138,21 @@ function formatTime(sec) {
   return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 }
 
+const STEM_DISPLAY_NAMES = {
+  no_vocals: 'Karaoke',
+  vocals:    'Vocals',
+  drums:     'Drums',
+  bass:      'Bass',
+  guitar:    'Guitar',
+  guitars:   'Guitars',
+  piano:     'Piano',
+  keys:      'Keys',
+  other:     'Other',
+};
+
+// Preferred ordering for the 7-stem PRO pipeline
+const STEM_ORDER = ['vocals', 'drums', 'bass', 'guitar', 'piano', 'other', 'no_vocals'];
+
 function buildTracksFromBackend(result) {
   const rawStems = result?.stems;
   const arr = Array.isArray(rawStems)
@@ -162,15 +160,23 @@ function buildTracksFromBackend(result) {
     : rawStems && typeof rawStems === 'object'
       ? Object.entries(rawStems).map(([type, url]) => ({ type, url }))
       : [];
-  return arr.map((stem) => ({
+
+  const sorted = [...arr].sort((a, b) => {
+    const ia = STEM_ORDER.indexOf(a.type);
+    const ib = STEM_ORDER.indexOf(b.type);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  return sorted.map((stem) => ({
     id: stem.type,
-    name: stem.name || stem.type,
+    name: stem.name || STEM_DISPLAY_NAMES[stem.type] || stem.type,
     color: stemColorFor(stem.type),
     role: getStemRole(stem.type),
     uri: stem.url,
-    volume: 1,
-    mute: false,
+    volume: stem.type === 'no_vocals' ? 0 : 1,
+    mute: stem.type === 'no_vocals',
     solo: false,
+    fx: { eq: { low: 0.5, mid: 0.5, high: 0.5 }, reverb: 0, reverbType: 'room' },
   }));
 }
 
@@ -184,16 +190,25 @@ function buildTracksFromLocal(localStems) {
     volume: 1,
     mute: false,
     solo: false,
+    fx: { eq: { low: 0.5, mid: 0.5, high: 0.5 }, reverb: 0, reverbType: 'room' },
   }));
 }
 
 // ─── Track Channel Card ───────────────────────────────────────────────────────
 function TrackCard({ item, onUpdate, isWorship, isIPad }) {
+  const [showEQ, setShowEQ] = useState(false);
   const role = item.role || getStemRole(item.name);
   const roleColor = ROLE_COLOR[role] || '#94A3B8';
   const isPad       = role === 'PAD';
   const worshipGlow = isWorship && isPad;
   const worshipDim  = isWorship && !isPad;
+  const eq = item.fx?.eq || { low: 0.5, mid: 0.5, high: 0.5 };
+
+  const updateEQ = (band, value) => {
+    onUpdate({ ...item, fx: { ...(item.fx || {}), eq: { ...eq, [band]: value } } });
+  };
+
+  const eqActive = Math.abs(eq.low - 0.5) > 0.05 || Math.abs(eq.mid - 0.5) > 0.05 || Math.abs(eq.high - 0.5) > 0.05;
 
   return (
     <View style={[
@@ -229,6 +244,12 @@ function TrackCard({ item, onUpdate, isWorship, isIPad }) {
           >
             <Text style={[st.smLabel, item.mute && st.smLabelActive]}>M</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[st.smBtn, isIPad && st.smBtnIPad, showEQ && st.smBtnEQActive, eqActive && !showEQ && st.smBtnEQDot]}
+            onPress={() => setShowEQ(v => !v)}
+          >
+            <Text style={[st.smLabel, showEQ && st.smLabelActive]}>EQ</Text>
+          </TouchableOpacity>
         </View>
         <Text style={[st.volPct, worshipDim && { color: '#374151' }]}>
           {Math.round(item.volume * 100)}%
@@ -245,6 +266,36 @@ function TrackCard({ item, onUpdate, isWorship, isIPad }) {
         thumbTintColor={worshipGlow ? '#E879F9' : '#E5E7EB'}
         onValueChange={(v) => onUpdate({ ...item, volume: v })}
       />
+
+      {showEQ && (
+        <View style={st.eqPanel}>
+          {[
+            { band: 'low',  label: 'LOW',  freq: '100Hz' },
+            { band: 'mid',  label: 'MID',  freq: '1kHz'  },
+            { band: 'high', label: 'HIGH', freq: '8kHz'  },
+          ].map(({ band, label, freq }) => (
+            <View key={band} style={st.eqBand}>
+              <View style={st.eqLabelRow}>
+                <Text style={st.eqBandLabel}>{label}</Text>
+                <Text style={st.eqFreqLabel}>{freq}</Text>
+              </View>
+              <Slider
+                style={st.eqSlider}
+                minimumValue={0}
+                maximumValue={1}
+                value={eq[band]}
+                minimumTrackTintColor={eq[band] > 0.5 ? item.color : '#EF4444'}
+                maximumTrackTintColor={eq[band] < 0.5 ? item.color : '#374151'}
+                thumbTintColor='#E5E7EB'
+                onValueChange={(v) => updateEQ(band, v)}
+              />
+              <Text style={st.eqDbLabel}>
+                {eq[band] === 0.5 ? '0' : `${eq[band] > 0.5 ? '+' : ''}${Math.round((eq[band] - 0.5) * 24)}dB`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -284,7 +335,7 @@ export default function StemMixerScreen({ route, navigation }) {
       }));
       const res = await fetchWithRetry(`${apiBase || CINESTAGE_URL}/ai/music/mix-recommendations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...syncHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           stems: stemInfo,
           genre: 'worship',
@@ -303,7 +354,11 @@ export default function StemMixerScreen({ route, navigation }) {
   }
 
   // Section + AI
-  const sections           = parseSectionsFromSong(song);
+  const fallbackSectionLabels = React.useMemo(
+    () => parseSectionsFromSong(song),
+    [song?.id, song?.lyrics, song?.chordChart, song?.chordSheet],
+  );
+  const [pipelineSections, setPipelineSections] = useState([]);
   const [activeSection,    setActiveSection]   = useState(null);
   const sectionHistoryRef  = useRef([]);
   const [aiSuggestion,     setAiSuggestion]    = useState(null);
@@ -311,6 +366,12 @@ export default function StemMixerScreen({ route, navigation }) {
   // Tap tempo
   const tapTimesRef        = useRef([]);
   const [detectedBpm,      setDetectedBpm]     = useState(null);
+
+  // Stem waveform peaks (fetched after tracks load)
+  const [stemPeaks,        setStemPeaks]        = useState(null);
+  const [displayWaveformPeaks, setDisplayWaveformPeaks] = useState(() =>
+    normalizeWaveformPeaks(song?.analysis?.waveformPeaks || song?.waveformPeaks || null),
+  );
 
   // Remember pre-pause state so we can restore it on resume
   const preStateRef = useRef(ENGINE_STATE.PLAYING);
@@ -321,6 +382,16 @@ export default function StemMixerScreen({ route, navigation }) {
   const midiCommandHandlerRef = useRef(null);
 
   const [midiConnected, setMidiConnected] = useState(false);
+  const sectionWindows = React.useMemo(() => {
+    if (Array.isArray(pipelineSections) && pipelineSections.length > 0) {
+      return pipelineSections;
+    }
+    return buildSectionWindows(fallbackSectionLabels, duration);
+  }, [pipelineSections, fallbackSectionLabels, duration]);
+  const sections = React.useMemo(
+    () => sectionWindows.map((section) => section.label),
+    [sectionWindows],
+  );
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -368,7 +439,7 @@ export default function StemMixerScreen({ route, navigation }) {
           const missingNames = [];
           for (const t of allTracks) {
             if (t.uri) {
-              const info = await FileSystem.getInfoAsync(t.uri);
+              const info = await getFileInfo(t.uri);
               if (info.exists) validTracks.push(t);
               else { missingNames.push(t.name); console.warn('[StemMixer] missing:', t.uri); }
             } else missingNames.push(t.name);
@@ -417,6 +488,59 @@ export default function StemMixerScreen({ route, navigation }) {
   useEffect(() => {
     if (tracks.length > 0) audioEngine.setMixerState(tracks);
   }, [tracks]);
+
+  // Fetch stem waveform peaks once tracks are loaded
+  useEffect(() => {
+    if (!song?.id || !tracks?.length) return;
+    getStemWaveformData(song.id, song).then(peaks => {
+      if (peaks) setStemPeaks(peaks);
+    });
+  }, [song?.id, tracks?.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const pipeline = await loadSongWavePipeline(song, {
+          audioUrl: resolveSongWaveformSourceUrl(song),
+          waveformPoints: isIPad ? 1280 : 640,
+          displayPoints: isIPad ? 960 : 480,
+          includeCues: true,
+        });
+        if (cancelled || !pipeline) return;
+
+        if (pipeline.displayPeaks.length > 0) {
+          setDisplayWaveformPeaks(pipeline.displayPeaks);
+        } else {
+          setDisplayWaveformPeaks(
+            normalizeWaveformPeaks(song?.analysis?.waveformPeaks || song?.waveformPeaks || null),
+          );
+        }
+
+        if (Array.isArray(pipeline.sections) && pipeline.sections.length > 0) {
+          setPipelineSections(pipeline.sections);
+        } else {
+          setPipelineSections([]);
+        }
+
+        if (!duration && pipeline.durationSec > 0) {
+          setDuration(pipeline.durationSec);
+        }
+      } catch {
+        if (!cancelled) {
+          setPipelineSections([]);
+          setDisplayWaveformPeaks(
+            normalizeWaveformPeaks(song?.analysis?.waveformPeaks || song?.waveformPeaks || null),
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [song, isIPad, duration]);
 
   // ── MIDI WebSocket — Cloudflare DO sync room, auto-reconnects ───────────────
   useEffect(() => {
@@ -548,7 +672,7 @@ export default function StemMixerScreen({ route, navigation }) {
       setAiSuggestion(suggestion?.section ? suggestion : null);
     } else if (tap.count === 2) {
       // Loop section
-      const sectionWindow = getSectionWindow(sections, section, duration);
+      const sectionWindow = sectionWindows.find((entry) => entry.label === section) || null;
       if (sectionWindow) {
         audioEngine.applyConductorCommand?.({
           type: 'LOOP_SECTION',
@@ -580,7 +704,7 @@ export default function StemMixerScreen({ route, navigation }) {
       audioEngine.clearLoopRegion?.();
       setEngineState(position > 0 ? ENGINE_STATE.PLAYING : ENGINE_STATE.IDLE);
     } else {
-      const sectionWindow = getSectionWindow(sections, activeSection, duration);
+      const sectionWindow = sectionWindows.find((entry) => entry.label === activeSection) || null;
       if (sectionWindow) {
         audioEngine.applyConductorCommand?.({
           type: 'LOOP_SECTION',
@@ -694,9 +818,9 @@ export default function StemMixerScreen({ route, navigation }) {
   // ── Derived values ─────────────────────────────────────────────────────────
   const anySolo        = tracks.some(t => t.solo);
   const displayPos     = isSeeking ? seekValue : position;
-  const waveformPeaks  = normalizeWaveformPeaks(
-    song?.analysis?.waveformPeaks || song?.waveformPeaks || null,
-  );
+  const waveformPeaks  = Array.isArray(displayWaveformPeaks) && displayWaveformPeaks.length > 0
+    ? displayWaveformPeaks
+    : normalizeWaveformPeaks(song?.analysis?.waveformPeaks || song?.waveformPeaks || null);
   const waveformProgress = duration > 0 ? Math.min(1, displayPos / duration) : 0;
   const waveformWidth    = Math.max(200, screenWidth - 32);
   const stateMeta        = STATE_META[engineState];
@@ -786,6 +910,14 @@ export default function StemMixerScreen({ route, navigation }) {
           height={isIPad ? 104 : 76}
           progress={waveformProgress}
         />
+        {stemPeaks && tracks?.length > 0 && (
+          <StemWaveformView
+            stemsData={stemPeaks}
+            activeStems={buildActiveStems(tracks)}
+            progress={waveformProgress || 0}
+            height={80}
+          />
+        )}
       </View>
 
       {/* ── Transport ────────────────────────────────────────────── */}
@@ -1013,15 +1145,12 @@ export default function StemMixerScreen({ route, navigation }) {
         </View>
       )}
 
-      {tracks.map(item => (
-        <TrackCard
-          key={item.id}
-          item={item}
-          onUpdate={updateTrack}
-          isWorship={isWorship}
-          isIPad={isIPad}
-        />
-      ))}
+      {/* ── Pro Mixer Console ─────────────────────────────────────── */}
+      <ProMixerConsole 
+        tracks={tracks}
+        onUpdateTrack={updateTrack}
+        isWorship={isWorship}
+      />
 
       <View style={{ height: 60 }} />
     </ScrollView>
@@ -1163,4 +1292,15 @@ const st = StyleSheet.create({
   volPct:      { width: 46, color: '#6B7280', fontSize: 12, textAlign: 'right', fontVariant: ['tabular-nums'] },
   volSlider:   { height: 42, marginTop: 8, marginHorizontal: -4 },
   volSliderIPad:{ height: 52 },
+
+  // ── EQ panel
+  smBtnEQActive: { backgroundColor: '#312E81' },
+  smBtnEQDot:    { borderWidth: 1, borderColor: '#6366F1' },
+  eqPanel:       { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#1F2937', gap: 6 },
+  eqBand:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  eqLabelRow:    { width: 44, alignItems: 'flex-start' },
+  eqBandLabel:   { color: '#9CA3AF', fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
+  eqFreqLabel:   { color: '#374151', fontSize: 8 },
+  eqSlider:      { flex: 1, height: 32 },
+  eqDbLabel:     { width: 38, color: '#6B7280', fontSize: 10, textAlign: 'right', fontVariant: ['tabular-nums'] },
 });
