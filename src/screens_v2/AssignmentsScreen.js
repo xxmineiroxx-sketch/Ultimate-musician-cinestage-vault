@@ -9,6 +9,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
+import {
+  connectSocket,
+  subscribeRoom,
+  unsubscribeRoom,
+  onSocketEvent,
+} from '../services/socketClient';
 import { ROLE_LABELS } from '../models_v2/models';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
@@ -265,6 +271,35 @@ export default function AssignmentsScreen({ navigation, route }) {
     if (!requestedServiceId) return;
     syncFromServer();
   }, [requestedServiceId, syncFromServer]);
+
+  // Subscribe to real-time service and practice updates
+  useEffect(() => {
+    let mounted = true;
+    let room = null;
+
+    const setup = async () => {
+      const profile = await getUserProfile();
+      if (!mounted || !profile?.orgId) return;
+      room = `${profile.orgId}:services`;
+      connectSocket();
+      subscribeRoom(room);
+    };
+    setup();
+
+    const unsubPublished = onSocketEvent('service:published', () => {
+      if (mounted) syncFromServer();
+    });
+    const unsubPractice = onSocketEvent('practice:updated', () => {
+      if (mounted) syncFromServer();
+    });
+
+    return () => {
+      mounted = false;
+      unsubPublished();
+      unsubPractice();
+      if (room) unsubscribeRoom(room);
+    };
+  }, [syncFromServer]);
 
   const pushResponse = async (assignment, status, declineReason = '') => {
     const prof = await getUserProfile();

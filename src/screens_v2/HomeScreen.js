@@ -626,6 +626,22 @@ export default function HomeScreen({ navigation }) {
     };
   }, [profile?.orgId]);
 
+  // Listen for service publishes and practice updates on the services room
+  useEffect(() => {
+    if (!profile?.orgId) return;
+    connectSocket();
+    const unsubPublished = onSocketEvent('service:published', () => {
+      loadDashboardData();
+    });
+    const unsubPractice = onSocketEvent('practice:updated', () => {
+      loadDashboardData();
+    });
+    return () => {
+      unsubPublished();
+      unsubPractice();
+    };
+  }, [profile?.orgId, loadDashboardData]);
+
   useEffect(() => {
     maybeShowVersePopup();
     const sub = AppState.addEventListener('change', (nextState) => {
