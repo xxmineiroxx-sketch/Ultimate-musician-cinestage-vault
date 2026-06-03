@@ -201,6 +201,18 @@ export function normalizeWaveformAnalysis(raw, fallback = {}) {
     fallback.peaks,
   );
 
+  const spectral_centroids =
+    analysis.spectral_centroids ||
+    raw?.spectral_centroids ||
+    fallback.spectral_centroids ||
+    [];
+
+  const chroma_peaks =
+    analysis.chroma_peaks ||
+    raw?.chroma_peaks ||
+    fallback.chroma_peaks ||
+    [];
+
   const sections = toArray(
     firstNonEmptyArray(
       analysis.sections,
@@ -237,7 +249,13 @@ export function normalizeWaveformAnalysis(raw, fallback = {}) {
     raw,
     analysis,
     peaks,
-    waveformPeaks: peaks,
+    spectral_centroids,
+    chroma_peaks,
+    waveformPeaks: {
+      peaks,
+      spectral_centroids,
+      chroma_peaks,
+    },
     sections,
     waveformSections: sections,
     cues,

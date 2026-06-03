@@ -4143,6 +4143,7 @@ export default function RehearsalScreen({ route, navigation }) {
              lengthSeconds={effectiveDuration}
              playheadPct={effectiveDuration > 0 ? position / effectiveDuration : 0}
              waveformPeaks={waveformPeaks}
+             worshipIntelligence={song?.analysis?.worship_intelligence}
              hapticMap={song?.analysis?.worship_intelligence?.haptic_map || []}
              hapticsEnabled={true}
              onSeek={(pct) => handleSeek(pct * effectiveDuration)}
@@ -4674,6 +4675,7 @@ export default function RehearsalScreen({ route, navigation }) {
             lengthSeconds={effectiveDuration}
             playheadPct={effectiveDuration > 0 ? position / effectiveDuration : 0}
             waveformPeaks={waveformPeaks}
+            worshipIntelligence={song?.analysis?.worship_intelligence}
             hapticMap={song?.analysis?.worship_intelligence?.haptic_map || []}
             hapticsEnabled={true}
             onSeek={(pct) => handleSeek(pct * effectiveDuration)}
