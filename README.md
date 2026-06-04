@@ -501,6 +501,58 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 
 ---
 
+## 2026-06-03 Ultimate Playback QA Status
+
+This update records the latest Ultimate Playback release-audit work. The mobile app source remains outside this GitHub vault; this README is the durable GitHub handoff note for sync/release status.
+
+Implemented in the Playback app:
+- Elevated member screens now require verified sync role grants before admin, leader, or content editor access is shown.
+- Assignment responses now persist to a local offline outbox and retry during sync.
+- Messages now persist to a local offline outbox and retry on inbox refresh.
+- Expo SDK 54 patch packages were updated, and `expo-doctor` passed all checks.
+- iOS TestFlight QA build `f6be1f49-2a37-44f4-9d5f-91e6fcd388fd`, app version `1.3.1`, build `38`, channel `production`, failed during the Bundle JavaScript build phase because `babel-preset-expo` was not declared as a top-level dev dependency.
+- The missing `babel-preset-expo` dependency was added and pinned to the Expo SDK 54 line. Local `npx expo export --platform ios` passes after the fix.
+- Replacement iOS TestFlight build is in progress: `27e6f6ae-116a-4eb8-ae80-ab6b095a1d3f`, app version `1.3.1`, build `39`, channel `production`.
+
+Verified:
+- Changed Playback route gate, role utilities, Home, content editor, assignments, and messages files passed JavaScript syntax checks.
+- Touched Playback files passed whitespace checks.
+- `npx expo-doctor` passed `18/18` after adding `babel-preset-expo`.
+- `npx expo export --platform ios` completed successfully after adding `babel-preset-expo`.
+- The production sync status endpoint responded successfully.
+- App source scan found no active production localhost, LAN IP, or tunnel fallback; only a local MIDI bridge comment remains.
+
+Release blocker:
+- EAS build `f6be1f49-2a37-44f4-9d5f-91e6fcd388fd` failed during the Bundle JavaScript build phase. The dependency cause was fixed locally, and replacement build `27e6f6ae-116a-4eb8-ae80-ab6b095a1d3f` is the active TestFlight candidate.
+- The Cloudflare sync Worker auth login path accepted bogus credentials and returned `ok: true` with no token while creating a profile. Fix this before treating the TestFlight build as release-ready.
+
+Next handoff:
+- Watch replacement EAS build `27e6f6ae-116a-4eb8-ae80-ab6b095a1d3f`; submit it to TestFlight only if it completes successfully.
+- Locate the active `ultimate-playback-sync` Worker source, harden `/sync/auth/login`, and retest with a real TestFlight install.
+- Keep admin controls in Ultimate Musician and keep Playback musician-first, with elevated screens visible only after server-backed grants.
+
+### 2026-06-04 Update
+
+Implemented:
+- Added hardened `ultimate-playback-sync` Worker source in the active Playback repo.
+- Added token-required auth handling in Ultimate Playback and Ultimate Musician.
+- Added per-service offline bundle/preflight cache for assignments and setlists.
+- Added Setlist preflight summary for rehearsal readiness.
+- Upgraded the advanced waveform pipeline with role-aware timed cue markers.
+
+Verified:
+- Worker local smoke test rejects bogus login, registers with a token, accepts valid login, rejects wrong password, and reports status.
+- WavePipeline local smoke test emits general plus role-specific cue markers.
+- `npx expo export --platform ios` passed.
+- `npx expo-doctor` passed `18/18`.
+- EAS build `27e6f6ae-116a-4eb8-ae80-ab6b095a1d3f` finished successfully as build `39`.
+
+Still required before release:
+- Wrangler is not authenticated in this shell, so the new Worker could not be deployed.
+- Create/bind Cloudflare KV `SYNC_STORE`, deploy `apps/ultimate_playback/cloudflare/ultimate-playback-sync`, and rerun the bogus-login smoke test against production.
+
+---
+
 ## Part 6 — Common Issues & Tips
 
 ### Server not reachable
