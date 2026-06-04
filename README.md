@@ -551,6 +551,25 @@ Still required before release:
 - Wrangler is not authenticated in this shell, so the new Worker could not be deployed.
 - Create/bind Cloudflare KV `SYNC_STORE`, deploy `apps/ultimate_playback/cloudflare/ultimate-playback-sync`, and rerun the bogus-login smoke test against production.
 
+### 2026-06-04 Market Readiness Structure Pass
+
+Implemented:
+- Added `/sync/service-bundle` to the hardened Playback sync Worker.
+- Added a one-shot service bundle fetch/cache path in Playback.
+- Home background-prefetches upcoming service bundles.
+- Setlist prefers service bundles and keeps legacy setlist/library endpoints as fallback.
+- Preflight now checks chart readiness and audio asset readiness.
+- Worker setlists preserve audio URLs, media URLs, stems URLs, assets, waveform peaks, cue markers, and role cues.
+
+Verified:
+- Service-bundle Worker smoke test passed for assignment + setlist + chart + audio asset.
+- `git diff --check` passed for Worker and bundle files.
+- `npx expo export --platform ios --output-dir /tmp/ultimate-playback-market-ready-export` passed.
+- `npx expo-doctor` passed `18/18`.
+
+Release gate:
+- The app structure is stronger and more market-aligned against MultiTracks, but production remains blocked until the hardened Worker is deployed to Cloudflare with KV and tested from TestFlight.
+
 ---
 
 ## Part 6 — Common Issues & Tips
