@@ -570,6 +570,29 @@ Verified:
 Release gate:
 - The app structure is stronger and more market-aligned against MultiTracks, but production remains blocked until the hardened Worker is deployed to Cloudflare with KV and tested from TestFlight.
 
+### 2026-06-04 Cloudflare Deploy Update
+
+Completed:
+- Created KV namespace `SYNC_STORE`: `a55937c1234c4e5fb5f8e4e04adb1a6b`.
+- Bound KV in `apps/ultimate_playback/cloudflare/ultimate-playback-sync/wrangler.toml`.
+- Deployed production Worker `ultimate-playback-sync`.
+- Current production Worker version: `5885c6e2-490d-4a61-8cea-45c6bec47d1b`.
+
+Production smoke passed:
+- `/sync/status` returned `200`.
+- Bad login returned `401`.
+- Register returned `200` with token.
+- Valid login returned `200` with token.
+- Publish returned `200`.
+- Service bundle returned assignment, song, `assetsReady: true`, and `chartsReady: true`.
+
+Deploy note:
+- Registration initially returned `500` in Cloudflare production with the PBKDF2 path, so the Worker now uses salted SHA-256 via Workers WebCrypto.
+- One initial deploy command resolved to `ultimate-musician-api`; its basic endpoint still returns `Ultimate Musician API Live`, but admin flows should be smoke-tested.
+
+Next release gate:
+- TestFlight/device QA against production sync: auth, assignments, service bundle, offline reopen, and Ultimate Musician admin flows.
+
 ---
 
 ## Part 6 — Common Issues & Tips
