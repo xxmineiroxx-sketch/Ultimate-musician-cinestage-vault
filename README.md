@@ -593,6 +593,37 @@ Deploy note:
 Next release gate:
 - TestFlight/device QA against production sync: auth, assignments, service bundle, offline reopen, and Ultimate Musician admin flows.
 
+### 2026-06-05 TestFlight Build 40
+
+Completed:
+- Created replacement iOS TestFlight build for Ultimate Playback.
+- EAS build ID: `9f37bcb8-6015-4893-9d42-c57122906282`.
+- App version: `1.3.1`.
+- iOS build number: `40`.
+- Build profile: `testflight`.
+- Runtime version: `1.0.0`.
+- Channel: `production`.
+- Distribution: `STORE`.
+- Build status: `FINISHED`.
+- IPA artifact: `https://expo.dev/artifacts/eas/kEkdfQw1MThejLmLGBTKk1.ipa`.
+
+Submission:
+- Scheduled iOS App Store/TestFlight submission with existing App Store Connect API key.
+- Submission ID: `093d20b3-d214-451c-acd1-2b7a8d240554`.
+- Submission URL: `https://expo.dev/accounts/ultimate-dev/projects/ultimate-playback/submissions/093d20b3-d214-451c-acd1-2b7a8d240554`.
+- App Store Connect app ID: `6760688602`.
+- API key ID: `PC5FUT9DF2`.
+
+Verified before build:
+- `npx expo-doctor` passed `18/18`.
+- `npx expo export --platform ios` completed successfully.
+- Production sync auth smoke passed: status `200`, bogus login `401`, register `200` with token, login `200` with token.
+- Exported iOS bundle includes the production `/sync/service-bundle` client path and no active production localhost, LAN IP, or tunnel fallback.
+
+Remaining release gate:
+- Confirm EAS/Apple submission processing completion.
+- Install build `40` from TestFlight and run real device QA: login/register, member assignments, setlist bundle, offline reopen, admin publish/readiness, and Ultimate Musician admin smoke.
+
 ---
 
 ## Part 6 — Common Issues & Tips
