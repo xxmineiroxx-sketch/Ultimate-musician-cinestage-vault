@@ -128,6 +128,9 @@ export async function submitStemJob({
   separateHarmonies = true,
   voiceCount = 4,
   enhanceInstrumentStems = true,
+  targetStems = ["lead_vocal", "bgv", "acoustic_guitar", "electric_guitar", "piano", "synth", "bass", "drums"],
+  separationMethod = "generative_infilling",
+  preserveSpatial = true,
   uploadId,
 }) {
   const resolved = await resolveStemSourceUrl(sourceUrl, {
@@ -145,6 +148,9 @@ export async function submitStemJob({
       separateHarmonies,
       voiceCount,
       enhanceInstrumentStems,
+      targetStems,
+      separationMethod,
+      preserveSpatial,
     }),
   });
   const job = await response.json().catch(() => ({}));
@@ -167,6 +173,9 @@ export async function kickStemJob({
   separateHarmonies = true,
   voiceCount = 4,
   enhanceInstrumentStems = true,
+  targetStems = ["lead_vocal", "bgv", "acoustic_guitar", "electric_guitar", "piano", "synth", "bass", "drums"],
+  separationMethod = "generative_infilling",
+  preserveSpatial = true,
 }) {
   const payload = {
     jobId,
@@ -183,6 +192,9 @@ export async function kickStemJob({
         separateHarmonies,
         voiceCount,
         enhanceInstrumentStems,
+        targetStems,
+        method: separationMethod,
+        preserveSpatial,
       },
     },
   };

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import ChartReferencePanel from '../components/ChartReferencePanel';
+import { ADMIN_GRANT_ROLES, normalizeGrantRole } from '../utils/roleUtils';
 
 // All known instrument parts
 const ALL_INSTRUMENTS = [
@@ -163,6 +164,7 @@ export default function ContentEditorScreen({ navigation, route }) {
     type             = 'lyrics',
     existing         = '',
     isAdmin          = false,
+    grantRole        = '',
     instrument: instrumentParam = '',
     userRole         = '',
   } = route.params || {};
@@ -246,8 +248,9 @@ export default function ContentEditorScreen({ navigation, route }) {
       // Worship Leader role also gets direct-apply access (same as admin)
       const wpRole = userRole || profile?.assignmentRole || '';
       const isWL = wpRole === 'worship_leader' || wpRole === 'Worship Leader';
-      const isPrivileged = isAdmin || isWL;
-      const senderRole = profile?.grantedRole || wpRole || '';
+      const verifiedGrantRole = normalizeGrantRole(grantRole || profile?.grantedRole || '');
+      const isPrivileged = isAdmin || ADMIN_GRANT_ROLES.has(verifiedGrantRole) || isWL;
+      const senderRole = verifiedGrantRole || wpRole || '';
 
       if (isPrivileged) {
         const field = isLyrics ? 'lyrics' : instrument ? 'instrumentNotes' : 'chordChart';

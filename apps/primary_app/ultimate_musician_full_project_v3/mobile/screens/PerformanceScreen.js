@@ -60,7 +60,10 @@ import {
   markSongPreloaded,
   shouldAutoPlayNext,
 } from "../services/setlistWavePipeline";
-import { resolveTransitionWindow } from "../services/wavePipelineEngine";
+import {
+  buildAdvancedWavePipeline,
+  resolveTransitionWindow,
+} from "../services/wavePipelineEngine";
 import { connectSync, disconnectSync, send, subscribeSync, getSyncStatus } from "../services/syncClient";
 import { SYNC_URL } from "./config";
 
@@ -320,16 +323,24 @@ export default function PerformanceScreen() {
   useEffect(() => {
     (async () => {
       const armed = await loadArmedPipeline();
-      setPipeline(armed);
-      if (armed?.safetyPolicy?.mode) setSafetyMode(armed.safetyPolicy.mode);
-      setLiveLock(armed?.restrictions?.liveLock !== false);
-      const validation = validateArmedPipeline(armed);
+      const advancedArmed = armed
+        ? buildAdvancedWavePipeline(armed, {
+            bpm: armed.bpm,
+            displayTarget: 640,
+            includeTransients: true,
+          })
+        : null;
+      setPipeline(advancedArmed);
+      audioEngine.setPipelineConfig?.(advancedArmed);
+      if (advancedArmed?.safetyPolicy?.mode) setSafetyMode(advancedArmed.safetyPolicy.mode);
+      setLiveLock(advancedArmed?.restrictions?.liveLock !== false);
+      const validation = validateArmedPipeline(advancedArmed);
       setPolicyError(validation.ok ? null : validation.reason);
-      const allTracks = armed?.restrictions?.allTrackIds || [];
-      const visibleTracks = new Set(armed?.restrictions?.visibleTrackIds || []);
+      const allTracks = advancedArmed?.restrictions?.allTrackIds || [];
+      const visibleTracks = new Set(advancedArmed?.restrictions?.visibleTrackIds || []);
       setBlockedTrackIds(allTracks.filter((id) => !visibleTracks.has(id)));
       setTrackLanes(
-        buildTrackLanes(armed?.restrictions?.visibleTrackIds || []),
+        buildTrackLanes(advancedArmed?.restrictions?.visibleTrackIds || []),
       );
       const kits = await getPadKits();
       setKitsCount(kits.length);
@@ -341,13 +352,13 @@ export default function PerformanceScreen() {
       setLatencyCalibration(calibration);
       const historyRows = await getArmedPipelineHistory();
       setHistory(historyRows);
-      const seeded = createPredictiveState(armed?.markers || []);
+      const seeded = createPredictiveState(advancedArmed?.markers || []);
       setPredictiveState(seeded);
       setSuggestedJumps(suggestNextMarkers(seeded, null, 3));
       const setlist = await loadSetlist();
-      const baseWaveState = buildSetlistWaveState(setlist, armed);
+      const baseWaveState = buildSetlistWaveState(setlist, advancedArmed);
       if ((baseWaveState?.queue || []).length <= 1) {
-        const enriched = await loadRealSongsFromStemCenter(armed, setlist);
+        const enriched = await loadRealSongsFromStemCenter(advancedArmed, setlist);
         setSetlistState(enriched);
       } else {
         setSetlistState(baseWaveState);
@@ -1186,8 +1197,8 @@ export default function PerformanceScreen() {
               : 0
           }
           waveformPeaks={pipeline.waveformPeaks || null}
-          onSeek={(s) => {
-            handleSeek(s);
+          onSeek={(pct) => {
+            handleSeek(pct * (duration || pipeline.durationSec || 0));
             announcedSectionRef.current = "";
           }}
           bpm={pipeline.bpm || 0}

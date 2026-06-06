@@ -29,8 +29,13 @@ import PreparationHub from '../components_v2/PreparationHub';
 import ServiceCommandCenter from '../components_v2/ServiceCommandCenter';
 import { CineStageAPI } from '../api/cinestage';
 import { getUserProfile, getAssignments, saveAssignments, saveUserProfile } from '../services/storage';
+import {
+  cacheAssignmentBundles,
+  fetchAndCacheServiceBundle,
+} from '../services/serviceBundleCache';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
+import { normalizeGrantRole } from '../utils/roleUtils';
 import * as Notifications from 'expo-notifications';
 
 // Notifications: show alerts + play sound even when app is in foreground
@@ -616,6 +621,7 @@ export default function HomeScreen({ navigation }) {
                 : r
             ));
             await saveAssignments(merged);
+            await cacheAssignmentBundles(userProfile, merged).catch(() => {});
             userAssignments = merged;
           }
           // Cache successful fetch for offline use
@@ -630,6 +636,7 @@ export default function HomeScreen({ navigation }) {
           if (cached) {
             const parsed = JSON.parse(cached);
             userAssignments = parsed;
+            await cacheAssignmentBundles(userProfile, parsed).catch(() => {});
             setIsOffline(true);
           }
         } catch (_e) {}
@@ -651,7 +658,7 @@ export default function HomeScreen({ navigation }) {
         if (roleRes?.ok) {
           const data = await roleRes.json();
           // Use grantedRole (Playback permission: md/admin) if available, else org role
-          const role = data.grantedRole || null;
+          const role = normalizeGrantRole(data.grantedRole || null);
           if (role) {
             setMdRole(role);
             if (userProfile.grantedRole !== role) {
@@ -671,6 +678,7 @@ export default function HomeScreen({ navigation }) {
 
     setProfile(userProfile);
     setAssignments(dashboardAssignments);
+    await cacheAssignmentBundles(userProfile, dashboardAssignments).catch(() => {});
 
     // Group ALL upcoming assigned services — accepted OR pending, all orgs, all roles
     const upcomingRaw = dashboardAssignments
@@ -685,6 +693,18 @@ export default function HomeScreen({ navigation }) {
       .sort((g1, g2) => new Date(g1[0].service_date) - new Date(g2[0].service_date));
 
     setUpcomingServices(upcomingGrouped);
+    if (userProfile?.email) {
+      upcomingGrouped.slice(0, 3).forEach((group) => {
+        const serviceId = group?.[0]?.service_id || group?.[0]?.id;
+        if (!serviceId) return;
+        fetchAndCacheServiceBundle({
+          serviceId,
+          email: userProfile.email,
+          profile: userProfile,
+          timeoutMs: 5000,
+        }).catch(() => {});
+      });
+    }
     // Schedule local push reminders for upcoming services (non-blocking)
     scheduleServiceReminders(upcomingGrouped).catch(() => {});
 

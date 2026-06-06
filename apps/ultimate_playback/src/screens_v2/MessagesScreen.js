@@ -9,10 +9,13 @@ import {
   FlatList, TextInput, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserProfile } from '../services/storage';
 import ModernDashboardCard from '../components_v2/ModernDashboardCard';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
+
+const MESSAGE_OUTBOX_KEY = 'playback_message_outbox_v1';
 
 async function fetchJson(url, opts = {}) {
   const ctrl = new AbortController();
@@ -25,6 +28,62 @@ async function fetchJson(url, opts = {}) {
   } finally {
     clearTimeout(tid);
   }
+}
+
+async function getMessageOutbox() {
+  try {
+    const raw = await AsyncStorage.getItem(MESSAGE_OUTBOX_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveMessageOutbox(outbox) {
+  await AsyncStorage.setItem(
+    MESSAGE_OUTBOX_KEY,
+    JSON.stringify(Array.isArray(outbox) ? outbox : []),
+  );
+}
+
+async function enqueueMessage(payload) {
+  const outbox = await getMessageOutbox();
+  await saveMessageOutbox([
+    ...outbox,
+    {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      payload,
+      queuedAt: new Date().toISOString(),
+      retryCount: 0,
+    },
+  ]);
+}
+
+async function flushMessageOutbox() {
+  const outbox = await getMessageOutbox();
+  if (outbox.length === 0) return { flushed: 0, remaining: 0 };
+
+  const remaining = [];
+  let flushed = 0;
+  for (const item of outbox) {
+    try {
+      await fetchJson(`${SYNC_URL}/sync/message`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify(item.payload),
+      });
+      flushed += 1;
+    } catch (error) {
+      remaining.push({
+        ...item,
+        retryCount: Number(item.retryCount || 0) + 1,
+        lastError: String(error?.message || error),
+      });
+    }
+  }
+  await saveMessageOutbox(remaining);
+  return { flushed, remaining: remaining.length };
 }
 
 function isPersonalInboxMessage(thread, email = '') {
@@ -47,6 +106,7 @@ export default function MessagesScreen({ navigation }) {
   const [sending, setSending]     = useState(false);
   const [deleting, setDeleting]   = useState(false);
   const [showCompose, setShowCompose] = useState(false);
+  const [outboxCount, setOutboxCount] = useState(0);
 
   const [subject, setSubject]   = useState('');
   const [body, setBody]         = useState('');
@@ -67,6 +127,8 @@ export default function MessagesScreen({ navigation }) {
     if (!email) return;
     setLoading(true);
     try {
+      const outboxResult = await flushMessageOutbox().catch(() => null);
+      setOutboxCount(outboxResult?.remaining || 0);
       const data = await fetchJson(
         `${SYNC_URL}/sync/messages/replies?email=${encodeURIComponent(email)}`,
         { headers: syncHeaders() }
@@ -97,17 +159,29 @@ export default function MessagesScreen({ navigation }) {
 
     setSending(true);
     try {
-      await fetchJson(`${SYNC_URL}/sync/message`, {
-        method: 'POST',
-        headers: syncHeaders(),
-        body: JSON.stringify({
-          fromEmail: profile.email,
-          fromName: `${profile.name || ''} ${profile.lastName || ''}`.trim() || profile.email,
-          subject: subject.trim(),
-          message: body.trim(),
-          to: 'admin',
-        }),
-      });
+      const payload = {
+        fromEmail: profile.email,
+        fromName: `${profile.name || ''} ${profile.lastName || ''}`.trim() || profile.email,
+        subject: subject.trim(),
+        message: body.trim(),
+        to: 'admin',
+      };
+      try {
+        await fetchJson(`${SYNC_URL}/sync/message`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        await enqueueMessage(payload);
+        const nextOutbox = await getMessageOutbox();
+        setOutboxCount(nextOutbox.length);
+        setSubject('');
+        setBody('');
+        setShowCompose(false);
+        Alert.alert('Saved Offline', 'Your message will send automatically the next time Inbox syncs.');
+        return;
+      }
       setSubject('');
       setBody('');
       setShowCompose(false);
@@ -344,6 +418,17 @@ export default function MessagesScreen({ navigation }) {
         <Text style={s.composeBtnText}>✉️  New Message</Text>
       </TouchableOpacity>
 
+      {outboxCount > 0 ? (
+        <TouchableOpacity
+          style={s.outboxBanner}
+          onPress={() => refreshInbox(profile?.email)}
+        >
+          <Text style={s.outboxBannerText}>
+            {outboxCount} saved message{outboxCount === 1 ? '' : 's'} waiting to sync. Tap to retry.
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       <FlatList
         data={threads}
         keyExtractor={(item) => item.id}
@@ -449,6 +534,22 @@ const s = StyleSheet.create({
     backgroundColor: '#8B5CF6', margin: 16, padding: 14, borderRadius: 12,
   },
   composeBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
+  outboxBanner: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    backgroundColor: '#451A03',
+  },
+  outboxBannerText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
 
   // Inbox list
   list: { paddingHorizontal: 16, paddingBottom: 40 },

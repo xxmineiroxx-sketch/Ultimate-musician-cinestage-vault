@@ -54,12 +54,47 @@ export async function cacheRemoteAudioUrl(url) {
 
   const targetUri = `${dir}${stableHash(url)}${fileExtensionFromUrl(url)}`;
   const existing = await FileSystem.getInfoAsync(targetUri).catch(() => null);
-  if (existing?.exists && Number(existing.size || 0) > 0) {
+  // Existing cache file must be at least 100KB — anything smaller is almost
+  // certainly an old 404 HTML page (~20KB) from a prior cache-poisoning bug.
+  if (existing?.exists && Number(existing.size || 0) >= 100 * 1024) {
     return targetUri;
   }
+  if (existing?.exists) {
+    await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => {});
+  }
 
-  const download = await FileSystem.downloadAsync(url, targetUri).catch(() => null);
-  return download?.uri || targetUri;
+  const download = await FileSystem.downloadAsync(url, targetUri).catch((err) => {
+    console.log('[Loader] FileSystem.downloadAsync failed for', url, ':', err?.message || err);
+    return null;
+  });
+  if (!download?.uri) return null;
+
+  // Reject non-2xx — the worker returns 404 HTML for dead paths but downloadAsync
+  // happily saves the body anyway. Without this guard, AVPlayer hangs trying to
+  // decode HTML as m4a.
+  const status = Number(download.status || 0);
+  if (status && (status < 200 || status >= 300)) {
+    console.log('[Loader] download status', status, 'for', url, '- discarding');
+    await FileSystem.deleteAsync(download.uri, { idempotent: true }).catch(() => {});
+    return null;
+  }
+
+  // Reject non-audio MIME types (HTML 404 pages, JSON errors).
+  const mime = String(download.headers?.['content-type'] || download.mimeType || '').toLowerCase();
+  if (mime && !mime.startsWith('audio/') && !mime.startsWith('video/') && !mime.includes('octet-stream')) {
+    console.log('[Loader] download mime', mime, 'is not audio for', url, '- discarding');
+    await FileSystem.deleteAsync(download.uri, { idempotent: true }).catch(() => {});
+    return null;
+  }
+
+  const post = await FileSystem.getInfoAsync(download.uri).catch(() => null);
+  if (!post?.exists || Number(post.size || 0) < 1024) {
+    console.log('[Loader] cache file too small:', download.uri, 'size=', post?.size);
+    await FileSystem.deleteAsync(download.uri, { idempotent: true }).catch(() => {});
+    return null;
+  }
+  console.log('[Loader] cached', url, '→', download.uri, 'size=', post.size);
+  return download.uri;
 }
 
 export async function loadSoundFromUri(uri, timeoutMs = 12000) {
@@ -72,7 +107,9 @@ export async function loadSoundFromUri(uri, timeoutMs = 12000) {
     ]);
     return sound;
   } catch (err) {
-    try { await sound.unloadAsync(); } catch {}
+    // Detach the cleanup — awaiting unloadAsync while loadAsync is still in-flight
+    // can hang indefinitely on iOS (expo-av AVPlayer locking).
+    sound.unloadAsync?.().catch(() => {});
     throw err;
   }
 }
@@ -80,12 +117,31 @@ export async function loadSoundFromUri(uri, timeoutMs = 12000) {
 export async function loadSound(url) {
   if (!url || /youtube\.com|youtu\.be/i.test(url)) return null;
 
-  try {
-    return await loadSoundFromUri(url, 12000);
-  } catch (err) {
-    if (!looksLikeRemoteAudioUrl(url)) return null;
+  // For remote URLs, download to local file FIRST then load. The CineStage worker
+  // serving /storage/* doesn't honor HTTP Range or set Content-Length, which causes
+  // AVPlayer (expo-av's iOS backend) to stall during streamed loads. Loading from a
+  // local file:// URI sidesteps the streaming path entirely.
+  if (looksLikeRemoteAudioUrl(url)) {
     const cachedUri = await cacheRemoteAudioUrl(url);
-    if (!cachedUri) return null;
-    return await loadSoundFromUri(cachedUri, 12000);
+    if (cachedUri) {
+      try {
+        return await loadSoundFromUri(cachedUri, 15000);
+      } catch (err) {
+        console.log('[Loader] local file load failed:', cachedUri, err?.message || err);
+      }
+    }
+    // Last-ditch fallback: try direct stream (may stall, but timeout is bounded).
+    try {
+      return await loadSoundFromUri(url, 20000);
+    } catch {
+      return null;
+    }
+  }
+
+  // Local URI (file://, asset://) — load directly.
+  try {
+    return await loadSoundFromUri(url, 15000);
+  } catch {
+    return null;
   }
 }

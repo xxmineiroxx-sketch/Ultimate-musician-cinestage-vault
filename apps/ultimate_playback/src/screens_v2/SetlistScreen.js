@@ -18,6 +18,12 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserProfile, getAssignments } from '../services/storage';
+import {
+  cacheSetlistBundle,
+  fetchAndCacheServiceBundle,
+  getCachedSetlistBundle,
+  summarizeServiceBundle,
+} from '../services/serviceBundleCache';
 
 import { ROLE_LABELS } from '../models_v2/models';
 // WaveformBar removed — audio handled in PersonalPractice screen
@@ -519,6 +525,7 @@ export default function SetlistScreen({ navigation, route }) {
   const [worshipFlowLoading, setWorshipFlowLoading]   = useState({});
   const [worshipFreelyActive, setWorshipFreelyActive] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [preflight, setPreflight] = useState(null);
   const worshipFreelyTapCount = React.useRef(0);
   const worshipFreelyTapTimer = React.useRef(null);
 
@@ -585,6 +592,24 @@ export default function SetlistScreen({ navigation, route }) {
     setLoading(true);
     setError(null);
     try {
+      const remoteBundle = await fetchAndCacheServiceBundle({
+        serviceId,
+        email: profile?.email || '',
+        profile,
+      }).catch(() => null);
+      if (remoteBundle?.setlist) {
+        const merged = mergeSetlistWithLibrary(
+          remoteBundle.setlist || [],
+          remoteBundle.librarySongs || [],
+        );
+        setSetlist(merged);
+        setVocalAssignments(remoteBundle.vocalAssignments || {});
+        setPeopleById(buildPeopleById(remoteBundle.people || []));
+        setPreflight(remoteBundle.preflight || summarizeServiceBundle(remoteBundle));
+        setIsOffline(false);
+        return;
+      }
+
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort(), 8000);
       try {
@@ -607,6 +632,19 @@ export default function SetlistScreen({ navigation, route }) {
           setSetlist(merged);
           setVocalAssignments(lib.vocalAssignments?.[serviceId] || {});
           setPeopleById(buildPeopleById(lib.people || []));
+          const bundle = await cacheSetlistBundle({
+            serviceId,
+            assignmentGroup: serviceAssignments,
+            songs,
+            librarySongs,
+            vocalAssignments: lib.vocalAssignments?.[serviceId] || {},
+            people: lib.people || [],
+          }).catch(() => null);
+          setPreflight(bundle?.preflight || summarizeServiceBundle({
+            serviceId,
+            assignmentGroup: serviceAssignments,
+            setlist: songs,
+          }));
           // Cache successful fetch for offline use
           await AsyncStorage.setItem(`up/cache/setlist/${serviceId}`, JSON.stringify(songs)).catch(() => {});
           await AsyncStorage.setItem('up/cache/library', JSON.stringify(librarySongs)).catch(() => {});
@@ -615,6 +653,16 @@ export default function SetlistScreen({ navigation, route }) {
           const merged = mergeSetlistWithLibrary(songs, []);
           setSetlist(merged);
           setPeopleById({});
+          const bundle = await cacheSetlistBundle({
+            serviceId,
+            assignmentGroup: serviceAssignments,
+            songs,
+          }).catch(() => null);
+          setPreflight(bundle?.preflight || summarizeServiceBundle({
+            serviceId,
+            assignmentGroup: serviceAssignments,
+            setlist: songs,
+          }));
           // Cache at least the songs even if library-pull failed
           await AsyncStorage.setItem(`up/cache/setlist/${serviceId}`, JSON.stringify(songs)).catch(() => {});
           setIsOffline(false);
@@ -626,12 +674,26 @@ export default function SetlistScreen({ navigation, route }) {
       setPeopleById({});
       // Network failed — try to load from cache
       try {
+        const bundle = await getCachedSetlistBundle(serviceId).catch(() => null);
+        if (bundle?.setlist?.length) {
+          setSetlist(mergeSetlistWithLibrary(bundle.setlist, bundle.librarySongs || []));
+          setVocalAssignments(bundle.vocalAssignments || {});
+          setPeopleById(buildPeopleById(bundle.people || []));
+          setPreflight(bundle.preflight || summarizeServiceBundle(bundle));
+          setIsOffline(true);
+          return;
+        }
         const cachedSetlist = await AsyncStorage.getItem(`up/cache/setlist/${serviceId}`).catch(() => null);
         const cachedLib = await AsyncStorage.getItem('up/cache/library').catch(() => null);
         if (cachedSetlist) {
           const songs = JSON.parse(cachedSetlist);
           const lib = cachedLib ? JSON.parse(cachedLib) : [];
           setSetlist(mergeSetlistWithLibrary(songs, lib));
+          setPreflight(summarizeServiceBundle({
+            serviceId,
+            assignmentGroup: serviceAssignments,
+            setlist: songs,
+          }));
           setIsOffline(true);
         } else {
           setError('Could not load setlist.\nMake sure the sync server is running.');
@@ -642,7 +704,7 @@ export default function SetlistScreen({ navigation, route }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [profile, serviceAssignments]);
 
   // When UM sends a playback trigger, params.serviceId changes — load that setlist directly
   useEffect(() => {
@@ -1591,6 +1653,35 @@ export default function SetlistScreen({ navigation, route }) {
         </View>
       )}
 
+      {preflight && (
+        <View style={styles.preflightBar}>
+          <View style={styles.preflightHeader}>
+            <Text style={styles.preflightTitle}>
+              {preflight.ready ? 'Ready for rehearsal' : 'Preflight'}
+            </Text>
+            <Text style={styles.preflightMeta}>
+              {preflight.lastSyncedAt ? `Synced ${new Date(preflight.lastSyncedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Cached locally'}
+            </Text>
+          </View>
+          <View style={styles.preflightStats}>
+            <Text style={styles.preflightStat}>{preflight.songCount} songs</Text>
+            <Text style={styles.preflightStat}>{preflight.roleCount} role{preflight.roleCount === 1 ? '' : 's'}</Text>
+            <Text style={[
+              styles.preflightStat,
+              preflight.assetsReady ? styles.preflightOk : styles.preflightWarn,
+            ]}>
+              {preflight.assetsReady ? 'audio ready' : `${preflight.songsWithAudio || 0}/${preflight.songCount || 0} audio`}
+            </Text>
+            <Text style={[
+              styles.preflightStat,
+              preflight.missingCharts > 0 ? styles.preflightWarn : styles.preflightOk,
+            ]}>
+              {preflight.missingCharts > 0 ? `${preflight.missingCharts} chart gaps` : 'charts ready'}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* We're Live animated banner */}
       {liveBannerVisible ? (
         <Animated.View
@@ -2023,6 +2114,54 @@ const styles = StyleSheet.create({
   },
   setlistSection: {
     marginBottom: 24,
+  },
+  preflightBar: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    padding: 12,
+    backgroundColor: '#08111F',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+  },
+  preflightHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  preflightTitle: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  preflightMeta: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  preflightStats: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  preflightStat: {
+    color: '#CBD5E1',
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  preflightOk: {
+    color: '#34D399',
+  },
+  preflightWarn: {
+    color: '#FBBF24',
   },
   sectionTitle: {
     fontSize: 18,

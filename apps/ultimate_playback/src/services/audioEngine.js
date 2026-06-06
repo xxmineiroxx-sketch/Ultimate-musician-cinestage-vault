@@ -5,6 +5,11 @@
 
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import {
+  applyLatencyCompensationSec,
+  quantizeTimeSec,
+  resolveTransitionWindow,
+} from './advancedWavePipeline';
 
 const REMOTE_AUDIO_RE = /^https?:\/\//i;
 const AUDIO_CACHE_DIR = `${FileSystem?.cacheDirectory ?? ''}up_practice_audio/`;
@@ -25,6 +30,7 @@ class AudioEngine {
       stream: true,
     };
     this.syncInterval = null;
+    this.scheduledJumpTimer = null;
     this.onProgressUpdate = null;
     this.onPlaybackStatusChange = null;
     this.onPlaybackEnded = null;
@@ -38,6 +44,20 @@ class AudioEngine {
       lastCommand: null,
       mode: 'idle',
       updatedAt: 0,
+    };
+    this.pipelineConfig = {
+      bpm: 120,
+      beatsPerBar: 4,
+      gridMode: 'BAR',
+      launchQuantization: 'BAR',
+      transitionMode: 'CROSSFADE',
+      latencyOffsetMs: 0,
+      markers: [],
+      sections: [],
+      transientMarkers: [],
+      currentSection: null,
+      nextSection: null,
+      pendingJump: null,
     };
   }
 
@@ -116,6 +136,131 @@ class AudioEngine {
       lastCommand,
       mode,
       updatedAt: Date.now(),
+    };
+  }
+
+  setPipelineConfig(config = {}) {
+    this.pipelineConfig = {
+      ...this.pipelineConfig,
+      ...(config || {}),
+      markers: Array.isArray(config.markers) ? config.markers : this.pipelineConfig.markers,
+      sections: Array.isArray(config.sections) ? config.sections : this.pipelineConfig.sections,
+      transientMarkers: Array.isArray(config.transientMarkers)
+        ? config.transientMarkers
+        : this.pipelineConfig.transientMarkers,
+      updatedAt: Date.now(),
+    };
+    return this.getPipelineState();
+  }
+
+  getPipelineState(positionMillis = this.currentPosition) {
+    const positionSec = Math.max(0, Number(positionMillis || 0)) / 1000;
+    const sections = Array.isArray(this.pipelineConfig.sections) ? this.pipelineConfig.sections : [];
+    let currentSection = null;
+    let nextSection = null;
+    for (let i = 0; i < sections.length; i += 1) {
+      const section = sections[i];
+      if (Number(section.timeSec || 0) <= positionSec) {
+        currentSection = section;
+        nextSection = sections[i + 1] || null;
+      } else if (!nextSection) {
+        nextSection = section;
+        break;
+      }
+    }
+    return {
+      ...this.pipelineConfig,
+      currentSection,
+      nextSection,
+      positionSec,
+    };
+  }
+
+  clearScheduledJump() {
+    if (this.scheduledJumpTimer) {
+      clearTimeout(this.scheduledJumpTimer);
+      this.scheduledJumpTimer = null;
+    }
+    this.pipelineConfig = {
+      ...this.pipelineConfig,
+      pendingJump: null,
+    };
+  }
+
+  resolvePipelineJump(targetMillis, options = {}) {
+    const currentSec = Math.max(0, Number(this.currentPosition || 0)) / 1000;
+    const targetSec = Math.max(0, Number(targetMillis || 0)) / 1000;
+    const bpm = Number(options.bpm || this.pipelineConfig.bpm || 120);
+    const beatsPerBar = Number(options.beatsPerBar || this.pipelineConfig.beatsPerBar || 4);
+    const quantization = options.quantization || this.pipelineConfig.launchQuantization || 'IMMEDIATE';
+    const transitionMode = options.transitionMode || this.pipelineConfig.transitionMode || 'CUT';
+    const latencyOffsetMs = Number(options.latencyOffsetMs ?? this.pipelineConfig.latencyOffsetMs ?? 0);
+    const quantizedSec = quantizeTimeSec(targetSec, quantization, bpm, beatsPerBar);
+    const compensatedSec = applyLatencyCompensationSec(quantizedSec, latencyOffsetMs);
+    return {
+      requestedMillis: Math.max(0, Math.floor(targetMillis || 0)),
+      requestedSec: targetSec,
+      targetSec: compensatedSec,
+      targetMillis: Math.max(0, Math.floor(compensatedSec * 1000)),
+      quantizedSec,
+      quantization,
+      transition: resolveTransitionWindow(currentSec, compensatedSec, transitionMode),
+      bpm,
+      beatsPerBar,
+      latencyOffsetMs,
+    };
+  }
+
+  async jumpToTime(targetMillis, options = {}) {
+    const resolved = this.resolvePipelineJump(targetMillis, options);
+    this.clearScheduledJump();
+    await this.seek(resolved.targetMillis);
+    this._setConductorState('PIPELINE_JUMP', this.isPlaying ? 'playing' : 'paused');
+    return {
+      ok: true,
+      ...resolved,
+      pipelineState: this.getPipelineState(resolved.targetMillis),
+    };
+  }
+
+  async jumpToMarker(marker, options = {}) {
+    if (!marker) return { ok: false, reason: 'missing-marker' };
+    const targetSec = Number(
+      marker.timeSec
+        ?? marker.positionSeconds
+        ?? marker.startSec
+        ?? marker.start
+        ?? 0,
+    );
+    const result = await this.jumpToTime(targetSec * 1000, options);
+    return {
+      ...result,
+      marker,
+    };
+  }
+
+  scheduleJumpToMarker(marker, options = {}) {
+    if (!marker) return { ok: false, reason: 'missing-marker' };
+    const delayMs = Math.max(0, Number(options.delayMs || 0));
+    const targetSec = Number(marker.timeSec ?? marker.positionSeconds ?? marker.startSec ?? marker.start ?? 0);
+    const resolved = this.resolvePipelineJump(targetSec * 1000, options);
+    this.clearScheduledJump();
+    this.pipelineConfig = {
+      ...this.pipelineConfig,
+      pendingJump: {
+        marker,
+        dueAt: Date.now() + delayMs,
+        ...resolved,
+      },
+    };
+    this.scheduledJumpTimer = setTimeout(() => {
+      this.jumpToTime(targetSec * 1000, options).catch((error) => {
+        console.warn('[AudioEngine] scheduled jump failed:', error?.message || error);
+      });
+    }, delayMs);
+    return {
+      ok: true,
+      pendingJump: this.pipelineConfig.pendingJump,
     };
   }
 
@@ -212,6 +357,7 @@ class AudioEngine {
         position: this.currentPosition,
         duration: this.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(),
       });
       console.log('Playback started');
     } catch (error) {
@@ -241,6 +387,7 @@ class AudioEngine {
         position: this.currentPosition,
         duration: this.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(),
       });
       console.log('Playback paused');
     } catch (error) {
@@ -270,6 +417,7 @@ class AudioEngine {
         position: 0,
         duration: this.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(0),
       });
       console.log('Playback stopped');
     } catch (error) {
@@ -293,6 +441,7 @@ class AudioEngine {
         position: nextPosition,
         duration: this.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(nextPosition),
       });
       console.log(`Seeked to ${nextPosition}ms`);
     } catch (error) {
@@ -511,6 +660,14 @@ class AudioEngine {
       case 'CLEAR_LOOP':
         this.clearLoopRegion();
         break;
+      case 'PIPELINE_JUMP':
+      case 'JUMP_TO_MARKER':
+        if (payload.marker) {
+          await this.jumpToMarker(payload.marker, payload);
+        } else {
+          await this.jumpToTime(payload.positionMillis ?? payload.positionMs ?? payload.position ?? startMillis ?? 0, payload);
+        }
+        break;
       case 'CLICK_ONLY':
         await this.clickOnlyMode();
         this._setConductorState('CLICK_ONLY', 'click_only');
@@ -559,6 +716,7 @@ class AudioEngine {
       position: 0,
       duration: 0,
       loopRegion: this.getLoopRegion(),
+      pipelineState: this.getPipelineState(),
     };
   }
 
@@ -577,6 +735,7 @@ class AudioEngine {
   async unloadAll() {
     try {
       this._stopSyncMonitor();
+      this.clearScheduledJump();
 
       const unloadPromises = Object.values(this.tracks).map((track) =>
         track.isLoaded ? track.sound.unloadAsync() : Promise.resolve()
@@ -620,6 +779,7 @@ class AudioEngine {
             position: loopStart,
             duration: status.duration,
             loopRegion: this.getLoopRegion(),
+            pipeline: this.getPipelineState(loopStart),
           });
           return;
         }
@@ -629,6 +789,7 @@ class AudioEngine {
         position: status.position,
         duration: status.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(status.position),
       });
 
       // Check if playback finished
@@ -669,6 +830,7 @@ class AudioEngine {
         position: this.currentPosition,
         duration: this.duration,
         loopRegion: this.getLoopRegion(),
+        pipeline: this.getPipelineState(),
       });
     }
   }

@@ -26,6 +26,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [codeSent, setCodeSent] = useState(false);
+  const [betaResetCode, setBetaResetCode] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -46,12 +47,19 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
     setSendingCode(true);
     try {
-      await requestPasswordReset(normalizedIdentifier);
+      const result = await requestPasswordReset(normalizedIdentifier);
+      const recoveryCode = String(result?.resetCode || '').trim();
+      setBetaResetCode(recoveryCode);
+      if (recoveryCode) setCode(recoveryCode);
       setCodeSent(true);
-      Alert.alert(
-        'Check Your Email',
-        'If an account exists for that email or phone number, we sent a 6-digit reset code to the email on file.',
-      );
+      if (recoveryCode) {
+        Alert.alert('Reset Code Ready', `Use this code to reset your password: ${recoveryCode}`);
+      } else {
+        Alert.alert(
+          'Check Your Email',
+          'If an account exists for that email or phone number, we sent a 6-digit reset code to the email on file.',
+        );
+      }
     } catch (error) {
       Alert.alert('Could Not Send Code', error.message);
     } finally {
@@ -150,6 +158,13 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
           {codeSent ? (
             <>
+              {betaResetCode ? (
+                <View style={styles.betaCodeBox}>
+                  <Text style={styles.betaCodeLabel}>Beta reset code</Text>
+                  <Text style={styles.betaCodeValue}>{betaResetCode}</Text>
+                </View>
+              ) : null}
+
               <Text style={styles.codeHint}>
                 Code sent? Enter the 6-digit code from your email, then set a new
                 password below.
@@ -294,6 +309,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginBottom: 12,
+  },
+  betaCodeBox: {
+    backgroundColor: '#172554',
+    borderColor: '#2563EB',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  betaCodeLabel: {
+    color: '#93C5FD',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  betaCodeValue: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 1,
   },
   primaryBtn: {
     backgroundColor: '#4F46E5',

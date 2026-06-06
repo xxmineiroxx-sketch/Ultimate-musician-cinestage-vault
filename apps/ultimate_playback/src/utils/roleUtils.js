@@ -50,3 +50,40 @@ export function normalizeRoleKey(role) {
 
   return aliases[lower] || lower.replace(/\s+/g, '_');
 }
+
+export function normalizeGrantRole(role) {
+  const normalized = String(role || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+
+  const aliases = {
+    owner: 'org_owner',
+    orgowner: 'org_owner',
+    org_owner: 'org_owner',
+    administrator: 'admin',
+    admin: 'admin',
+    manager: 'manager',
+    worship_leader: 'manager',
+    worshipleader: 'manager',
+    music_director: 'md',
+    musicdirector: 'md',
+    md: 'md',
+    service_planner: 'leader',
+    planner: 'leader',
+    leader: 'leader',
+  };
+
+  return aliases[normalized] || normalized;
+}
+
+export const ADMIN_GRANT_ROLES = new Set(['org_owner', 'admin', 'manager', 'md']);
+export const LEADER_GRANT_ROLES = new Set(['leader']);
+export const ELEVATED_GRANT_ROLES = new Set([
+  ...ADMIN_GRANT_ROLES,
+  ...LEADER_GRANT_ROLES,
+]);
+
+export function hasGrantRole(role, allowedRoles = ELEVATED_GRANT_ROLES) {
+  return allowedRoles.has(normalizeGrantRole(role));
+}

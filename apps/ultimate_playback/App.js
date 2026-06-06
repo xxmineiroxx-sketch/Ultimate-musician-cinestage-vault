@@ -40,16 +40,22 @@ import FeedbackScreen from './src/screens_v2/FeedbackScreen';
 import AppErrorBoundary from './src/components_v2/AppErrorBoundary';
 import MessageNotificationWatcher from './src/components_v2/MessageNotificationWatcher';
 import PushNotificationManager from './src/components_v2/PushNotificationManager';
+import RoleGate from './src/components_v2/RoleGate';
 import {
   flushFeedbackQueue,
   registerGlobalErrorHandler,
   setFeedbackRuntimeContext,
 } from './src/services/feedback';
 import { syncPushRegistration } from './src/services/pushNotifications';
+import { ADMIN_GRANT_ROLES, LEADER_GRANT_ROLES } from './src/utils/roleUtils';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 const navigationRef = createNavigationContainerRef();
+const CONTENT_EDITOR_GRANT_ROLES = new Set([
+  ...ADMIN_GRANT_ROLES,
+  ...LEADER_GRANT_ROLES,
+]);
 const linking = {
   prefixes: ['ultimateplayback://'],
   config: {
@@ -228,6 +234,74 @@ function MainTabs() {
   );
 }
 
+function AdminRoute(props) {
+  return (
+    <RoleGate
+      {...props}
+      allowedRoles={ADMIN_GRANT_ROLES}
+      fallbackBody="The admin panel is only available to org owners, admins, worship leaders, and music directors."
+    >
+      {({ role, navigation, route }) => (
+        <AdminDashboardScreen
+          navigation={navigation}
+          route={{
+            ...route,
+            params: { ...(route.params || {}), mdRole: role },
+          }}
+        />
+      )}
+    </RoleGate>
+  );
+}
+
+function LeaderRoute(props) {
+  return (
+    <RoleGate
+      {...props}
+      allowedRoles={LEADER_GRANT_ROLES}
+      fallbackBody="The service planner workspace is only available to approved service planners."
+    >
+      {({ navigation, route, profile }) => (
+        <LeaderDashboardScreen
+          navigation={navigation}
+          route={{
+            ...route,
+            params: {
+              ...(route.params || {}),
+              leaderEmail: profile?.email || route.params?.leaderEmail || '',
+              leaderName: profile?.name || route.params?.leaderName || '',
+            },
+          }}
+        />
+      )}
+    </RoleGate>
+  );
+}
+
+function ContentEditorRoute(props) {
+  return (
+    <RoleGate
+      {...props}
+      allowedRoles={CONTENT_EDITOR_GRANT_ROLES}
+      fallbackBody="Content editing is only available to approved leaders. Team members can send part updates from assigned service screens."
+    >
+      {({ role, navigation, route }) => (
+        <ContentEditorScreen
+          navigation={navigation}
+          route={{
+            ...route,
+            params: {
+              ...(route.params || {}),
+              grantRole: role,
+              isAdmin: ADMIN_GRANT_ROLES.has(role),
+            },
+          }}
+        />
+      )}
+    </RoleGate>
+  );
+}
+
 export default function App() {
   const lastRouteNameRef = useRef('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -277,7 +351,7 @@ export default function App() {
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, signOut: handleSignOut }}>
+    <AuthContext.Provider value={{ isAuthenticated, signOut: handleSignOut, setAuthenticated: setIsAuthenticated }}>
       <GestureHandlerRootView style={styles.appContainer}>
         <AppErrorBoundary getCurrentRouteName={() => navigationRef.getCurrentRoute()?.name || lastRouteNameRef.current}>
           <MessageNotificationWatcher />
@@ -386,17 +460,17 @@ export default function App() {
                 />
                 <Stack.Screen
                   name="AdminDashboard"
-                  component={AdminDashboardScreen}
+                  component={AdminRoute}
                   options={{ headerShown: false }}
                 />
                 <Stack.Screen
                   name="LeaderDashboard"
-                  component={LeaderDashboardScreen}
+                  component={LeaderRoute}
                   options={{ headerShown: false }}
                 />
                 <Stack.Screen
                   name="ContentEditor"
-                  component={ContentEditorScreen}
+                  component={ContentEditorRoute}
                   options={{ headerShown: false }}
                 />
                 <Stack.Screen

@@ -5,8 +5,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { verifyCode, resendCode } from '../services/authAPI';
+import { useAuth } from '../context/AuthContext';
 
 export default function VerifyScreen({ navigation, route }) {
+  const { setAuthenticated } = useAuth();
   const insets = useSafeAreaInsets();
   const email = route?.params?.email || '';
   const identifier = route?.params?.identifier || email;
@@ -32,7 +34,7 @@ export default function VerifyScreen({ navigation, route }) {
     setLoading(true);
     try {
       await verifyCode(identifier, fullCode, { email, purpose });
-      navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'HomeTab' } }] });
+      setAuthenticated(true);
     } catch (err) {
       Alert.alert('Invalid Code', err.message);
       setCode(['', '', '', '', '', '']);

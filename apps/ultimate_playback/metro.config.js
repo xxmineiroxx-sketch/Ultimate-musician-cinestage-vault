@@ -20,7 +20,7 @@ config.resolver.nodeModulesPaths = [
   projectNodeModules,
   reactNativeNodeModules,
 ];
-config.resolver.disableHierarchicalLookup = true;
+config.resolver.disableHierarchicalLookup = false;
 config.resolver.extraNodeModules = new Proxy(
   {},
   {

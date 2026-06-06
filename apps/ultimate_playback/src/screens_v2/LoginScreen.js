@@ -15,9 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { login, loginWithApple, isLoggedIn } from '../services/authAPI';
 import { sendLoginNotification } from '../services/loginNotification';
+import { useAuth } from '../context/AuthContext';
 
 export default function LoginScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+  const { setAuthenticated } = useAuth();
   const [identifier, setIdentifier] = useState(
     route?.params?.identifier || route?.params?.email || '',
   );
@@ -65,7 +67,7 @@ export default function LoginScreen({ navigation, route }) {
         return;
       }
       sendLoginNotification(credential.email || result?.email || '');
-      navigation.replace('Main', { screen: 'HomeTab' });
+      setAuthenticated(true);
     } catch (e) {
       if (e.code === 'ERR_REQUEST_CANCELED') {
         // User canceled
@@ -94,7 +96,7 @@ export default function LoginScreen({ navigation, route }) {
         return;
       }
       sendLoginNotification(result?.email || identifier.trim());
-      navigation.replace('Main', { screen: 'HomeTab' });
+      setAuthenticated(true);
     } catch (err) {
       if (err?.needsVerification) {
         navigation.navigate('Verify', {

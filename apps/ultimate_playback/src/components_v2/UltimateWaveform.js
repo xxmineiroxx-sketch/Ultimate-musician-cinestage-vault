@@ -90,6 +90,7 @@ function normalizePeaks(peaks) {
  * @param {number}   props.currentTime  - Current playback position in seconds
  * @param {Function} props.onSeek       - Called with (timeSeconds) on scrub
  * @param {Array}    props.sections     - [{label, positionSeconds, timeSec, color}] from parseSectionsForWaveform
+ * @param {Array}    props.markers      - [{label, timeSec, color, source}] transient/cue markers
  * @param {number}   props.bpm          - BPM for beat grid (0 = hidden)
  * @param {number}   props.height       - Component height in logical pixels (default 72)
  * @param {number|null} props.loopStartPct - Loop region start 0→1 (null = no loop)
@@ -103,6 +104,7 @@ export default function UltimateWaveform({
   currentTime = 0,
   onSeek,
   sections = [],
+  markers = [],
   bpm = 0,
   height = 72,
   loopStartPct = null,
@@ -192,6 +194,31 @@ export default function UltimateWaveform({
     const lw = Math.round((loopEndPct - loopStartPct) * containerWidth);
     return { x: lx, w: Math.max(2, lw) };
   }, [loopStartPct, loopEndPct, containerWidth]);
+
+  // ── Transient/cue markers ─────────────────────────────────────────────────
+  const markerTicks = useMemo(() => {
+    if (!Array.isArray(markers) || markers.length === 0 || duration <= 0 || containerWidth <= 10) {
+      return [];
+    }
+    return markers
+      .map((marker) => {
+        const timeSec = Number(
+          marker.timeSec
+            ?? marker.positionSeconds
+            ?? marker.startSec
+            ?? marker.start
+            ?? 0,
+        );
+        if (!Number.isFinite(timeSec) || timeSec < 0 || timeSec > duration) return null;
+        return {
+          x: Math.round((timeSec / duration) * containerWidth),
+          label: marker.label || '',
+          color: marker.color || (marker.source === 'transient' ? '#F59E0B' : '#38BDF8'),
+          source: marker.source || marker.type || 'marker',
+        };
+      })
+      .filter(Boolean);
+  }, [markers, duration, containerWidth]);
 
   // ── Playhead position (for SVG rendering) ─────────────────────────────────
   const playheadXRounded = Math.round(playheadX);
@@ -286,6 +313,21 @@ export default function UltimateWaveform({
             ]}
           />
         ) : null}
+
+        {markerTicks.map((marker, i) => (
+          <View
+            key={`fallback-marker-${i}`}
+            pointerEvents="none"
+            style={[
+              styles.fallbackMarker,
+              {
+                left: marker.x,
+                height,
+                backgroundColor: marker.color,
+              },
+            ]}
+          />
+        ))}
 
         <Animated.View
           style={[
@@ -414,7 +456,28 @@ export default function UltimateWaveform({
           </React.Fragment>
         ))}
 
-        {/* 7. Playhead glow + line */}
+        {/* 7. Transient/cue markers */}
+        {markerTicks.map((marker, i) => (
+          <React.Fragment key={`mt${i}`}>
+            <Line
+              x1={marker.x} y1={0} x2={marker.x} y2={height}
+              stroke={marker.color}
+              strokeWidth={marker.source === 'transient' ? 1 : 1.5}
+              opacity={marker.source === 'transient' ? 0.42 : 0.72}
+            />
+            <Rect
+              x={marker.x - 2}
+              y={2}
+              width={4}
+              height={4}
+              rx={2}
+              fill={marker.color}
+              opacity={0.92}
+            />
+          </React.Fragment>
+        ))}
+
+        {/* 8. Playhead glow + line */}
         {playheadXRounded > 0 && (
           <>
             <Rect
@@ -468,6 +531,12 @@ const styles = StyleSheet.create({
     top: 0,
     borderLeftWidth: 1.5,
     borderRightWidth: 1.5,
+  },
+  fallbackMarker: {
+    position: 'absolute',
+    top: 0,
+    width: 1,
+    opacity: 0.55,
   },
   playheadTrack: {
     position: 'absolute',

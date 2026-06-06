@@ -1,0 +1,12 @@
+# Ultimate Platform Monorepo — Environment Configuration
+# Copy this file to .env and fill in real values.
+
+# Sync server (Cloudflare Pages)
+EXPO_PUBLIC_SYNC_URL=https://ultimatelabs.pages.dev
+
+# CineStage AI REST API (Cloudflare Container)
+EXPO_PUBLIC_CINESTAGE_URL=https://cinestage.ultimatelabs.co
+
+# Org credentials — obtain from your Ultimate Labs dashboard
+EXPO_PUBLIC_SYNC_ORG_ID=your-org-id-here
+EXPO_PUBLIC_SYNC_SECRET_KEY=your-secret-key-here

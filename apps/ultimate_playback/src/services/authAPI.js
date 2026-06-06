@@ -238,6 +238,7 @@ async function persistSession({
   email,
   phone,
   name,
+  token,
   role,
   grantedRole,
   orgRole,
@@ -271,6 +272,7 @@ async function persistSession({
         identifier: normalizedIdentifier,
         email: normalizedEmail,
         phone: normalizedPhone,
+        token: String(token || ''),
       }),
     ],
     [PROFILE_EMAIL_KEY, normalizedEmail],
@@ -462,11 +464,12 @@ async function migrateLegacySession() {
     const user = await persistSession({
       identifier,
       email: storedEmail,
-      phone: session?.phone || storedProfile?.phone || '',
-      name: resolvedName,
-      role: storedProfile?.grantedRole || null,
-      orgName: null,
-    });
+    phone: session?.phone || storedProfile?.phone || '',
+    name: resolvedName,
+    token: session?.token || '',
+    role: storedProfile?.grantedRole || null,
+    orgName: null,
+  });
     const profile = await hydrateLocalProfile({
       identifier: user.identifier,
       email: user.email,
@@ -506,6 +509,7 @@ async function completeAuthFromResponse(data, fallback = {}) {
     email: resolvedEmail,
     phone: resolvedPhone,
     name: resolvedName,
+    token: data?.token || '',
     role: roles.sessionRole,
     grantedRole: roles.grantedRole,
     orgRole: roles.orgRole,
@@ -568,6 +572,10 @@ export async function register({
     return data;
   }
 
+  if (!data?.token) {
+    throw new Error('Registration failed: secure session token missing.');
+  }
+
   await completeAuthFromResponse(data, {
     identifier: normalizedEmail,
     email: normalizedEmail,
@@ -590,6 +598,10 @@ export async function login(identifier, password) {
 
   if (data?.needsVerification) {
     return data;
+  }
+
+  if (!data?.token) {
+    throw new Error('Login failed: secure session token missing.');
   }
 
   await completeAuthFromResponse(data, {
@@ -703,6 +715,21 @@ export async function changePassword(identifier, currentPassword, newPassword) {
 
 export async function logout() {
   await unregisterStoredPushToken().catch(() => {});
+  try {
+    const rawSession = await AsyncStorage.getItem(SESSION_KEY);
+    const session = rawSession ? JSON.parse(rawSession) : null;
+    const token = String(session?.token || '').trim();
+    if (token) {
+      await fetch(`${SYNC_URL}/sync/auth/logout`, {
+        method: 'POST',
+        headers: {
+          ...syncHeaders(),
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ token }),
+      }).catch(() => {});
+    }
+  } catch {}
   await AsyncStorage.multiRemove([
     USER_KEY,
     SESSION_KEY,

@@ -1,84 +1,58 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { PanGestureHandler } from 'react-native-gesture-handler';
-import Animated, { 
-  useAnimatedStyle, 
-  useSharedValue, 
-  useAnimatedGestureHandler,
-  runOnJS,
-  withSpring
-} from 'react-native-reanimated';
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, PanResponder, Animated } from 'react-native';
 
 const TRACK_HEIGHT = 200;
 const FADER_KNOB_SIZE = 40;
 
 const ProTrackFader = ({ track, onChange }) => {
-  // Volume shared value (0 to 1)
-  const volume = useSharedValue(track.volume || 0.8);
-  
-  const gestureHandler = useAnimatedGestureHandler({
-    onStart: (_, ctx) => {
-      ctx.startVolume = volume.value;
-    },
-    onActive: (event, ctx) => {
-      // Calculate new volume based on vertical drag
-      const delta = -event.translationY / TRACK_HEIGHT;
-      let nextVolume = ctx.startVolume + delta;
-      
-      // Clamp between 0 and 1
-      if (nextVolume > 1) nextVolume = 1;
-      if (nextVolume < 0) nextVolume = 0;
-      
-      volume.value = nextVolume;
-      
-      // Update the actual audio engine via JS thread
-      runOnJS(onChange)({ ...track, volume: nextVolume });
-    },
-    onEnd: () => {
-      // Snap to smooth value
-      volume.value = withSpring(volume.value);
-    }
-  });
+  const [volume, setVolume] = useState(track.volume ?? 0.8);
+  const startVolumeRef = useRef(volume);
 
-  const animatedFaderStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateY: (1 - volume.value) * (TRACK_HEIGHT - FADER_KNOB_SIZE) }
-      ],
-    };
-  });
+  const clamp = (v) => Math.max(0, Math.min(1, v));
 
-  const animatedLevelStyle = useAnimatedStyle(() => {
-    return {
-      height: volume.value * TRACK_HEIGHT,
-      backgroundColor: volume.value > 0.8 ? '#F43F5E' : '#00FF99',
-    };
-  });
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        startVolumeRef.current = volume;
+      },
+      onPanResponderMove: (_, gesture) => {
+        const delta = -gesture.dy / TRACK_HEIGHT;
+        const next = clamp(startVolumeRef.current + delta);
+        setVolume(next);
+        onChange({ ...track, volume: next });
+      },
+    })
+  ).current;
+
+  const knobTop = (1 - volume) * (TRACK_HEIGHT - FADER_KNOB_SIZE);
+  const levelHeight = volume * TRACK_HEIGHT;
+  const levelColor = volume > 0.8 ? '#F43F5E' : '#00FF99';
 
   return (
     <View style={styles.container}>
       <Text style={styles.trackName}>{track.name.toUpperCase()}</Text>
-      
+
       <View style={styles.faderTrack}>
-        {/* Background Level Fill */}
-        <Animated.View style={[styles.levelFill, animatedLevelStyle]} />
-        
-        {/* The Pan Gesture Handler for the Fader */}
-        <PanGestureHandler onGestureEvent={gestureHandler}>
-          <Animated.View style={[styles.faderKnob, animatedFaderStyle]}>
-            <View style={styles.knobLine} />
-          </Animated.View>
-        </PanGestureHandler>
+        <View style={[styles.levelFill, { height: levelHeight, backgroundColor: levelColor }]} />
+
+        <View
+          {...panResponder.panHandlers}
+          style={[styles.faderKnob, { top: knobTop }]}
+        >
+          <View style={styles.knobLine} />
+        </View>
       </View>
 
       <View style={styles.controls}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.btn, track.solo && styles.soloActive]}
           onPress={() => onChange({ ...track, solo: !track.solo })}
         >
           <Text style={styles.btnText}>S</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.btn, track.mute && styles.muteActive]}
           onPress={() => onChange({ ...track, mute: !track.mute })}
         >
@@ -88,11 +62,6 @@ const ProTrackFader = ({ track, onChange }) => {
     </View>
   );
 };
-
-// Placeholder for Touchables since I can't import them in a single block easily without standard structure
-const TouchableOpacity = ({ children, style, onPress }) => (
-  <View onTouchStart={onPress} style={style}>{children}</View>
-);
 
 const styles = StyleSheet.create({
   container: {

@@ -126,17 +126,15 @@ export function AuthProvider({ children }) {
     const resolvedRole = String(data?.role || "").trim();
 
     await AsyncStorage.multiSet([
+      [STORAGE_KEYS.token, String(data?.token || "")],
       [STORAGE_KEYS.userEmail, resolvedUserId],
       [STORAGE_KEYS.userName, resolvedName],
       [STORAGE_KEYS.userRole, resolvedRole],
       [STORAGE_KEYS.userId, resolvedUserId],
     ]);
-    await AsyncStorage.multiRemove([
-      STORAGE_KEYS.token,
-      STORAGE_KEYS.pendingVerification,
-    ]);
+    await AsyncStorage.removeItem(STORAGE_KEYS.pendingVerification);
 
-    setToken(null);
+    setToken(data?.token || null);
     setUserId(resolvedUserId || null);
     setUserName(resolvedName || null);
     setUserRole(resolvedRole || null);
@@ -166,6 +164,10 @@ export function AuthProvider({ children }) {
         email: data.email || raw,
       });
       return { ...data, pendingVerification: verification };
+    }
+
+    if (!data?.token) {
+      throw new Error("Registration failed: secure session token missing.");
     }
 
     await persistSession(data, raw);
@@ -199,6 +201,10 @@ export function AuthProvider({ children }) {
     // Admin 2FA gate — caller must show 2FA modal and call verifyTwoFa
     if (data.needsTwoFa) {
       return data;
+    }
+
+    if (!data?.token) {
+      throw new Error("Login failed: secure session token missing.");
     }
 
     await persistSession(data, raw);

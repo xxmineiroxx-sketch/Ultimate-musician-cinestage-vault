@@ -102,6 +102,8 @@ export default function MasterpieceWaveform({
   duration = 0,                 // seconds
   onSeek,                       // (pct: 0–1) => void
   onSectionPress,               // (label, startPct, startMs, endPct) => void
+  sectionMarkers = null,        // advanced pipeline sections
+  cueMarkers = [],              // transient/cue markers
   activeStems = {},             // stem visibility map
   loopEnabled = false,
   loopSection = null,           // { label, startPct, endPct }
@@ -120,8 +122,18 @@ export default function MasterpieceWaveform({
 
   const durationMs = duration * 1000;
   const sections = useMemo(
-    () => parseSectionsFromText(songText, durationMs),
-    [songText, durationMs]
+    () => (
+      Array.isArray(sectionMarkers) && sectionMarkers.length > 0
+        ? sectionMarkers.map((section, index) => ({
+            ...section,
+            label: section.label || section.section || `Section ${index + 1}`,
+            positionSeconds: section.positionSeconds ?? section.timeSec ?? 0,
+            startPct: section.startPct ?? ((section.timeSec || 0) / Math.max(1, duration)),
+            color: section.color || colorFor(section.label || section.section),
+          }))
+        : parseSectionsFromText(songText, durationMs)
+    ),
+    [sectionMarkers, songText, durationMs, duration]
   );
 
   const currentTime = duration > 0 ? progress * duration : 0;
@@ -185,6 +197,7 @@ export default function MasterpieceWaveform({
         currentTime={currentTime}
         onSeek={handleSeek}
         sections={sections}
+        markers={cueMarkers}
         bpm={bpm}
         height={80}
         loopStartPct={loopStartPct}

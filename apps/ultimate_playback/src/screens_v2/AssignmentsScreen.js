@@ -9,6 +9,7 @@ import { promptCrossPlatform } from '../utils/promptCrossPlatform';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cacheAssignmentBundles } from '../services/serviceBundleCache';
 import * as Notifications from 'expo-notifications';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
@@ -196,6 +197,7 @@ function sortGroupsByTarget(groups, targetServiceId) {
 // Stores { [service_id]: { status, respondedAt } } in AsyncStorage.
 // This key is NEVER overwritten by sync — once a user responds, it sticks.
 const LOCAL_RESPONSES_KEY = 'playback_local_responses';
+const ASSIGNMENT_RESPONSE_OUTBOX_KEY = 'playback_assignment_response_outbox_v1';
 
 async function saveLocalResponse(serviceId, status) {
   try {
@@ -213,6 +215,76 @@ async function getLocalResponses() {
   } catch {
     return {};
   }
+}
+
+async function getAssignmentResponseOutbox() {
+  try {
+    const raw = await AsyncStorage.getItem(ASSIGNMENT_RESPONSE_OUTBOX_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveAssignmentResponseOutbox(outbox) {
+  await AsyncStorage.setItem(
+    ASSIGNMENT_RESPONSE_OUTBOX_KEY,
+    JSON.stringify(Array.isArray(outbox) ? outbox : []),
+  );
+}
+
+async function enqueueAssignmentResponse(payload) {
+  const outbox = await getAssignmentResponseOutbox();
+  const key = `${payload.serviceId || ''}_${payload.role || ''}_${payload.status || payload.response || ''}`;
+  const next = [
+    ...outbox.filter(item => item.key !== key),
+    {
+      key,
+      payload,
+      queuedAt: new Date().toISOString(),
+      retryCount: 0,
+    },
+  ];
+  await saveAssignmentResponseOutbox(next);
+}
+
+async function postAssignmentResponsePayload(payload) {
+  const res = await fetch(`${SYNC_URL}/sync/assignment/respond`, {
+    method: 'POST',
+    headers: syncHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    const error = new Error(data?.error || `HTTP ${res.status}`);
+    error.status = res.status;
+    error.conflict = data?.conflict || null;
+    throw error;
+  }
+  return data;
+}
+
+async function flushAssignmentResponseOutbox() {
+  const outbox = await getAssignmentResponseOutbox();
+  if (outbox.length === 0) return { flushed: 0, remaining: 0 };
+
+  const remaining = [];
+  let flushed = 0;
+  for (const item of outbox) {
+    try {
+      await postAssignmentResponsePayload(item.payload);
+      flushed += 1;
+    } catch (error) {
+      remaining.push({
+        ...item,
+        retryCount: Number(item.retryCount || 0) + 1,
+        lastError: String(error?.message || error),
+      });
+    }
+  }
+  await saveAssignmentResponseOutbox(remaining);
+  return { flushed, remaining: remaining.length };
 }
 
 // Extract org name + branch city from an assignment object
@@ -284,6 +356,8 @@ export default function AssignmentsScreen({ navigation, route }) {
         return;
       }
 
+      const outboxResult = await flushAssignmentResponseOutbox().catch(() => null);
+
       const fullName = [profile?.name, profile?.lastName].filter(Boolean).join(' ').trim();
       const assignUrl = fullName
         ? `${SYNC_URL}/sync/assignments?email=${encodeURIComponent(email)}&name=${encodeURIComponent(fullName)}`
@@ -328,8 +402,12 @@ export default function AssignmentsScreen({ navigation, route }) {
       // Prune past-service assignments from local storage (end-of-day grace)
       const active = dedupAssignments(merged).filter(a => !isPastService(a.service_date));
       await saveAssignments(active);
+      await cacheAssignmentBundles(profile, active).catch(() => {});
       setAssignments(active);
       setLastSync(new Date());
+      if (outboxResult?.remaining > 0) {
+        setSyncError(`${outboxResult.remaining} saved response${outboxResult.remaining === 1 ? '' : 's'} still waiting to sync`);
+      }
     } catch (e) {
       setSyncError(e?.message || 'Network request failed');
     } finally {
@@ -355,28 +433,25 @@ export default function AssignmentsScreen({ navigation, route }) {
       throw new Error('No email set in your profile');
     }
     const fullName = [prof.name, prof.lastName].filter(Boolean).join(' ').trim() || prof.email;
-    const res = await fetch(`${SYNC_URL}/sync/assignment/respond`, {
-      method: 'POST',
-      headers: syncHeaders(),
-      body: JSON.stringify({
-        serviceId:     assignment.service_id,
-        personId:      prof.email.trim().toLowerCase(),
-        name:          fullName,
-        response:      status,
-        status,
-        role:          assignment.role,
-        serviceName:   assignment.service_name || assignment.service_id,
-        declineReason: declineReason || undefined,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data?.ok === false) {
-      const error = new Error(data?.error || `HTTP ${res.status}`);
-      error.status = res.status;
-      error.conflict = data?.conflict || null;
+    const payload = {
+      serviceId:     assignment.service_id,
+      personId:      prof.email.trim().toLowerCase(),
+      name:          fullName,
+      response:      status,
+      status,
+      role:          assignment.role,
+      serviceName:   assignment.service_name || assignment.service_id,
+      declineReason: declineReason || undefined,
+    };
+    try {
+      return await postAssignmentResponsePayload(payload);
+    } catch (error) {
+      if (!error?.status) {
+        await enqueueAssignmentResponse(payload);
+        error.queuedOffline = true;
+      }
       throw error;
     }
-    return data;
   };
 
   const applyStatusToGroup = (group, status) => {
@@ -395,6 +470,13 @@ export default function AssignmentsScreen({ navigation, route }) {
       // Schedule local reminders for the service date
       scheduleServiceReminders(group).catch(() => {});
     } catch (error) {
+      if (error?.queuedOffline) {
+        await Promise.all(group.map(a => updateAssignment(a.id, { status: 'accepted' })));
+        const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
+        await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'accepted')));
+        setSyncError('Response saved offline. Pull to sync when you are back online.');
+        return;
+      }
       applyStatusToGroup(group, 'pending');
       await Promise.all(
         group.map(a => updateAssignment(a.id, { status: 'pending' }).catch(() => null))
@@ -449,7 +531,14 @@ export default function AssignmentsScreen({ navigation, route }) {
       // Cancel any scheduled reminders for this service
       const first = group[0];
       if (first?.service_id) cancelRemindersForService(first.service_id).catch(() => {});
-    } catch {
+    } catch (error) {
+      if (error?.queuedOffline) {
+        await Promise.all(group.map(a => updateAssignment(a.id, { status: 'declined' })));
+        const serviceIds = [...new Set(group.map(a => a.service_id).filter(Boolean))];
+        await Promise.all(serviceIds.map(sid => saveLocalResponse(sid, 'declined')));
+        setSyncError('Response saved offline. Pull to sync when you are back online.');
+        return;
+      }
       applyStatusToGroup(group, 'pending');
       await Promise.all(
         group.map(a => updateAssignment(a.id, { status: 'pending' }).catch(() => null))

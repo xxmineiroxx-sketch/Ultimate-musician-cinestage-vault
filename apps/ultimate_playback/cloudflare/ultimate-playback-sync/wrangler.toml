@@ -1,0 +1,8 @@
+name = "ultimate-playback-sync"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "SYNC_STORE"
+id = "a55937c1234c4e5fb5f8e4e04adb1a6b"
