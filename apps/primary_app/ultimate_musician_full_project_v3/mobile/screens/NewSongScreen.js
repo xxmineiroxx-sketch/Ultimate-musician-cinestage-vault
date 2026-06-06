@@ -270,6 +270,35 @@ export default function NewSongScreen({ navigation }) {
           keyboardType="url"
         />
 
+        {/* ── Advanced CineStage Power Toggles ── */}
+        <View style={styles.advancedOptions}>
+           <Text style={styles.advancedTitle}>CINESTAGE POWER OPTIONS</Text>
+           
+           <View style={styles.toggleRow}>
+              <View>
+                 <Text style={styles.toggleLabel}>Generative Infilling</Text>
+                 <Text style={styles.toggleDesc}>AI-reconstructed high frequencies</Text>
+              </View>
+              <View style={[styles.switch, { backgroundColor: '#10B981' }]} />
+           </View>
+
+           <View style={styles.toggleRow}>
+              <View>
+                 <Text style={styles.toggleLabel}>Spatial Audio</Text>
+                 <Text style={styles.toggleDesc}>Preserve Atmos/3D positioning</Text>
+              </View>
+              <View style={[styles.switch, { backgroundColor: '#10B981' }]} />
+           </View>
+
+           <View style={styles.toggleRow}>
+              <View>
+                 <Text style={styles.toggleLabel}>Informed Extraction</Text>
+                 <Text style={styles.toggleDesc}>Use MIDI/Chords for 99% purity</Text>
+              </View>
+              <View style={styles.switch} />
+           </View>
+        </View>
+
         <TouchableOpacity
           style={[styles.button, loading && { opacity: 0.5 }]}
           onPress={handleCreateAndProcess}
@@ -502,6 +531,44 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 14,
+  },
+  advancedOptions: {
+    marginTop: 20,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  advancedTitle: {
+    color: '#94A3B8',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+    marginBottom: 16,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  toggleLabel: {
+    color: '#F8FAF3',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  toggleDesc: {
+    color: '#64748B',
+    fontSize: 10,
+  },
+  switch: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   toolsSection: {
     marginTop: 24,

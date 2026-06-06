@@ -4,11 +4,12 @@ import { View, Text, StyleSheet, TouchableOpacity, PanResponder, Animated } from
 const TRACK_HEIGHT = 200;
 const FADER_KNOB_SIZE = 40;
 
-const ProTrackFader = ({ track, onChange }) => {
+const ProTrackFader = ({ track, onChange, compact = false, isMaster = false }) => {
   const [volume, setVolume] = useState(track.volume ?? 0.8);
   const startVolumeRef = useRef(volume);
 
-  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const TRACK_H = isMaster ? 240 : 200;
+  const FADER_W = compact ? 60 : 80;
 
   const panResponder = useRef(
     PanResponder.create({
@@ -18,108 +19,150 @@ const ProTrackFader = ({ track, onChange }) => {
         startVolumeRef.current = volume;
       },
       onPanResponderMove: (_, gesture) => {
-        const delta = -gesture.dy / TRACK_HEIGHT;
-        const next = clamp(startVolumeRef.current + delta);
+        const delta = -gesture.dy / TRACK_H;
+        const next = Math.max(0, Math.min(1, startVolumeRef.current + delta));
         setVolume(next);
         onChange({ ...track, volume: next });
       },
     })
   ).current;
 
-  const knobTop = (1 - volume) * (TRACK_HEIGHT - FADER_KNOB_SIZE);
-  const levelHeight = volume * TRACK_HEIGHT;
-  const levelColor = volume > 0.8 ? '#F43F5E' : '#00FF99';
+  const knobTop = (1 - volume) * (TRACK_H - FADER_KNOB_SIZE);
+  const levelHeight = volume * TRACK_H;
+  
+  // High-res color gradient for level
+  const levelColor = isMaster ? '#F59E0B' : volume > 0.9 ? '#EF4444' : volume > 0.7 ? '#FBBF24' : '#10B981';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.trackName}>{track.name.toUpperCase()}</Text>
+    <View style={[styles.container, { width: FADER_W }]}>
+      <Text style={[styles.trackName, isMaster && styles.masterName]}>
+        {track.name.toUpperCase()}
+      </Text>
 
-      <View style={styles.faderTrack}>
-        <View style={[styles.levelFill, { height: levelHeight, backgroundColor: levelColor }]} />
+      <View style={[styles.faderTrack, { height: TRACK_H }]}>
+        {/* Hardware-style Meter Ticks */}
+        <View style={styles.ticks}>
+           {[0, 20, 40, 60, 80, 100].map(t => (
+             <View key={t} style={[styles.tick, { bottom: `${t}%` }]} />
+           ))}
+        </View>
+
+        <View style={[styles.levelFill, { height: levelHeight, backgroundColor: levelColor, shadowColor: levelColor }]} />
 
         <View
           {...panResponder.panHandlers}
-          style={[styles.faderKnob, { top: knobTop }]}
+          style={[styles.faderKnob, { top: knobTop, width: FADER_W - 20, left: -(FADER_W - 20)/2 + 6 }]}
         >
           <View style={styles.knobLine} />
+          {isMaster && <View style={styles.masterIndicator} />}
         </View>
       </View>
 
-      <View style={styles.controls}>
-        <TouchableOpacity
-          style={[styles.btn, track.solo && styles.soloActive]}
-          onPress={() => onChange({ ...track, solo: !track.solo })}
-        >
-          <Text style={styles.btnText}>S</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.btn, track.mute && styles.muteActive]}
-          onPress={() => onChange({ ...track, mute: !track.mute })}
-        >
-          <Text style={styles.btnText}>M</Text>
-        </TouchableOpacity>
-      </View>
+      {!compact && (
+        <View style={styles.controls}>
+          <TouchableOpacity
+            style={[styles.btn, track.solo && styles.soloActive]}
+            onPress={() => onChange({ ...track, solo: !track.solo })}
+          >
+            <Text style={styles.btnText}>S</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btn, track.mute && styles.muteActive]}
+            onPress={() => onChange({ ...track, mute: !track.mute })}
+          >
+            <Text style={styles.btnText}>M</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    width: 80,
     alignItems: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: 4,
   },
   trackName: {
     color: '#94A3B8',
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: '900',
-    marginBottom: 12,
+    marginBottom: 16,
     letterSpacing: 1,
+    height: 12,
+  },
+  masterName: {
+    color: '#F59E0B',
+    fontSize: 10,
   },
   faderTrack: {
-    width: 12,
-    height: TRACK_HEIGHT,
-    backgroundColor: '#1E293B',
-    borderRadius: 6,
+    width: 14,
+    backgroundColor: '#0F172A',
+    borderRadius: 7,
     justifyContent: 'flex-end',
     position: 'relative',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  ticks: {
+    position: 'absolute',
+    left: -10,
+    right: -10,
+    height: '100%',
+  },
+  tick: {
+    position: 'absolute',
+    width: 4,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    left: 2,
   },
   levelFill: {
     width: '100%',
-    borderRadius: 6,
+    borderRadius: 7,
     position: 'absolute',
     bottom: 0,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
   },
   faderKnob: {
-    width: 44,
     height: FADER_KNOB_SIZE,
-    backgroundColor: '#F8FAF3',
-    borderRadius: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
     position: 'absolute',
-    left: -16,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderColor: '#94A3B8',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
   },
   knobLine: {
-    width: 20,
-    height: 2,
-    backgroundColor: '#94A3B8',
+    width: '60%',
+    height: 3,
+    backgroundColor: '#64748B',
+    borderRadius: 1.5,
+  },
+  masterIndicator: {
+    position: 'absolute',
+    top: 4,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#F59E0B',
   },
   controls: {
     marginTop: 20,
     gap: 8,
   },
   btn: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#1E293B',
     justifyContent: 'center',
     alignItems: 'center',
@@ -129,14 +172,15 @@ const styles = StyleSheet.create({
   btnText: {
     color: '#F8FAF3',
     fontWeight: '900',
+    fontSize: 10,
   },
   soloActive: {
     backgroundColor: '#FBBF24',
     borderColor: '#F59E0B',
   },
   muteActive: {
-    backgroundColor: '#F43F5E',
-    borderColor: '#E11D48',
+    backgroundColor: '#EF4444',
+    borderColor: '#DC2626',
   }
 });
 
