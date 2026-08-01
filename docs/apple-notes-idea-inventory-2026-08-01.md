@@ -91,7 +91,8 @@ The notes align with the current vision:
 
 Implementation implication:
 
-- Build a desktop worker registry: online/offline, capability list, queue depth, storage path, and last heartbeat.
+- Implemented on 2026-08-01: desktop worker registry tracks online/offline status, capabilities, queue depth, active job, storage path, and heartbeat timestamps.
+- Implemented on 2026-08-01: desktop workers claim stem jobs with a lease before processing; wrong-worker updates are rejected and stale claims can be reclaimed.
 - Mobile submits jobs to sync; desktop claims and processes jobs.
 - Store only job metadata and short-lived signed download links in cloud.
 - Add local cache recognition so repeated songs can publish faster.
@@ -182,13 +183,13 @@ Highest-value next implementation targets:
 
 1. Service review metadata and dashboard filtering.
 2. Scheduled service reminders and notification tone preferences.
-3. Desktop worker registry and stem job claim/heartbeat model.
-4. Song cue timeline model for per-song mixer/FOH/live cues.
-5. Read-only mixer profile discovery model.
-6. Idea Vault / Blueprint Vault inside Admin so notes become structured product memory.
-7. Role and branch verification tests.
+3. Song cue timeline model for per-song mixer/FOH/live cues.
+4. Read-only mixer profile discovery model.
+5. Idea Vault / Blueprint Vault inside Admin so notes become structured product memory.
+6. Role and branch verification tests.
 
 Implemented on 2026-08-01: shared service time parsing and normalization for `8am`, `8:00am`, `8 pm`, `8:30 PM`, and `20:30` across service creation, reminders, conflict detection, setlist expiry, and widget handoff.
+Implemented on 2026-08-01: desktop stem worker registry plus claim/heartbeat leases for single-desktop processing and stale claim recovery.
 
 ## Immediate Product Decision
 

@@ -43,6 +43,8 @@ flowchart TD
   - Lists known desktop workers.
 - `POST /sync/stem-jobs`
   - Creates a desktop-primary stem job from a YouTube/audio link.
+- `POST /sync/stem-job/claim?id=...`
+  - Desktop claims one queued job before processing. Claims include a lease so only one desktop processes a job at a time, and stale claims can be reclaimed.
 - `GET /sync/stem-jobs?status=&processor=&ownerEmail=&serviceId=`
   - Lists jobs for Admin/iPad/Desktop.
 - `GET /sync/stem-job?id=...`
@@ -166,13 +168,15 @@ Current worker behavior:
 
 1. Send heartbeat every 60 seconds.
 2. Poll `GET /sync/stem-jobs?processor=desktop&status=queued_for_desktop`.
-3. Download direct audio URLs or use local/file URLs as source audio.
-4. Run Demucs stem separation.
-5. Upload processed stems to `/sync/stem-assets/upload` when Cloudflare R2 is configured.
-6. Save stems and a manifest in the account holder's local cache.
-7. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
-8. Include `roleStemMap`, readiness flags, and local cache metadata.
-9. Call `POST /sync/stem-jobs/cleanup` so expired published jobs clear temporary metadata and R2 objects.
+3. If no queued job exists, poll expired `processing` claims and reclaim stale work.
+4. Claim a job through `POST /sync/stem-job/claim?id=...` before processing.
+5. Download direct audio URLs or use local/file URLs as source audio.
+6. Run Demucs stem separation.
+7. Upload processed stems to `/sync/stem-assets/upload` when Cloudflare R2 is configured.
+8. Save stems and a manifest in the account holder's local cache.
+9. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
+10. Include `roleStemMap`, readiness flags, and local cache metadata.
+11. Call `POST /sync/stem-jobs/cleanup` so expired published jobs clear temporary metadata and R2 objects.
 
 ## Cloudflare R2 Delivery
 

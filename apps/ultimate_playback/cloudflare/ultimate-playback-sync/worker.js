@@ -1,6 +1,7 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.1.0-stem-asset-delivery';
+const WORKER_VERSION = '2.2.0-desktop-stem-claims';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
   'content-type': 'application/json; charset=utf-8',
   'access-control-allow-origin': '*',
@@ -1268,11 +1269,32 @@ function findStemJob(store, url) {
   return (store.stemJobs || []).find((job) => job.id === id) || null;
 }
 
+function stemJobClaimExpired(job = {}, now = Date.now()) {
+  const expiresAt = Date.parse(job.claimExpiresAt || '');
+  return Boolean(job.claimedByDesktopWorkerId || job.claimedBy) && (!expiresAt || expiresAt <= now);
+}
+
+function stemJobClaimActive(job = {}, now = Date.now()) {
+  return Boolean(job.claimedByDesktopWorkerId || job.claimedBy) && !stemJobClaimExpired(job, now);
+}
+
+function clearStemJobClaim(job = {}) {
+  job.claimedByDesktopWorkerId = '';
+  job.claimedBy = '';
+  job.claimToken = '';
+  job.claimedAt = '';
+  job.claimExpiresAt = '';
+  job.claimRenewedAt = '';
+}
+
 function stemJobPublicPayload(job = {}) {
   const expired = job.retention?.expiresAt ? Date.parse(job.retention.expiresAt) < Date.now() : false;
+  const claimExpired = stemJobClaimExpired(job);
   return {
     ...job,
     expired,
+    claimExpired,
+    claimActive: stemJobClaimActive(job),
     desktopRequired: job.processor === 'waiting_for_desktop',
     readyForReview: ['completed', 'ready_for_review'].includes(job.status),
     readyForPlayback: ['approved', 'published'].includes(job.status) && !expired,
@@ -1326,6 +1348,20 @@ async function handleDesktopHeartbeat(request, env, store) {
       waveform: body.capabilities?.waveform !== false,
       roleStemMap: body.capabilities?.roleStemMap !== false,
     },
+    queueDepth: Math.max(0, Number(body.queueDepth || 0) || 0),
+    activeJobId: String(body.activeJobId || '').trim(),
+    storagePath: String(body.storagePath || body.cacheDir || '').trim(),
+    storage: body.storage && typeof body.storage === 'object'
+      ? {
+        cacheDir: String(body.storage.cacheDir || body.cacheDir || '').trim(),
+        externalDrive: Boolean(body.storage.externalDrive),
+        freeBytes: Number(body.storage.freeBytes || 0) || 0,
+      }
+      : {
+        cacheDir: String(body.cacheDir || '').trim(),
+        externalDrive: Boolean(body.externalDrive),
+        freeBytes: Number(body.freeBytes || 0) || 0,
+      },
     appVersion: String(body.appVersion || '').trim(),
     lastSeenAt: nowIso(),
     updatedAt: nowIso(),
@@ -1369,6 +1405,24 @@ async function handleUpdateStemJob(request, env, store, url) {
   const job = findStemJob(store, url);
   if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
   const body = await readJson(request);
+  const bodyWorkerId = String(body.desktopWorkerId || body.workerId || '').trim();
+  const claimedWorkerId = String(job.claimedByDesktopWorkerId || job.claimedBy || '').trim();
+  if (
+    bodyWorkerId &&
+    claimedWorkerId &&
+    bodyWorkerId !== claimedWorkerId &&
+    stemJobClaimActive(job)
+  ) {
+    return json({
+      ok: false,
+      error: 'stem job is claimed by another desktop worker',
+      claimedByDesktopWorkerId: claimedWorkerId,
+      claimExpiresAt: job.claimExpiresAt || '',
+    }, 409);
+  }
+  if (stemJobClaimExpired(job)) {
+    clearStemJobClaim(job);
+  }
   const nextStatus = String(body.status || job.status || '').trim();
   const progress = Number(body.progress ?? job.progress ?? 0);
 
@@ -1396,6 +1450,15 @@ async function handleUpdateStemJob(request, env, store, url) {
     error: String(body.error || '').trim(),
     updatedAt: nowIso(),
   });
+  if (bodyWorkerId && ['processing', 'queued_for_desktop'].includes(job.status)) {
+    job.claimedByDesktopWorkerId = bodyWorkerId;
+    job.claimedBy = bodyWorkerId;
+    job.claimRenewedAt = nowIso();
+    job.claimExpiresAt = new Date(Date.now() + STEM_JOB_CLAIM_TTL_MS).toISOString();
+  }
+  if (['ready_for_review', 'completed', 'approved', 'published', 'failed', 'rejected', 'waiting_for_source'].includes(job.status)) {
+    clearStemJobClaim(job);
+  }
   job.readiness = {
     ...(job.readiness || {}),
     ...(body.readiness || {}),
@@ -1404,6 +1467,61 @@ async function handleUpdateStemJob(request, env, store, url) {
     analyzed: body.readiness?.analyzed ?? job.readiness?.analyzed ?? Boolean(job.analysis && Object.keys(job.analysis).length),
     mappedToRoles: body.readiness?.mappedToRoles ?? job.readiness?.mappedToRoles ?? Boolean(job.roleStemMap && Object.keys(job.roleStemMap).length),
   };
+
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job) });
+}
+
+async function handleClaimStemJob(request, env, store, url) {
+  const body = await readJson(request);
+  const job = findStemJob(store, url) || (store.stemJobs || []).find((candidate) => (
+    candidate.status === 'queued_for_desktop' &&
+    candidate.processor === 'desktop' &&
+    (!body.ownerEmail || normalizeIdentifier(candidate.ownerEmail) === normalizeIdentifier(body.ownerEmail)) &&
+    (!body.accountEmail || normalizeIdentifier(candidate.ownerEmail) === normalizeIdentifier(body.accountEmail)) &&
+    (!body.accountId || String(candidate.accountId || '').trim() === String(body.accountId || '').trim())
+  ));
+  if (!job) return json({ ok: false, error: 'no queued desktop stem job found' }, 404);
+
+  const desktopWorkerId = String(body.desktopWorkerId || body.workerId || body.id || '').trim();
+  if (!desktopWorkerId) return json({ ok: false, error: 'desktopWorkerId is required' }, 400);
+
+  if (stemJobClaimExpired(job)) {
+    clearStemJobClaim(job);
+    if (job.status === 'processing') {
+      job.status = 'queued_for_desktop';
+      job.progress = Math.min(Number(job.progress || 0), 5);
+    }
+  }
+
+  const claimedWorkerId = String(job.claimedByDesktopWorkerId || job.claimedBy || '').trim();
+  if (claimedWorkerId && claimedWorkerId !== desktopWorkerId && stemJobClaimActive(job)) {
+    return json({
+      ok: false,
+      error: 'stem job is already claimed',
+      job: stemJobPublicPayload(job),
+    }, 409);
+  }
+
+  if (!['queued_for_desktop', 'processing'].includes(job.status)) {
+    return json({ ok: false, error: `stem job is not claimable from status ${job.status}` }, 409);
+  }
+
+  const leaseMs = Math.max(
+    60 * 1000,
+    Math.min(60 * 60 * 1000, Number(body.leaseMs || STEM_JOB_CLAIM_TTL_MS) || STEM_JOB_CLAIM_TTL_MS),
+  );
+  job.processor = 'desktop';
+  job.status = 'processing';
+  job.progress = Math.max(Number(job.progress || 0), 1);
+  job.desktopWorkerId = desktopWorkerId;
+  job.claimedByDesktopWorkerId = desktopWorkerId;
+  job.claimedBy = desktopWorkerId;
+  job.claimToken = String(body.claimToken || `claim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim();
+  job.claimedAt ||= nowIso();
+  job.claimRenewedAt = nowIso();
+  job.claimExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+  job.updatedAt = nowIso();
 
   await saveStore(env, store);
   return json({ ok: true, job: stemJobPublicPayload(job) });
@@ -1907,6 +2025,9 @@ async function handlePost(request, env, store, path, url) {
   }
   if (path === '/sync/stem-assets/upload') return handleUploadStemAsset(request, env, store, url);
   if (path === '/sync/stem-jobs') return handleCreateStemJob(request, env, store);
+  if (path === '/sync/stem-job/claim' || path === '/sync/stem-jobs/claim') {
+    return handleClaimStemJob(request, env, store, url);
+  }
   if (path === '/sync/stem-job/update' || path === '/sync/stem-jobs/update') {
     return handleUpdateStemJob(request, env, store, url);
   }

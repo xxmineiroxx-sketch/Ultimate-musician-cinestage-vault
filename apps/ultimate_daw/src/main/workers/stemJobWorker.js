@@ -203,6 +203,8 @@ class DesktopStemJobWorker {
     this.allowYouTubeDownload = options.allowYouTubeDownload ?? process.env.UM_STEM_ALLOW_YOUTUBE_DOWNLOAD === 'true';
     this.lastHeartbeatAt = 0;
     this.processing = false;
+    this.activeJobId = '';
+    this.lastQueueDepth = 0;
   }
 
   async fetchSync(endpoint, { method = 'GET', body } = {}) {
@@ -214,7 +216,10 @@ class DesktopStemJobWorker {
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(data?.error || `Sync request failed (${response.status})`);
+      const error = new Error(data?.error || `Sync request failed (${response.status})`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
     }
     return data;
   }
@@ -229,7 +234,14 @@ class DesktopStemJobWorker {
         accountEmail: this.accountEmail,
         accountId: this.accountId,
         status,
-        appVersion: 'ultimate_daw_worker_v1',
+        appVersion: 'ultimate_daw_worker_v2',
+        activeJobId: this.activeJobId,
+        queueDepth: this.lastQueueDepth,
+        cacheDir: this.cacheDir,
+        storage: {
+          cacheDir: this.cacheDir,
+          externalDrive: false,
+        },
         capabilities: {
           stems: true,
           demucs: true,
@@ -237,6 +249,18 @@ class DesktopStemJobWorker {
           waveform: false,
           roleStemMap: true,
         },
+      },
+    });
+  }
+
+  async claimJob(job) {
+    return this.fetchSync(`/sync/stem-job/claim?id=${encodeURIComponent(job.id)}`, {
+      method: 'POST',
+      body: {
+        desktopWorkerId: this.desktopId,
+        accountEmail: this.accountEmail,
+        accountId: this.accountId,
+        leaseMs: Math.max(this.heartbeatIntervalMs * 3, 5 * 60 * 1000),
       },
     });
   }
@@ -285,12 +309,23 @@ class DesktopStemJobWorker {
   }
 
   async listQueuedJobs() {
-    const params = new URLSearchParams({
+    const queuedParams = new URLSearchParams({
       processor: 'desktop',
       status: 'queued_for_desktop',
     });
-    if (this.accountEmail) params.set('ownerEmail', this.accountEmail);
-    return this.fetchSync(`/sync/stem-jobs?${params.toString()}`);
+    if (this.accountEmail) queuedParams.set('ownerEmail', this.accountEmail);
+    const queued = await this.fetchSync(`/sync/stem-jobs?${queuedParams.toString()}`);
+    const queuedJobs = Array.isArray(queued) ? queued : queued?.jobs || [];
+    if (queuedJobs.length) return queuedJobs;
+
+    const staleParams = new URLSearchParams({
+      processor: 'desktop',
+      status: 'processing',
+    });
+    if (this.accountEmail) staleParams.set('ownerEmail', this.accountEmail);
+    const processing = await this.fetchSync(`/sync/stem-jobs?${staleParams.toString()}`);
+    const processingJobs = Array.isArray(processing) ? processing : processing?.jobs || [];
+    return processingJobs.filter((job) => job.claimExpired);
   }
 
   async cleanupExpiredJobs(dryRun = false) {
@@ -305,11 +340,24 @@ class DesktopStemJobWorker {
     this.processing = true;
     try {
       const jobs = await this.listQueuedJobs();
-      const job = Array.isArray(jobs) ? jobs[0] : jobs?.jobs?.[0];
+      const queued = Array.isArray(jobs) ? jobs : jobs?.jobs || [];
+      this.lastQueueDepth = queued.length;
+      const job = queued[0];
       if (!job) return null;
-      await this.processJob(job);
-      return job;
+
+      const claimed = await this.claimJob(job).catch((err) => {
+        if (err?.status === 409 || (err?.message && /claimed/i.test(err.message))) return null;
+        throw err;
+      });
+      const claimedJob = claimed?.job;
+      if (!claimedJob) return null;
+
+      this.activeJobId = claimedJob.id;
+      await this.heartbeat('online').catch(() => null);
+      await this.processJob(claimedJob);
+      return claimedJob;
     } finally {
+      this.activeJobId = '';
       this.processing = false;
     }
   }
