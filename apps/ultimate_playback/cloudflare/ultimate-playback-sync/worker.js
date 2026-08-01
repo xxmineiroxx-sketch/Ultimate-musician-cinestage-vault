@@ -929,6 +929,47 @@ function activeDesktopWorkerFor(store, account = {}) {
   }) || null;
 }
 
+function serviceEndDateForStemJob(job = {}, store = {}) {
+  const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
+  const date = String(job.serviceDate || service?.date || '').trim();
+  const time = String(job.serviceEndTime || job.serviceTime || service?.endTime || service?.time || '').trim();
+  const parsed = Date.parse(`${date}T${time || '23:59'}`);
+  if (!Number.isNaN(parsed)) return new Date(parsed);
+  const serviceDate = Date.parse(date);
+  if (!Number.isNaN(serviceDate)) {
+    return new Date(serviceDate + (23 * 60 + 59) * 60 * 1000);
+  }
+  return new Date(Date.now() + 2 * 60 * 60 * 1000);
+}
+
+function stemRetentionPolicy(body = {}, store = {}) {
+  const retention = body.retention || body.storagePolicy || {};
+  const deleteAfterHours = Math.max(
+    0.25,
+    Number(
+      retention.deleteAfterServiceHours ??
+      body.deleteAfterServiceHours ??
+      2,
+    ) || 2,
+  );
+  return {
+    mode: String(retention.mode || body.storageMode || 'ephemeral_delivery').trim(),
+    deleteAfterServiceHours: deleteAfterHours,
+    cloudStorageAllowed: retention.cloudStorageAllowed === true || body.cloudStorageAllowed === true,
+    accountHolderLocalCacheAllowed: retention.accountHolderLocalCacheAllowed !== false && body.localCacheAllowed !== false,
+    cacheRecognitionEnabled: retention.cacheRecognitionEnabled !== false,
+    externalDriveRecommended: true,
+    websiteCatalogEligible: false,
+    cleanupStatus: 'not_published',
+    expiresAt: '',
+    cleanupInstructions: [
+      'Delete temporary delivery links and downloadable app cache after expiration.',
+      'Keep only metadata in the sync Worker.',
+      'Keep reusable stems only on the account holder desktop, mini PC/Mac, or external drive when explicitly saved.',
+    ],
+  };
+}
+
 function normalizeStemJob(body = {}, store = {}) {
   const account = body.account || {};
   const ownerEmail = normalizeIdentifier(
@@ -964,6 +1005,9 @@ function normalizeStemJob(body = {}, store = {}) {
       : 'audio',
     ownerEmail,
     accountId: String(body.accountId || account.id || account.accountId || '').trim(),
+    serviceDate: String(body.serviceDate || body.service?.date || '').trim(),
+    serviceTime: String(body.serviceTime || body.service?.time || '').trim(),
+    serviceEndTime: String(body.serviceEndTime || body.service?.endTime || '').trim(),
     requestedBy: {
       email: normalizeIdentifier(body.requestedBy?.email || body.submittedBy?.email || ownerEmail),
       name: String(body.requestedBy?.name || body.submittedBy?.name || body.requestedByName || 'Admin').trim(),
@@ -975,6 +1019,16 @@ function normalizeStemJob(body = {}, store = {}) {
     progress: 0,
     stems: {},
     roleStemMap: normalizeRoleStemMap(body.roleStemMap),
+    retention: stemRetentionPolicy(body, store),
+    localCache: {
+      status: 'unknown',
+      desktopWorkerId: desktopWorker?.id || '',
+      cacheKey: String(body.cacheKey || '').trim(),
+      localPath: '',
+      externalDrive: Boolean(body.externalDrive),
+      lastMatchedAt: '',
+      savedAt: '',
+    },
     analysis: {},
     sections: [],
     cueMarkers: [],
@@ -1013,11 +1067,13 @@ function findStemJob(store, url) {
 }
 
 function stemJobPublicPayload(job = {}) {
+  const expired = job.retention?.expiresAt ? Date.parse(job.retention.expiresAt) < Date.now() : false;
   return {
     ...job,
+    expired,
     desktopRequired: job.processor === 'waiting_for_desktop',
     readyForReview: ['completed', 'ready_for_review'].includes(job.status),
-    readyForPlayback: ['approved', 'published'].includes(job.status),
+    readyForPlayback: ['approved', 'published'].includes(job.status) && !expired,
   };
 }
 
@@ -1044,6 +1100,8 @@ function applyStemJobToSong(song, job) {
   song.cueMarkers = Array.isArray(job.cueMarkers) ? job.cueMarkers : song.cueMarkers || [];
   song.roleStemMap = job.roleStemMap || song.roleStemMap || {};
   song.stemReadiness = job.readiness || {};
+  song.stemRetention = job.retention || {};
+  song.localStemCache = job.localCache || {};
   song.updatedAt = nowIso();
 }
 
@@ -1124,6 +1182,15 @@ async function handleUpdateStemJob(request, env, store, url) {
     sections: Array.isArray(body.sections) ? body.sections : job.sections,
     cueMarkers: Array.isArray(body.cueMarkers) ? body.cueMarkers : job.cueMarkers,
     waveformPeaks: body.waveformPeaks || job.waveformPeaks || null,
+    localCache: body.localCache && typeof body.localCache === 'object'
+      ? {
+        ...(job.localCache || {}),
+        ...body.localCache,
+        desktopWorkerId: body.localCache.desktopWorkerId || body.desktopWorkerId || body.workerId || job.desktopWorkerId,
+        status: body.localCache.status || job.localCache?.status || 'saved',
+        updatedAt: nowIso(),
+      }
+      : job.localCache,
     error: String(body.error || '').trim(),
     updatedAt: nowIso(),
   });
@@ -1188,6 +1255,16 @@ async function handlePublishStemJob(request, env, store, url) {
   job.status = 'published';
   job.publishedAt = nowIso();
   job.librarySongId = librarySongId;
+  const serviceEnd = serviceEndDateForStemJob(job, store);
+  const deleteAfterHours = Number(job.retention?.deleteAfterServiceHours || 2) || 2;
+  job.retention = {
+    ...stemRetentionPolicy({ retention: job.retention || {} }, store),
+    ...(job.retention || {}),
+    cleanupStatus: 'scheduled',
+    serviceEndedAt: serviceEnd.toISOString(),
+    expiresAt: new Date(serviceEnd.getTime() + deleteAfterHours * 60 * 60 * 1000).toISOString(),
+    websiteCatalogEligible: false,
+  };
   job.readiness = {
     ...(job.readiness || {}),
     approved: true,
@@ -1216,6 +1293,45 @@ async function handlePublishStemJob(request, env, store, url) {
 
   await saveStore(env, store);
   return json({ ok: true, job: stemJobPublicPayload(job), song: librarySong });
+}
+
+async function handleCleanupStemJobs(request, env, store) {
+  const body = await readJson(request);
+  const dryRun = body.dryRun !== false;
+  const now = Date.now();
+  const expiredJobs = (store.stemJobs || []).filter((job) => (
+    job.retention?.expiresAt &&
+    Date.parse(job.retention.expiresAt) <= now &&
+    !['cleaned', 'archived_metadata'].includes(job.retention?.cleanupStatus)
+  ));
+
+  const cleaned = expiredJobs.map((job) => ({
+    id: job.id,
+    title: job.title,
+    serviceId: job.serviceId,
+    expiresAt: job.retention.expiresAt,
+    localCache: job.localCache || {},
+  }));
+
+  if (!dryRun) {
+    for (const job of expiredJobs) {
+      job.status = job.status === 'published' ? 'expired' : job.status;
+      job.stems = {};
+      job.stemsUrl = '';
+      job.retention = {
+        ...(job.retention || {}),
+        cleanupStatus: 'cleaned',
+        cleanedAt: nowIso(),
+      };
+      job.readiness = {
+        ...(job.readiness || {}),
+        published: false,
+      };
+    }
+    await saveStore(env, store);
+  }
+
+  return json({ ok: true, dryRun, count: cleaned.length, jobs: cleaned });
 }
 
 async function handleRejectStemJob(request, env, store, url) {
@@ -1587,6 +1703,9 @@ async function handlePost(request, env, store, path, url) {
   }
   if (path === '/sync/stem-job/publish' || path === '/sync/stem-jobs/publish') {
     return handlePublishStemJob(request, env, store, url);
+  }
+  if (path === '/sync/stem-jobs/cleanup' || path === '/sync/stem-job/cleanup') {
+    return handleCleanupStemJobs(request, env, store);
   }
   if (path === '/sync/stem-job/reject' || path === '/sync/stem-jobs/reject') {
     return handleRejectStemJob(request, env, store, url);

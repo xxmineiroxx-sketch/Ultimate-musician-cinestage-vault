@@ -137,6 +137,13 @@ export class CineStageAPI {
     });
   }
 
+  static async cleanupExpiredStemJobs(payload = {}) {
+    return this.fetchSyncJson('/sync/stem-jobs/cleanup', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   static async sendDesktopHeartbeat(payload = {}) {
     return this.fetchSyncJson('/sync/cinestage/desktop-heartbeat', {
       method: 'POST',
