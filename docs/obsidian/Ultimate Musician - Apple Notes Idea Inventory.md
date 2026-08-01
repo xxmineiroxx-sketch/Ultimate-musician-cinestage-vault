@@ -22,9 +22,10 @@ Next implementation targets:
 
 1. Service review metadata and dashboard filters.
 2. Apple Watch controls and iPhone widget support. Playback notification preferences and scheduled service reminders are implemented as of 2026-08-01.
-3. Time parsing utility for service times.
-4. Desktop worker registry for stem processing.
-5. Song cue timeline model.
-6. Read-only mixer profile discovery.
-7. Admin Idea Vault / Blueprint Vault.
-8. Role and branch verification tests.
+3. Desktop worker registry for stem processing.
+4. Song cue timeline model.
+5. Read-only mixer profile discovery.
+6. Admin Idea Vault / Blueprint Vault.
+7. Role and branch verification tests.
+
+Implemented on 2026-08-01: shared service time parsing and normalization across service creation, reminders, conflict detection, setlist expiry, and widget handoff.

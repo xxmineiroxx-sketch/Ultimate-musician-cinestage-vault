@@ -37,6 +37,12 @@ import {
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
 import { normalizeGrantRole } from '../utils/roleUtils';
+import {
+  formatServiceTime,
+  getServiceDateKey,
+  getServiceTimeKey,
+  parseServiceDateTime,
+} from '../utils/serviceTime';
 import * as Notifications from 'expo-notifications';
 
 // Notifications: show alerts + play sound even when app is in foreground
@@ -156,12 +162,8 @@ function resolveTimeConflicts(assignments) {
     const dateStr = a.service_date ? String(a.service_date) : null;
     if (!dateStr) return true; // no date — always show
 
-    const dateKey = dateStr.split('T')[0]; // "2026-03-15"
-
-    // Extract time: explicit field first, then from ISO string, else null
-    const timeKey =
-      a.service_time ||
-      (dateStr.includes('T') ? dateStr.split('T')[1]?.slice(0, 5) : null);
+    const dateKey = getServiceDateKey(dateStr);
+    const timeKey = getServiceTimeKey(a);
 
     // Without a time we can't detect a conflict — keep it
     if (!timeKey) return true;
@@ -311,21 +313,10 @@ function parseServiceEndMs(assignment) {
   const serviceDate = assignment?.service_date || assignment?.date;
   if (!serviceDate) return null;
 
-  if (String(serviceDate).includes('T')) {
-    const withTimeMs = new Date(serviceDate).getTime();
-    if (Number.isFinite(withTimeMs)) return withTimeMs;
-  }
-
-  const timeRaw = assignment?.service_time || assignment?.time || '';
-  const m = String(timeRaw).match(/(\d{1,2}):(\d{2})/);
-  if (m) {
-    const hh = Math.max(0, Math.min(23, Number(m[1] || 0)));
-    const mm = Math.max(0, Math.min(59, Number(m[2] || 0)));
-    const dt = new Date(serviceDate);
-    if (Number.isFinite(dt.getTime())) {
-      dt.setHours(hh, mm, 0, 0);
-      return dt.getTime();
-    }
+  const hasServiceTime = Boolean(getServiceTimeKey(assignment));
+  const parsed = hasServiceTime ? parseServiceDateTime(assignment, '') : null;
+  if (parsed) {
+    return parsed.getTime();
   }
 
   const dt = new Date(serviceDate);
@@ -500,7 +491,10 @@ export default function HomeScreen({ navigation }) {
       nextService: nextGroup
         ? { name: nextGroup[0].service_name || nextGroup[0].org_name || '',
             date: nextGroup[0].service_date || '',
-            time: nextGroup[0].service_time || '' }
+            time: formatServiceTime(
+              nextGroup[0].service_time || nextGroup[0].time || getServiceTimeKey(nextGroup[0]),
+              '',
+            ) }
         : null,
       role:             nextGroup?.[0]?.role || '',
       assignmentStatus: nextGroup?.[0]?.status || 'pending',
@@ -597,9 +591,9 @@ export default function HomeScreen({ navigation }) {
         const a = group[0];
         const serviceDate = a.service_date || a.date;
         if (!serviceDate) continue;
-        const dateStr = String(serviceDate).includes('T') ? serviceDate : serviceDate + 'T09:00:00';
-        const svcMs = new Date(dateStr).getTime();
-        if (isNaN(svcMs)) continue;
+        const serviceDateTime = parseServiceDateTime(a, '09:00');
+        if (!serviceDateTime) continue;
+        const svcMs = serviceDateTime.getTime();
         const svcName = a.service_name || a.name || 'Service';
         const roles = [...new Set(group.map(g => ROLE_LABELS[g.role] || g.role).filter(Boolean))];
         const roleStr = roles.join(', ') || 'team member';
@@ -1434,10 +1428,10 @@ export default function HomeScreen({ navigation }) {
               const dateFormatted = dateObj.toLocaleDateString('en-US', {
                 weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
               });
-              const timeFormatted = first.service_time
-                || (String(first.service_date).includes('T')
-                  ? dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                  : null);
+              const timeFormatted = formatServiceTime(
+                first.service_time || first.time || getServiceTimeKey(first),
+                null,
+              );
 
               return (
                 <>

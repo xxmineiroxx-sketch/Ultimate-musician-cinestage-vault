@@ -13,6 +13,7 @@ import { cacheAssignmentBundles } from '../services/serviceBundleCache';
 import * as Notifications from 'expo-notifications';
 import { getAssignments, saveAssignments, updateAssignment, getUserProfile } from '../services/storage';
 import { ROLE_LABELS } from '../models_v2/models';
+import { parseServiceDateTime } from '../utils/serviceTime';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
@@ -77,10 +78,9 @@ async function scheduleServiceReminders(group) {
   const roles = [...new Set(group.map(item => ROLE_LABELS[item.role] || item.role).filter(Boolean))];
   const roleStr = roles.join(', ') || 'team member';
 
-  // Parse service date (assume 10:00am local time if no time given)
-  const dateStr = String(first.service_date);
-  const serviceDate = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T10:00:00');
-  if (isNaN(serviceDate.getTime())) return;
+  // Assume 10:00 AM local time if no service time is available.
+  const serviceDate = parseServiceDateTime(first, '10:00');
+  if (!serviceDate) return;
 
   const { status } = await Notifications.requestPermissionsAsync().catch(() => ({ status: null }));
   if (status !== 'granted') return;

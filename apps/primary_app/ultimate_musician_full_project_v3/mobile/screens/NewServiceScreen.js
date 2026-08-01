@@ -13,39 +13,10 @@ import {
 import { SERVICE_TYPES, defaultServiceTypeId } from "../data/serviceTemplates";
 import { createService } from "../data/servicesStore";
 import { getSettings } from "../data/storage";
+import { normalizeServiceTime } from "../utils/serviceTime";
 import { SYNC_URL, syncHeaders } from "./config";
 
 const CUSTOM_TYPES_KEY = "um/custom_service_types/v1";
-
-// Parse flexible time input → "HH:mm" (24h) or null
-// Accepts: "8pm","8 PM","8:30pm","8:30 PM","20:30","9:00","09:00","8am","10 am"
-function parseTimeInput(raw) {
-  if (!raw) return null;
-  const s = raw.trim().toLowerCase().replace(/\s+/g, "");
-  // Already HH:mm 24h
-  const hhmm = s.match(/^(\d{1,2}):(\d{2})$/);
-  if (hhmm) {
-    const h = parseInt(hhmm[1], 10);
-    const m = parseInt(hhmm[2], 10);
-    if (h >= 0 && h <= 23 && m >= 0 && m <= 59)
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-  // h:mmam/pm or hampm
-  const ampm = s.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)$/);
-  if (ampm) {
-    let h = parseInt(ampm[1], 10);
-    const m = parseInt(ampm[2] || "0", 10);
-    const period = ampm[3];
-    if (period === "am") {
-      if (h === 12) h = 0;
-    } else {
-      if (h !== 12) h += 12;
-    }
-    if (h >= 0 && h <= 23 && m >= 0 && m <= 59)
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-  return null;
-}
 
 // MM/DD/YYYY → YYYY-MM-DD
 function toISO(display) {
@@ -151,7 +122,7 @@ export default function NewServiceScreen({ navigation, route }) {
 
   async function onCreate() {
     const d = (date || "").trim();
-    const t = parseTimeInput((time || "").trim());
+    const t = normalizeServiceTime((time || "").trim());
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
       Alert.alert("Invalid date", "Date must be MM/DD/YYYY (e.g., 03/09/2026)");
       return;

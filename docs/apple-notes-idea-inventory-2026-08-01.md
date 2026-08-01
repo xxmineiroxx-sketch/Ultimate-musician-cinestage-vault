@@ -182,12 +182,13 @@ Highest-value next implementation targets:
 
 1. Service review metadata and dashboard filtering.
 2. Scheduled service reminders and notification tone preferences.
-3. Time parsing utility for `8am`, `8:00am`, `8 pm`, and service-time normalization.
-4. Desktop worker registry and stem job claim/heartbeat model.
-5. Song cue timeline model for per-song mixer/FOH/live cues.
-6. Read-only mixer profile discovery model.
-7. Idea Vault / Blueprint Vault inside Admin so notes become structured product memory.
-8. Role and branch verification tests.
+3. Desktop worker registry and stem job claim/heartbeat model.
+4. Song cue timeline model for per-song mixer/FOH/live cues.
+5. Read-only mixer profile discovery model.
+6. Idea Vault / Blueprint Vault inside Admin so notes become structured product memory.
+7. Role and branch verification tests.
+
+Implemented on 2026-08-01: shared service time parsing and normalization for `8am`, `8:00am`, `8 pm`, `8:30 PM`, and `20:30` across service creation, reminders, conflict detection, setlist expiry, and widget handoff.
 
 ## Immediate Product Decision
 

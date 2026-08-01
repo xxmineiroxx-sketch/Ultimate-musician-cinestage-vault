@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile } from '../services/storage';
+import { normalizeServiceTime } from '../utils/serviceTime';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
 // ── Inline Calendar ──────────────────────────────────────────────────────────
@@ -218,6 +219,11 @@ export default function LeaderDashboardScreen({ navigation, route }) {
     if (!newSvcName.trim() || !newSvcDate.trim()) {
       Alert.alert('Missing fields', 'Service name and date are required.'); return;
     }
+    const normalizedTime = normalizeServiceTime(newSvcTime.trim());
+    if (newSvcTime.trim() && !normalizedTime) {
+      Alert.alert('Invalid time', 'Enter time like "8pm", "8:30 PM", "8:30am", or "20:30".');
+      return;
+    }
     setSavingSvc(true);
     try {
       const hdrs = syncHeaders();
@@ -225,7 +231,7 @@ export default function LeaderDashboardScreen({ navigation, route }) {
         method: 'POST', headers: hdrs,
         body: JSON.stringify({
           name: newSvcName.trim(), date: newSvcDate.trim(),
-          time: newSvcTime.trim(), type: newSvcType,
+          time: normalizedTime, type: newSvcType,
           notes: newSvcNotes.trim(),
           created_by_email: leaderEmail(), created_by_name: leaderName(),
         }),

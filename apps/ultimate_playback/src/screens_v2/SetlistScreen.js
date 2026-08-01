@@ -39,6 +39,7 @@ import {
 } from '../utils/songMedia';
 import { normalizeRoleKey } from '../utils/roleUtils';
 import { promptCrossPlatform } from '../utils/promptCrossPlatform';
+import { getServiceTimeKey, parseServiceDateTime } from '../utils/serviceTime';
 
 // Roles that get lyrics / vocal part access.
 const VOCAL_ROLES = new Set([
@@ -485,7 +486,11 @@ function stripChordsForVocals(text) {
 function parseServiceEndMs(assignment) {
   const serviceDate = assignment?.service_date || assignment?.date;
   if (!serviceDate) return null;
-  // Always expire at end of the service calendar day (local time), regardless of service time.
+  const hasServiceTime = Boolean(getServiceTimeKey(assignment));
+  const parsed = hasServiceTime ? parseServiceDateTime(assignment, '') : null;
+  if (parsed) return parsed.getTime();
+
+  // Safe fallback: if no time exists, treat service end as end-of-day local.
   const datePart = String(serviceDate).split('T')[0];
   const dt = new Date(datePart + 'T23:59:59.999');
   return Number.isFinite(dt.getTime()) ? dt.getTime() : null;

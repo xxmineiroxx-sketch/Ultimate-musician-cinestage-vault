@@ -115,6 +115,7 @@ const cal = StyleSheet.create({
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getUserProfile } from '../services/storage';
+import { normalizeServiceTime } from '../utils/serviceTime';
 
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
@@ -978,11 +979,16 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const handleCreateService = async () => {
     if (!newSvcName.trim()) { Alert.alert('Required', 'Service name is required.'); return; }
     if (!newSvcDate.trim()) { Alert.alert('Required', 'Date is required (YYYY-MM-DD).'); return; }
+    const normalizedTime = normalizeServiceTime(newSvcTime.trim());
+    if (newSvcTime.trim() && !normalizedTime) {
+      Alert.alert('Invalid time', 'Enter time like "8pm", "8:30 PM", "8:30am", or "20:30".');
+      return;
+    }
     setSavingSvc(true);
     try {
       const newSvc = {
         id: `svc_${Date.now()}`, name: newSvcName.trim(), title: newSvcName.trim(),
-        date: newSvcDate.trim(), time: newSvcTime.trim(), serviceType: 'standard', status: 'draft',
+        date: newSvcDate.trim(), time: normalizedTime, serviceType: 'standard', status: 'draft',
         created_by_name:  profile?.name  || (isAdmin ? 'Admin' : 'Worship Leader'),
         created_by_email: profile?.email || '',
         created_by_at:    new Date().toISOString(),

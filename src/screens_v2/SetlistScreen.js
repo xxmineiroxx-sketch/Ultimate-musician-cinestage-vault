@@ -30,6 +30,7 @@ import {
   isYouTubeUrl,
   mergeSetlistWithLibrary,
 } from '../utils/songMedia';
+import { getServiceTimeKey, parseServiceDateTime } from '../utils/serviceTime';
 
 function normalizeRoleKey(role) {
   const raw = String(role || '').trim();
@@ -529,23 +530,9 @@ function parseServiceEndMs(assignment) {
   const serviceDate = assignment?.service_date || assignment?.date;
   if (!serviceDate) return null;
 
-  // If service_date already has time (ISO), use it directly.
-  if (String(serviceDate).includes('T')) {
-    const withTimeMs = new Date(serviceDate).getTime();
-    if (Number.isFinite(withTimeMs)) return withTimeMs;
-  }
-
-  const timeRaw = assignment?.service_time || assignment?.time || '';
-  const m = String(timeRaw).match(/(\d{1,2}):(\d{2})/);
-  if (m) {
-    const hh = Math.max(0, Math.min(23, Number(m[1] || 0)));
-    const mm = Math.max(0, Math.min(59, Number(m[2] || 0)));
-    const dt = new Date(serviceDate);
-    if (Number.isFinite(dt.getTime())) {
-      dt.setHours(hh, mm, 0, 0);
-      return dt.getTime();
-    }
-  }
+  const hasServiceTime = Boolean(getServiceTimeKey(assignment));
+  const parsed = hasServiceTime ? parseServiceDateTime(assignment, '') : null;
+  if (parsed) return parsed.getTime();
 
   // Safe fallback: if no time exists, treat service end as end-of-day local.
   const dt = new Date(serviceDate);
