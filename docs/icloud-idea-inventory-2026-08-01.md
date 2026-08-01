@@ -292,6 +292,27 @@ Do not commit large audio libraries, Kontakt libraries, or Ableton projects to t
 - Mixer intelligence has substantial old planning and prototypes, but should stay a later surface until core sync/release reliability is stable.
 - Obsidian and Graphify are updated manually today; there is not yet a formal "every decision becomes a note" app workflow.
 
+## Apple Notes Addendum
+
+Apple Notes were scanned after explicit permission. The sanitized inventory is captured in:
+
+- `docs/apple-notes-idea-inventory-2026-08-01.md`
+- `docs/obsidian/Ultimate Musician - Apple Notes Idea Inventory.md`
+
+Additional product ideas found there:
+
+- Service review should include creator tracking and pending approval visibility.
+- Playback should support notification tones, 3-day reminders, 1-day reminders, future Apple Watch controls, and a phone widget.
+- Desktop should be the Mac-first Organizer Console and local heavy-processing worker.
+- YouTube-to-stems should prefer account-holder desktop processing, with Cloudflare fallback only when no desktop worker is available.
+- Mixer scene intelligence should start read-only, then apply changes only after Admin/Engineer approval.
+- Rehearsal mode can author cue automation, while Live Performance executes approved cues without record controls.
+- Waveform, stems, sections, tempo, cues, and rehearsal notes should become a unified model.
+
+Security finding:
+
+- At least one Apple Note contains live-looking credentials and API tokens. Those values were not copied into repo docs. Rotate them and move runtime secrets into proper secret stores before release.
+
 ## Recommended Backlog
 
 ### Now
@@ -326,4 +347,3 @@ When a new idea appears in chat, iCloud, Obsidian, or an app prototype:
 4. State which app owns it: Ultimate Musician, Ultimate Playback, CineStage, Ultimate Mixer, Sync Worker, or Obsidian/Graphify.
 5. Run Graphify after meaningful changes.
 6. Commit and push the repo copy so GitHub becomes the durable source.
-
