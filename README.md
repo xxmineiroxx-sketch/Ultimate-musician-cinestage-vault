@@ -11,28 +11,39 @@ The Ultimate Ecosystem is a two-app worship team management platform:
 |-----|------|----------|
 | **Ultimate Musician** | Admin / Music Director | React Native / Expo SDK 54 |
 | **Ultimate Playback** | Team Members | React Native / Expo SDK 54 |
-| **Sync Server** | Central hub connecting both apps | Node.js HTTP server |
+| **Sync Worker** | Production sync brain connecting both apps | Cloudflare Worker + KV |
+| **Local Sync Server** | Local/iCloud development mirror | Node.js HTTP server |
 
-All real-time data (services, team assignments, messages, blockouts, proposals, song library) flows through the sync server at `http://10.0.0.34:8099`.
+Production Playback sync uses `https://ultimate-playback-sync.studio-cinestage.workers.dev`. Local sync servers are for development and MIDI bridge work only; production builds should use `EXPO_PUBLIC_SYNC_URL`.
+
+Current approval model:
+- Admin/Worship Leader assigns a service Lead Singer.
+- Lead Singer creates the setlist, assigns vocals/musicians, and submits it for approval.
+- Admin/Worship Leader approves or rejects before the team receives the final setlist.
+- Any team member can suggest songs; approval adds them to the shared library.
+- Musicians can submit lyrics, chord charts, and instrument-specific notes as proposals; approval applies them live.
 
 ---
 
-## Part 1 — Sync Server
+## Part 1 — Sync
 
-### Location
+### Production Worker
 ```
-/Users/studio/Desktop/sync-server.js
+apps/ultimate_playback/cloudflare/ultimate-playback-sync
 ```
-Data is persisted to `/Users/studio/Desktop/sync-data.json` automatically on every change.
 
-### Starting the Server
+Primary production endpoint:
+```
+https://ultimate-playback-sync.studio-cinestage.workers.dev
+```
+
+### Local Mirror
+For local development, the standalone mirror lives in iCloud:
 ```bash
-node /Users/studio/Desktop/sync-server.js
+cd "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateSyncServer"
+node server.js
 ```
-The server starts on port **8099**. You should see:
-```
-Sync server running on port 8099
-```
+The local server is useful for development parity, but TestFlight/production should not depend on LAN IPs, localhost, or temporary tunnels.
 
 ### API Reference
 
@@ -57,6 +68,15 @@ Sync server running on port 8099
 | GET | `/sync/proposals?status=` | List proposals, optional status filter |
 | POST | `/sync/proposal/approve?id=` | Approve a proposal (publishes content live) |
 | POST | `/sync/proposal/reject?id=` | Reject a proposal `{ reason }` |
+| POST | `/sync/library/song-propose` | Submit a song suggestion for approval |
+| GET | `/sync/library/pending-songs` | List song suggestions awaiting approval |
+| POST | `/sync/library/song-approve?id=` | Approve a song suggestion into the library |
+| POST | `/sync/library/song-reject?id=` | Reject a song suggestion |
+| POST | `/sync/setlist/submit` | Submit a Lead Singer setlist for approval |
+| GET | `/sync/setlist/pending` | List pending setlists |
+| POST | `/sync/setlist/approve?id=` | Approve and publish a submitted setlist |
+| POST | `/sync/setlist/reject?id=` | Reject a submitted setlist |
+| GET | `/sync/assignment-stats?month=YYYY-MM` | Monthly assignment counts |
 | GET | `/sync/song-library?songId=&since=` | Global song library (approved content) |
 
 ---
@@ -466,12 +486,12 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 │  ServicePlan         ──────────► POST /sync/publish
 └─────────────────────────────┘
               │
-              │  http://10.0.0.34:8099
+              │  Cloudflare Worker / local mirror
               ▼
 ┌─────────────────────────────┐
-│       Sync Server           │
-│   sync-server.js (port 8099)│
-│   sync-data.json (storage)  │
+│       Sync Brain            │
+│   Cloudflare Worker + KV    │
+│   local server.js mirror    │
 │                             │
 │  store.services []          │
 │  store.plans {}             │
@@ -484,7 +504,7 @@ This is the same pattern used by Musician's admin — both apps are peers with e
 │  store.songLibrary {}       │
 └─────────────────────────────┘
               │
-              │  http://10.0.0.34:8099
+              │  Cloudflare Worker / local mirror
               ▼
 ┌─────────────────────────────┐
 │  Ultimate Playback (Team)   │
@@ -629,9 +649,9 @@ Remaining release gate:
 ## Part 6 — Common Issues & Tips
 
 ### Server not reachable
-- Make sure `sync-server.js` is running: `node /Users/studio/Desktop/sync-server.js`
-- Verify the IP: device and server must be on the same Wi-Fi network
-- Server IP is hardcoded as `10.0.0.34` — if your Mac's IP changes, update `SYNC_URL` in both apps
+- Production/TestFlight should use `EXPO_PUBLIC_SYNC_URL=https://ultimate-playback-sync.studio-cinestage.workers.dev`.
+- Local development can run the iCloud `UltimateSyncServer/server.js` mirror.
+- Do not ship localhost, LAN IP, or temporary tunnel URLs in production builds.
 
 ### Changes not showing up
 - Pull down to refresh in the Playback app HomeScreen

@@ -345,6 +345,8 @@ export default function LeaderDashboardScreen({ navigation, route }) {
                   submittedBy: {
                     email: leaderEmail(),
                     name: leaderName(),
+                    role: 'leader',
+                    roles: ['leader', 'service_planner'],
                   },
                 }),
               });

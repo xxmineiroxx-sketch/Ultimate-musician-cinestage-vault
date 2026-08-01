@@ -1,4 +1,6 @@
 node_modules/
+graphify-out/cache/
+**/graphify-out/cache/
 .expo/
 .expo-shared/
 **/.expo/

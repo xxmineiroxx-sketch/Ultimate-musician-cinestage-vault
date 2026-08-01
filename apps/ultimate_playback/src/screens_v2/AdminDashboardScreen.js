@@ -4,7 +4,7 @@
  * Admin role: full access including member deletion.
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
@@ -123,6 +123,7 @@ const playbackGrantLabel = (role) => (
   : role === 'admin' ? 'Admin'
   : role === 'manager' ? 'Worship Leader'
   : role === 'md' ? 'Music Director'
+  : role === 'lead_singer' || role === 'setlist_creator' ? 'Lead Singer'
   : role === 'leader' ? 'Service Planner'
   : role === 'none' ? 'Remove Access'
   : role || 'Member'
@@ -132,7 +133,7 @@ const ADMIN_LIBRARY_CACHE_KEY = '@up_admin_library_cache_v1';
 const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
-  'Worship Leader', 'Music Director', 'Vocal Lead', 'Vocal BGV',
+  'Worship Leader', 'Music Director', 'Lead Singer', 'Vocal Lead', 'Vocal BGV',
   'Drums', 'Bass', 'Electric Guitar', 'Acoustic Guitar',
   'Keys', 'Synth/Pad', 'Tracks', 'Sound', 'Media',
 ];
@@ -218,6 +219,12 @@ function personRoles(person) {
 
 function firstPersonRole(person) {
   return personRoles(person)[0] || '';
+}
+
+function isLeadSingerRole(role) {
+  return ['lead singer', 'lead_singer', 'lead vocal', 'lead_vocal', 'vocal lead', 'vocal_lead'].includes(
+    String(role || '').trim().toLowerCase(),
+  );
 }
 
 function messageReplies(message) {
@@ -467,7 +474,7 @@ function isPastService(svc, today = todayDateStr()) {
 
 export default function AdminDashboardScreen({ navigation, route = {} }) {
   const insets = useSafeAreaInsets();
-  const { mdRole } = route.params || {};
+  const { mdRole, focusServiceId } = route.params || {};
   // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
   const isOrgOwner = mdRole === 'org_owner';
   const isAdmin    = mdRole === 'admin' || isOrgOwner;
@@ -479,8 +486,22 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const canManageMembers = isAdmin || isManager;
   // Only Org Owner and Admin can delete services
   const canDeleteServices = isAdmin;
+  const isLeadSingerPlanner = ['lead_singer', 'lead_vocal', 'vocal_lead', 'setlist_creator'].includes(mdRole);
 
-  const [tab, setTab]         = useState('Calendar');
+  const isLeadSingerForService = (svcId) => {
+    if (!isLeadSingerPlanner) return false;
+    const email = String(profile?.email || profile?.identifier || '').trim().toLowerCase();
+    const plan = normalizePlan(plans[svcId] || {});
+    return planTeam(plan).some((member) => (
+      isLeadSingerRole(member.role) &&
+      (
+        (email && String(member.email || '').trim().toLowerCase() === email) ||
+        (profile?.id && member.personId === profile.id)
+      )
+    ));
+  };
+
+  const [tab, setTab]         = useState(focusServiceId || isLeadSingerPlanner ? 'Services' : 'Calendar');
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [error, setError]     = useState(null);
@@ -510,6 +531,13 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // Expanded service plan (both Calendar + Services tabs share this)
   const [expandedSvc, setExpandedSvc] = useState(null);
+
+  useEffect(() => {
+    if (!focusServiceId) return;
+    setTab('Services');
+    const target = services.find((svc) => svc.id === focusServiceId);
+    if (target) setExpandedSvc(target);
+  }, [focusServiceId, services]);
 
   // Song picker
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -556,7 +584,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const [rejectNoteTarget, setRejectNoteTarget] = useState(null); // { setlist, note }
   const [rejectNoteText, setRejectNoteText] = useState('');
 
-  // Pending services & songs (from Leaders)
+  // Pending services plus song suggestions from team members
   const [pendingServices, setPendingServices] = useState([]);
   const [pendingSongs, setPendingSongs]       = useState([]);
   const [approvingSvcId, setApprovingSvcId]   = useState(null);
@@ -1048,6 +1076,36 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       plan.team = planTeam(plan).filter(t => !(t.personId === person.id && t.role === chipRole));
       plan.team = [...plan.team, { id: `ta_${Date.now()}`, personId: person.id, email: (person.email || '').toLowerCase(), name: person.name, role: chipRole }];
       await publishUpdate({ ...plans, [svcId]: plan }, null, null);
+      if (isLeadSingerRole(chipRole) && person.email) {
+        await fetchJson(`${SYNC_URL}/sync/grant`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify({
+            email: person.email,
+            name: person.name,
+            role: 'lead_singer',
+            canCreateSetlists: true,
+          }),
+        }).catch(() => {});
+        await fetchJson(`${SYNC_URL}/sync/message`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify({
+            from_email: profile?.email || '',
+            from_name: profile?.name || 'Worship Leader',
+            subject: `Lead Singer assignment: ${assignTarget.name || assignTarget.title || 'Service'}`,
+            message: `You were assigned as Lead Singer for ${assignTarget.name || assignTarget.title || 'this service'}. You can now create the setlist, assign vocals and musicians, then submit it for approval.`,
+            to: 'assigned_team',
+            recipients: [person.email],
+            metadata: {
+              type: 'lead_singer_assigned',
+              serviceId: svcId,
+              serviceName: assignTarget.name || assignTarget.title || 'Service',
+              role: 'lead_singer',
+            },
+          }),
+        }).catch(() => {});
+      }
       setShowAssignModal(false); setChipRole('');
       Alert.alert('Assigned ✓', `${person.name} → ${chipRole}`); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
@@ -1272,7 +1330,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
     ]);
   };
 
-  // ── Approve/reject pending song (from Leader) ────────────────────────────
+  // ── Approve/reject pending song suggestion ───────────────────────────────
   const handleApprovePendingSong = async (song) => {
     setApprovingSongId(song.id);
     try {
@@ -1315,7 +1373,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
           serviceDate: svc.date || '',
           serviceTime: svc.time || '',
           plan,
-          submittedBy: { email: profile?.email || '', name: profile?.name || 'Leader' },
+          submittedBy: {
+            email: profile?.email || '',
+            name: profile?.name || 'Lead Singer',
+            role: mdRole,
+            roles: [mdRole],
+          },
         }),
       });
       Alert.alert('✅ Submitted', 'Your setlist has been sent to the admin for review. It will be published once approved.');
@@ -1377,7 +1440,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       const roleValue = grantingRole === 'none' ? null : grantingRole;
       await fetchJson(`${SYNC_URL}/sync/grant`, {
         method: 'POST', headers: syncHeaders(),
-        body: JSON.stringify({ email: showGrantRole.email, name: showGrantRole.name, role: roleValue }),
+        body: JSON.stringify({
+          email: showGrantRole.email,
+          name: showGrantRole.name,
+          role: roleValue,
+          canCreateSetlists: ['lead_singer', 'setlist_creator'].includes(grantingRole),
+        }),
       });
       setShowGrantRole(null); setGrantingRole('');
       Alert.alert('Permission updated ✓', `${showGrantRole.name} is now ${playbackGrantLabel(grantingRole)}.`);
@@ -1771,7 +1839,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   // ── Render: Services — full plan editing + role-aware publish ───────────
   const renderServices = () => {
     const today = todayDateStr();
-    const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
+    const visibleServices = isLeadSingerPlanner
+      ? services.filter((svc) => isLeadSingerForService(svc.id))
+      : services;
+    const allSvcs = [...visibleServices].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
     const upcomingSvcs = allSvcs.filter((svc) => !isPastService(svc, today));
     const archivedSvcs = [...allSvcs]
       .filter((svc) => isPastService(svc, today))
@@ -2062,7 +2133,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   // ── Render: Library ─────────────────────────────────────────────────────
   const renderLibrary = () => (
     <View style={{ flex: 1 }}>
-      {/* ── Pending Songs from Leaders ── */}
+      {/* ── Pending Song Suggestions ── */}
       {canApprove && pendingSongs.length > 0 && (
         <View style={[s.pendingApprovalSection, { margin: 12, marginBottom: 0 }]}>
           <Text style={s.pendingApprovalHeader}>⏳ Pending Songs ({pendingSongs.length})</Text>
@@ -2953,14 +3024,14 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
             <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
               Set service access for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can only grant Service Planner access' : ''}
-              {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, or Service Planner' : ''}
+              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can grant Lead Singer or Service Planner access' : ''}
+              {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, Lead Singer, or Service Planner' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
               {(
-                isOrgOwner ? ['org_owner', 'admin', 'manager', 'md', 'leader', 'none']
-                : isAdmin  ? ['manager', 'md', 'leader', 'none']
-                :             ['leader', 'none']
+                isOrgOwner ? ['org_owner', 'admin', 'manager', 'md', 'lead_singer', 'leader', 'none']
+                : isAdmin  ? ['manager', 'md', 'lead_singer', 'leader', 'none']
+                :             ['lead_singer', 'leader', 'none']
               ).map(r => {
                 const label = playbackGrantLabel(r);
                 return (
@@ -2976,6 +3047,11 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                 );
               })}
             </View>
+            {grantingRole === 'lead_singer' && (
+              <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: -12, marginBottom: 16 }}>
+                Can create the service setlist, assign vocals and musicians, then submit for Admin or Worship Leader approval.
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowGrantRole(null)}>
                 <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>

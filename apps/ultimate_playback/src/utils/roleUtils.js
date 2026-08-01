@@ -69,6 +69,12 @@ export function normalizeGrantRole(role) {
     music_director: 'md',
     musicdirector: 'md',
     md: 'md',
+    lead_singer: 'lead_singer',
+    leadsinger: 'lead_singer',
+    lead_vocal: 'lead_singer',
+    vocal_lead: 'lead_singer',
+    setlist_creator: 'setlist_creator',
+    setlistcreator: 'setlist_creator',
     service_planner: 'leader',
     planner: 'leader',
     leader: 'leader',
@@ -78,7 +84,7 @@ export function normalizeGrantRole(role) {
 }
 
 export const ADMIN_GRANT_ROLES = new Set(['org_owner', 'admin', 'manager', 'md']);
-export const LEADER_GRANT_ROLES = new Set(['leader']);
+export const LEADER_GRANT_ROLES = new Set(['leader', 'lead_singer', 'setlist_creator']);
 export const ELEVATED_GRANT_ROLES = new Set([
   ...ADMIN_GRANT_ROLES,
   ...LEADER_GRANT_ROLES,

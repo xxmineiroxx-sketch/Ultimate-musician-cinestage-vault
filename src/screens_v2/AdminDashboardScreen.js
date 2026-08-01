@@ -4,7 +4,7 @@
  * Admin role: full access including member deletion.
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList,
   TextInput, ActivityIndicator, RefreshControl, Alert, Modal,
@@ -114,7 +114,7 @@ import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
-  'Worship Leader', 'Music Director', 'Vocal Lead', 'Vocal BGV',
+  'Worship Leader', 'Music Director', 'Lead Singer', 'Vocal Lead', 'Vocal BGV',
   'Drums', 'Bass', 'Electric Guitar', 'Acoustic Guitar',
   'Keys', 'Synth/Pad', 'Tracks', 'Sound', 'Media',
 ];
@@ -396,25 +396,53 @@ function playbackGrantLabel(role) {
   if (role === 'org_owner') return 'Org Owner';
   if (role === 'admin') return 'Admin';
   if (role === 'manager') return 'Worship Leader';
+  if (role === 'lead_singer' || role === 'setlist_creator') return 'Lead Singer';
   if (role === 'leader') return 'Service Planner';
   if (role === 'none' || role == null) return 'No extra access';
   return String(role || '');
 }
 
+function isLeadSingerRole(role) {
+  return ['lead_singer', 'lead singer', 'lead_vocal', 'lead vocal', 'vocal_lead', 'vocal lead'].includes(
+    String(role || '').trim().toLowerCase().replace(/[-_]+/g, ' '),
+  );
+}
+
 export default function AdminDashboardScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { mdRole } = route.params || {};
+  const { mdRole, focusServiceId } = route.params || {};
   // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
   const isOrgOwner = mdRole === 'org_owner';
   const isAdmin    = mdRole === 'admin' || isOrgOwner;
   const isManager  = mdRole === 'manager';
   // canApprove = admin, manager, or org_owner
   const canApprove = isAdmin || isManager;
+  const isSetlistCreator = ['lead_singer', 'lead_vocal', 'vocal_lead', 'setlist_creator'].includes(mdRole);
+  const isServicePlanner = mdRole === 'leader';
+  const canPublishDirectly = canApprove || mdRole === 'md';
+  const canEditSetlists = canPublishDirectly || isSetlistCreator || isServicePlanner;
+  const canSubmitSetlists = canEditSetlists && !canPublishDirectly;
+  const canCreateServices = canPublishDirectly || isServicePlanner;
   // manager can add/edit members, add songs, create services
   const canManageMembers = isAdmin || isManager;
   const canDeleteServices = isAdmin || isManager || mdRole === 'md';
 
-  const [tab, setTab]         = useState('Calendar');
+  const isLeadSingerForService = (svcId) => {
+    if (!isSetlistCreator) return false;
+    const email = String(profile?.email || profile?.identifier || '').trim().toLowerCase();
+    const plan = plans[svcId] || {};
+    return (plan.team || []).some((member) => (
+      isLeadSingerRole(member.role) &&
+      (
+        (email && String(member.email || '').trim().toLowerCase() === email) ||
+        (profile?.id && member.personId === profile.id)
+      )
+    ));
+  };
+
+  const canEditServicePlan = (svcId) => canPublishDirectly || isServicePlanner || isLeadSingerForService(svcId);
+
+  const [tab, setTab]         = useState(focusServiceId || isSetlistCreator ? 'Services' : 'Calendar');
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [error, setError]     = useState(null);
@@ -445,6 +473,13 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
   // Expanded service plan (both Calendar + Services tabs share this)
   const [expandedSvc, setExpandedSvc] = useState(null);
+
+  useEffect(() => {
+    if (!focusServiceId) return;
+    setTab('Services');
+    const target = services.find((svc) => svc.id === focusServiceId);
+    if (target) setExpandedSvc(target);
+  }, [focusServiceId, services]);
 
   // Song picker
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -483,12 +518,15 @@ export default function AdminDashboardScreen({ navigation, route }) {
   const [approvingId, setApprovingId] = useState(null);
   const [rejectingId, setRejectingId] = useState(null);
 
-  // Pending services & songs (from Leaders)
+  // Pending services plus song suggestions from team members
   const [pendingServices, setPendingServices] = useState([]);
   const [pendingSongs, setPendingSongs]       = useState([]);
   const [pendingSetlists, setPendingSetlists] = useState([]);
+  const [setlistReviews, setSetlistReviews] = useState([]);
+  const [assignmentStats, setAssignmentStats] = useState({ month: '', byPerson: {} });
   const [approvingSvcId, setApprovingSvcId]   = useState(null);
   const [approvingSongId, setApprovingSongId] = useState(null);
+  const [submittingSetlistId, setSubmittingSetlistId] = useState(null);
 
   // Role grant modal
   const [showGrantRole, setShowGrantRole]   = useState(null); // person object
@@ -570,14 +608,16 @@ export default function AdminDashboardScreen({ navigation, route }) {
     setError(null);
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, lib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
+      const statsMonth = todayDateStr().slice(0, 7);
+      const [prof, msgs, lib, props, pSvcs, pSongs, pSetlists, monthlyStats] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }),
         fetchJson(`${SYNC_URL}/sync/proposals`,       { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/services/pending`,        { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
-        fetchJson(`${SYNC_URL}/sync/setlist/pending`,         { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/setlist/pending?status=all`, { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/assignment-stats?month=${encodeURIComponent(statsMonth)}`, { headers: hdrs }).catch(() => ({ month: statsMonth, byPerson: {} })),
       ]);
       setProfile(prof);
       setMessages(Array.isArray(msgs) ? msgs : []);
@@ -589,7 +629,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
       setProposals(Array.isArray(props) ? props : []);
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
-      setPendingSetlists(Array.isArray(pSetlists) ? pSetlists.filter(s => s.status === 'pending') : []);
+      const allSetlistReviews = Array.isArray(pSetlists) ? pSetlists : [];
+      setSetlistReviews(allSetlistReviews);
+      setPendingSetlists(allSetlistReviews.filter(s => s.status === 'pending'));
+      setAssignmentStats(monthlyStats && typeof monthlyStats === 'object'
+        ? monthlyStats
+        : { month: statsMonth, byPerson: {} });
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
@@ -908,6 +953,36 @@ export default function AdminDashboardScreen({ navigation, route }) {
       plan.team = (plan.team || []).filter(t => !(t.personId === person.id && t.role === chipRole));
       plan.team = [...plan.team, { id: `ta_${Date.now()}`, personId: person.id, email: (person.email || '').toLowerCase(), name: person.name, role: chipRole }];
       await publishUpdate({ ...plans, [svcId]: plan }, null, null);
+      if (isLeadSingerRole(chipRole) && person.email) {
+        await fetchJson(`${SYNC_URL}/sync/grant`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify({
+            email: person.email,
+            name: person.name,
+            role: 'lead_singer',
+            canCreateSetlists: true,
+          }),
+        }).catch(() => {});
+        await fetchJson(`${SYNC_URL}/sync/message`, {
+          method: 'POST',
+          headers: syncHeaders(),
+          body: JSON.stringify({
+            from_email: profile?.email || '',
+            from_name: profile?.name || 'Worship Leader',
+            subject: `Lead Singer assignment: ${assignTarget.name || assignTarget.title || 'Service'}`,
+            message: `You were assigned as Lead Singer for ${assignTarget.name || assignTarget.title || 'this service'}. You can now create the setlist, assign vocals and musicians, then submit it for approval.`,
+            to: 'assigned_team',
+            recipients: [person.email],
+            metadata: {
+              type: 'lead_singer_assigned',
+              serviceId: svcId,
+              serviceName: assignTarget.name || assignTarget.title || 'Service',
+              role: 'lead_singer',
+            },
+          }),
+        }).catch(() => {});
+      }
       setShowAssignModal(false); setChipRole('');
       Alert.alert('Assigned ✓', `${person.name} → ${chipRole}`); loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
@@ -968,6 +1043,74 @@ export default function AdminDashboardScreen({ navigation, route }) {
       loadAll();
     } catch (e) { Alert.alert('Error', e.message); }
     finally { setPublishingId(null); }
+  };
+
+  const getSetlistReviewForService = (svcId) => {
+    const entries = (setlistReviews || []).filter(entry => entry.serviceId === svcId);
+    const rank = { pending: 4, rejected: 3, approved: 2 };
+    return entries.sort((a, b) => {
+      const ar = rank[a.status] || 0;
+      const br = rank[b.status] || 0;
+      if (br !== ar) return br - ar;
+      return String(b.submittedAt || b.approvedAt || b.rejectedAt || '').localeCompare(String(a.submittedAt || a.approvedAt || a.rejectedAt || ''));
+    })[0] || null;
+  };
+
+  const handleSubmitSetlistForApproval = async (svc) => {
+    const plan = plans[svc.id] || {};
+    const songs = plan.songs || [];
+    const team = plan.team || [];
+    if (songs.length === 0) {
+      Alert.alert('No songs', 'Add at least one song before submitting this setlist.');
+      return;
+    }
+    if (team.length === 0) {
+      Alert.alert('No team', 'Assign at least one team member before submitting this setlist.');
+      return;
+    }
+    setSubmittingSetlistId(svc.id);
+    try {
+      const submittedBy = {
+        name: profile?.name || profile?.fullName || profile?.email || 'Lead Singer',
+        email: profile?.email || profile?.identifier || '',
+        role: mdRole,
+        roles: [mdRole],
+      };
+      const body = {
+        serviceId: svc.id,
+        serviceName: svc.name || svc.title || 'Service',
+        serviceDate: svc.date || svc.serviceDate || '',
+        serviceTime: svc.time || svc.startTime || '',
+        service: svc,
+        plan,
+        people,
+        submittedBy,
+      };
+      const result = await fetchJson(`${SYNC_URL}/sync/setlist/submit`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify(body),
+      });
+      const entry = result?.entry || {
+        id: result?.id || `local_${svc.id}`,
+        serviceId: svc.id,
+        serviceName: svc.name || svc.title || 'Service',
+        serviceDate: svc.date || '',
+        serviceTime: svc.time || '',
+        plan,
+        submittedBy,
+        status: 'pending',
+        submittedAt: new Date().toISOString(),
+      };
+      setSetlistReviews(prev => [entry, ...prev.filter(item => item.id !== entry.id && !(item.serviceId === svc.id && item.status === 'pending'))]);
+      setPendingSetlists(prev => [entry, ...prev.filter(item => item.id !== entry.id && item.serviceId !== svc.id)]);
+      Alert.alert('Submitted for approval ✓', `"${svc.name || svc.title || 'Service'}" is waiting for Admin or Worship Leader review.`);
+      loadAll();
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSubmittingSetlistId(null);
+    }
   };
 
   // ── Assign vocal part to person ─────────────────────────────────────────
@@ -1065,7 +1208,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
     ]);
   };
 
-  // ── Approve/reject pending song (from Leader) ────────────────────────────
+  // ── Approve/reject pending song suggestion ───────────────────────────────
   const handleApprovePendingSong = async (song) => {
     setApprovingSongId(song.id);
     try {
@@ -1145,7 +1288,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
       const roleValue = grantingRole === 'none' ? null : grantingRole;
       await fetchJson(`${SYNC_URL}/sync/grant`, {
         method: 'POST', headers: syncHeaders(),
-        body: JSON.stringify({ email: showGrantRole.email, name: showGrantRole.name, role: roleValue }),
+        body: JSON.stringify({
+          email: showGrantRole.email,
+          name: showGrantRole.name,
+          role: roleValue,
+          canCreateSetlists: ['lead_singer', 'setlist_creator'].includes(grantingRole),
+        }),
       });
       setShowGrantRole(null); setGrantingRole('');
       Alert.alert('Permission updated ✓', `${showGrantRole.name} is now ${playbackGrantLabel(grantingRole)}.`);
@@ -1292,16 +1440,25 @@ export default function AdminDashboardScreen({ navigation, route }) {
     const plan  = plans[svc.id] || {};
     const songs = plan.songs || [];
     const team  = plan.team  || [];
+    const review = getSetlistReviewForService(svc.id);
+    const reviewStatus = review?.status || plan.status || '';
+    const isWaitingForApproval = reviewStatus === 'pending' || reviewStatus === 'pending_approval';
+    const submitBusy = submittingSetlistId === svc.id;
+    const publishBusy = publishingId === svc.id;
+    const canEditThisPlan = canEditServicePlan(svc.id);
+    const canSubmitThisPlan = canEditThisPlan && !canPublishDirectly;
     return (
       <View style={s.planSection}>
         {/* Songs */}
         <View style={s.planSubHeader}>
           <Text style={s.planSubTitle}>🎵 Setlist</Text>
-          <TouchableOpacity style={s.planAddBtn} onPress={() => {
-            setSvcForSong(svc); setSongQuery(''); setShowSongPicker(true);
-          }}>
-            <Text style={s.planAddBtnText}>+ Add Song</Text>
-          </TouchableOpacity>
+          {canEditThisPlan && (
+            <TouchableOpacity style={s.planAddBtn} onPress={() => {
+              setSvcForSong(svc); setSongQuery(''); setShowSongPicker(true);
+            }}>
+              <Text style={s.planAddBtnText}>+ Add Song</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {songs.length === 0
           ? <Text style={s.planEmpty}>No songs yet — tap "+ Add Song"</Text>
@@ -1324,9 +1481,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
                   >
                     <Text style={s.vocalToggleTxt}>🎤{hasVocals ? ' ✓' : ''}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={s.removeBtn} onPress={() => handleRemoveSong(svc.id, song.id)}>
-                    <Text style={s.removeBtnText}>✕</Text>
-                  </TouchableOpacity>
+                  {canEditThisPlan && (
+                    <TouchableOpacity style={s.removeBtn} onPress={() => handleRemoveSong(svc.id, song.id)}>
+                      <Text style={s.removeBtnText}>✕</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 {isVocalExpanded && (
                   <View style={s.vocalPanel}>
@@ -1367,10 +1526,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
         {/* Team */}
         <View style={[s.planSubHeader, { marginTop: 16 }]}>
           <Text style={s.planSubTitle}>👥 Team</Text>
-          <TouchableOpacity style={[s.planAddBtn, { borderColor: '#10B981' }]}
-            onPress={() => { setAssignTarget(svc); setChipRole(''); setShowAssignModal(true); }}>
-            <Text style={[s.planAddBtnText, { color: '#10B981' }]}>+ Assign</Text>
-          </TouchableOpacity>
+          {canEditThisPlan && (
+            <TouchableOpacity style={[s.planAddBtn, { borderColor: '#10B981' }]}
+              onPress={() => { setAssignTarget(svc); setChipRole(''); setShowAssignModal(true); }}>
+              <Text style={[s.planAddBtnText, { color: '#10B981' }]}>+ Assign</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {team.length === 0
           ? <Text style={s.planEmpty}>No team assigned yet</Text>
@@ -1426,33 +1587,76 @@ export default function AdminDashboardScreen({ navigation, route }) {
                     <Text style={s.planTeamMetaMuted}>Reason: {assignmentResponse.declineReason}</Text>
                   ) : null}
                 </View>
-                <TouchableOpacity style={s.removeBtn}
-                  onPress={() => handleRemoveFromService(svc.id, tm.personId, tm.role)}>
-                  <Text style={s.removeBtnText}>✕</Text>
-                </TouchableOpacity>
+                {canEditThisPlan && (
+                  <TouchableOpacity style={s.removeBtn}
+                    onPress={() => handleRemoveFromService(svc.id, tm.personId, tm.role)}>
+                    <Text style={s.removeBtnText}>✕</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           })}
 
-        {/* ── Publish to Team ─────────────────────────────────────── */}
-        <TouchableOpacity
-          style={[s.publishBtn, publishingId === svc.id && s.publishBtnDisabled]}
-          onPress={() => handlePublish(svc)}
-          disabled={publishingId === svc.id}
-          activeOpacity={0.8}
-        >
-          {publishingId === svc.id
-            ? <ActivityIndicator size="small" color="#FFF" />
-            : <>
-                <Text style={s.publishBtnText}>📤 Publish to Team</Text>
-                {svc.publishedAt && (
-                  <Text style={s.publishedAt}>
-                    Last: {new Date(svc.publishedAt).toLocaleDateString()}
-                  </Text>
-                )}
-              </>
-          }
-        </TouchableOpacity>
+        {(reviewStatus || review?.reviewNote) && (
+          <View style={[
+            s.setlistReviewBanner,
+            reviewStatus === 'approved' && s.setlistReviewApproved,
+            reviewStatus === 'rejected' && s.setlistReviewRejected,
+          ]}>
+            <Text style={s.setlistReviewTitle}>
+              {reviewStatus === 'approved'
+                ? 'Approved and published'
+                : reviewStatus === 'rejected'
+                  ? 'Changes requested'
+                  : reviewStatus === 'pending_approval' || reviewStatus === 'pending'
+                    ? 'Waiting for approval'
+                    : 'Draft'}
+            </Text>
+            {review?.reviewNote ? <Text style={s.setlistReviewMeta}>{review.reviewNote}</Text> : null}
+            {review?.submittedAt && reviewStatus !== 'approved' ? (
+              <Text style={s.setlistReviewMeta}>Submitted {new Date(review.submittedAt).toLocaleDateString()}</Text>
+            ) : null}
+          </View>
+        )}
+
+        {canPublishDirectly ? (
+          <TouchableOpacity
+            style={[s.publishBtn, publishBusy && s.publishBtnDisabled]}
+            onPress={() => handlePublish(svc)}
+            disabled={publishBusy}
+            activeOpacity={0.8}
+          >
+            {publishBusy
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <>
+                  <Text style={s.publishBtnText}>📤 Publish to Team</Text>
+                  {svc.publishedAt && (
+                    <Text style={s.publishedAt}>
+                      Last: {new Date(svc.publishedAt).toLocaleDateString()}
+                    </Text>
+                  )}
+                </>
+            }
+          </TouchableOpacity>
+        ) : canSubmitThisPlan ? (
+          <TouchableOpacity
+            style={[
+              s.publishBtn,
+              s.submitApprovalBtn,
+              (submitBusy || isWaitingForApproval) && s.publishBtnDisabled,
+            ]}
+            onPress={() => handleSubmitSetlistForApproval(svc)}
+            disabled={submitBusy || isWaitingForApproval}
+            activeOpacity={0.8}
+          >
+            {submitBusy
+              ? <ActivityIndicator size="small" color="#FFF" />
+              : <Text style={s.publishBtnText}>
+                  {reviewStatus === 'rejected' ? '↻ Resubmit for Approval' : '📝 Submit for Approval'}
+                </Text>
+            }
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   };
@@ -1485,10 +1689,14 @@ export default function AdminDashboardScreen({ navigation, route }) {
         contentContainerStyle={s.tabContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
-        <TouchableOpacity style={s.addBtn} onPress={() => setShowNewService(v => !v)}>
-          <Text style={s.addBtnText}>{showNewService ? '✕ Cancel' : '+ New Service'}</Text>
-        </TouchableOpacity>
-        {renderNewServiceForm()}
+        {canCreateServices && (
+          <>
+            <TouchableOpacity style={s.addBtn} onPress={() => setShowNewService(v => !v)}>
+              <Text style={s.addBtnText}>{showNewService ? '✕ Cancel' : '+ New Service'}</Text>
+            </TouchableOpacity>
+            {renderNewServiceForm()}
+          </>
+        )}
 
         {sorted.length === 0 && !loading && (
           <View style={s.empty}>
@@ -1659,7 +1867,10 @@ export default function AdminDashboardScreen({ navigation, route }) {
 
       {(() => {
         const today = todayDateStr();
-        const allSvcs = [...services].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
+        const visibleServices = isSetlistCreator
+          ? services.filter((svc) => isLeadSingerForService(svc.id))
+          : services;
+        const allSvcs = [...visibleServices].sort((a, b) => serviceSortKey(a).localeCompare(serviceSortKey(b)));
         const upcomingSvcs = allSvcs.filter((svc) => !isPastService(svc, today));
         const archivedSvcs = [...allSvcs]
           .filter((svc) => isPastService(svc, today))
@@ -1800,17 +2011,21 @@ export default function AdminDashboardScreen({ navigation, route }) {
       {!isAdmin && !isManager && (
         <View style={s.mdNoticeBanner}>
           <Text style={s.mdNoticeText}>
-            🔐 You can add and assign members. Contact an Admin to manage roles.
+            {isSetlistCreator
+              ? '🎤 Lead Singer: build the setlist, assign vocals and musicians, then submit for approval. Contact a Worship Leader or Admin for roster changes.'
+              : '🔐 You can add and assign members. Contact an Admin to manage roles.'}
           </Text>
         </View>
       )}
 
       {/* Add Member — available to MD + Admin */}
-      <TouchableOpacity style={s.addBtn} onPress={() => setShowAddMember(v => !v)}>
-        <Text style={s.addBtnText}>{showAddMember ? '✕ Cancel' : '+ Add Member'}</Text>
-      </TouchableOpacity>
+      {canManageMembers && (
+        <TouchableOpacity style={s.addBtn} onPress={() => setShowAddMember(v => !v)}>
+          <Text style={s.addBtnText}>{showAddMember ? '✕ Cancel' : '+ Add Member'}</Text>
+        </TouchableOpacity>
+      )}
 
-      {showAddMember && (
+      {canManageMembers && showAddMember && (
         <View style={s.formCard}>
           <Text style={s.formLabel}>Name *</Text>
           <TextInput style={s.formInput} value={newMemberName} onChangeText={setNewMemberName}
@@ -1847,43 +2062,56 @@ export default function AdminDashboardScreen({ navigation, route }) {
       )}
 
       {people.map(person => (
-        <View key={person.id || person.name} style={s.personCard}>
-          <View style={s.personAvatar}>
-            <Text style={s.personAvatarText}>{(person.name || '?')[0]}</Text>
-          </View>
-          <View style={s.personBody}>
-            <Text style={s.personName}>{person.name}</Text>
-            <Text style={s.personEmail}>{person.email || 'no email'}</Text>
-            {(person.roles || []).length > 0 && (
-              <Text style={s.personRoles}>{person.roles.join(' · ')}</Text>
-            )}
-          </View>
-          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-            {/* Edit — Admin + Manager */}
-            {canManageMembers && (
-              <TouchableOpacity style={s.editMemberBtn} onPress={() => {
-                setShowEditMember(person);
-                setEditName(person.name || '');
-                setEditEmail(person.email || '');
-                setEditRole((person.roles || [])[0] || '');
-              }}>
-                <Text style={s.editMemberBtnTxt}>✏️</Text>
-              </TouchableOpacity>
-            )}
-            {/* Grant Role — Admin + Manager (manager limited to leader) */}
-            {canManageMembers && (
-              <TouchableOpacity style={s.grantRoleBtn} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
-                <Text style={s.grantRoleBtnTxt}>🔑</Text>
-              </TouchableOpacity>
-            )}
-            {/* Delete — Admin only */}
-            {isAdmin && (
-              <TouchableOpacity style={s.deleteMemberBtn} onPress={() => handleDeleteMember(person)}>
-                <Text style={s.deleteMemberBtnText}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+        (() => {
+          const email = String(person.email || '').trim().toLowerCase();
+          const monthly =
+            assignmentStats?.byPerson?.[person.id] ||
+            assignmentStats?.byPerson?.[email] ||
+            null;
+          const monthlyTotal = Number(monthly?.total || 0);
+          return (
+            <View key={person.id || person.name} style={s.personCard}>
+              <View style={s.personAvatar}>
+                <Text style={s.personAvatarText}>{(person.name || '?')[0]}</Text>
+              </View>
+              <View style={s.personBody}>
+                <Text style={s.personName}>{person.name}</Text>
+                <Text style={s.personEmail}>{person.email || 'no email'}</Text>
+                {(person.roles || []).length > 0 && (
+                  <Text style={s.personRoles}>{person.roles.join(' · ')}</Text>
+                )}
+                <Text style={s.personRoles}>
+                  Assigned {monthlyTotal}x this month
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                {/* Edit — Admin + Manager */}
+                {canManageMembers && (
+                  <TouchableOpacity style={s.editMemberBtn} onPress={() => {
+                    setShowEditMember(person);
+                    setEditName(person.name || '');
+                    setEditEmail(person.email || '');
+                    setEditRole((person.roles || [])[0] || '');
+                  }}>
+                    <Text style={s.editMemberBtnTxt}>✏️</Text>
+                  </TouchableOpacity>
+                )}
+                {/* Grant Role — Admin + Manager */}
+                {canManageMembers && (
+                  <TouchableOpacity style={s.grantRoleBtn} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
+                    <Text style={s.grantRoleBtnTxt}>🔑</Text>
+                  </TouchableOpacity>
+                )}
+                {/* Delete — Admin only */}
+                {isAdmin && (
+                  <TouchableOpacity style={s.deleteMemberBtn} onPress={() => handleDeleteMember(person)}>
+                    <Text style={s.deleteMemberBtnText}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          );
+        })()
       ))}
     </ScrollView>
   );
@@ -1891,7 +2119,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
   // ── Render: Library ─────────────────────────────────────────────────────
   const renderLibrary = () => (
     <View style={{ flex: 1 }}>
-      {/* ── Pending Songs from Leaders ── */}
+      {/* ── Pending Song Suggestions ── */}
       {canApprove && pendingSongs.length > 0 && (
         <View style={[s.pendingApprovalSection, { margin: 12, marginBottom: 0 }]}>
           <Text style={s.pendingApprovalHeader}>⏳ Pending Songs ({pendingSongs.length})</Text>
@@ -2709,12 +2937,12 @@ export default function AdminDashboardScreen({ navigation, route }) {
             <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
               Set service access for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🛡 Worship Leader: can only grant Service Planner access' : ''}
+              {isManager && !isAdmin ? '\n🛡 Worship Leader: can grant Lead Singer or Service Planner access' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-              {(isOrgOwner ? ['org_owner', 'admin', 'manager', 'leader', 'none']
-                : isAdmin  ? ['manager', 'leader', 'none']
-                : ['leader', 'none']).map(r => (
+              {(isOrgOwner ? ['org_owner', 'admin', 'manager', 'lead_singer', 'leader', 'none']
+                : isAdmin  ? ['manager', 'lead_singer', 'leader', 'none']
+                : ['lead_singer', 'leader', 'none']).map(r => (
                 <TouchableOpacity key={r}
                   style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, borderWidth: 1,
                     backgroundColor: grantingRole === r ? '#7C3AED' : '#1F2937',
@@ -2723,6 +2951,7 @@ export default function AdminDashboardScreen({ navigation, route }) {
                   <Text style={{ color: grantingRole === r ? '#FFF' : '#9CA3AF', fontWeight: '700' }}>
                     {r === 'manager' ? 'Worship Leader'
                       : r === 'leader' ? 'Service Planner'
+                      : r === 'lead_singer' ? 'Lead Singer'
                       : r === 'org_owner' ? 'Org Owner'
                       : r === 'none' ? 'Remove Access'
                       : r === 'admin' ? 'Admin'
@@ -2731,6 +2960,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
                 </TouchableOpacity>
               ))}
             </View>
+            {grantingRole === 'lead_singer' && (
+              <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: -12, marginBottom: 16 }}>
+                Can create the service setlist, assign vocals and musicians, then submit for Admin or Worship Leader approval.
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity style={{ flex: 1, backgroundColor: '#1F2937', borderRadius: 10, paddingVertical: 12, alignItems: 'center' }} onPress={() => setShowGrantRole(null)}>
                 <Text style={{ color: '#9CA3AF', fontWeight: '700' }}>Cancel</Text>
@@ -2853,9 +3087,15 @@ const s = StyleSheet.create({
   planAddBtnText: { fontSize: 12, fontWeight: '700', color: '#8B5CF6' },
   planEmpty: { fontSize: 12, color: '#4B5563', fontStyle: 'italic', marginBottom: 8, paddingLeft: 4 },
   publishBtn: { marginTop: 16, backgroundColor: '#7C3AED', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  submitApprovalBtn: { backgroundColor: '#2563EB' },
   publishBtnDisabled: { opacity: 0.5 },
   publishBtnText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
   publishedAt: { fontSize: 11, color: '#C4B5FD', marginTop: 2 },
+  setlistReviewBanner: { marginTop: 14, borderRadius: 10, borderWidth: 1, borderColor: '#2563EB55', backgroundColor: '#1D4ED811', padding: 10 },
+  setlistReviewApproved: { borderColor: '#05966966', backgroundColor: '#05966912' },
+  setlistReviewRejected: { borderColor: '#EF444466', backgroundColor: '#7F1D1D22' },
+  setlistReviewTitle: { color: '#E5E7EB', fontSize: 13, fontWeight: '800' },
+  setlistReviewMeta: { color: '#9CA3AF', fontSize: 12, marginTop: 4, lineHeight: 17 },
   planSongRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1F2937' },
   // Vocal assignment
   vocalToggleBtn: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 7, backgroundColor: '#1F2937', borderWidth: 1, borderColor: '#374151' },

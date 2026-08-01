@@ -137,7 +137,7 @@ export default function MessageNotificationWatcher() {
         const fullName = [profile?.name, profile?.lastName].filter(Boolean).join(' ').trim();
         const grantedRole = normalize(profile?.grantedRole);
         const identity = `${email}|${fullName.toLowerCase()}|${grantedRole}`;
-        const shouldCheckAdmin = grantedRole === 'admin' || grantedRole === 'md';
+        const shouldCheckAdmin = ['org_owner', 'admin', 'manager', 'md'].includes(grantedRole);
 
         if (!email && !shouldCheckAdmin) {
           identityRef.current = '';

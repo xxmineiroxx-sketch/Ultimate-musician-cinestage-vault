@@ -1,0 +1,2494 @@
+{
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/App_Original.js": {
+    "mtime": 1785595098.9468677,
+    "hash": "7c029eafdfa16ffd2e153028f642970d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/index.js": {
+    "mtime": 1785595099.5753577,
+    "hash": "7b1e3824c2300228f04aae76def0446b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/App.js": {
+    "mtime": 1785595098.9467957,
+    "hash": "634ee3ded4076444d835dfefc17e3d08"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/sync-server.js": {
+    "mtime": 1785595099.5805802,
+    "hash": "f7d4eddeeb59da718eb21a815d17e3a2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/Widget/UltimateWidget.swift": {
+    "mtime": 1785595099.5758677,
+    "hash": "837dffb35ac26aaca17118aa8458bc07"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/Widget/WidgetEntry.swift": {
+    "mtime": 1785595099.575924,
+    "hash": "5a88bdb09e36030879a87cf0df330712"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/RN/WidgetDataModule.m": {
+    "mtime": 1785595099.5755522,
+    "hash": "6e47f6afa56308d5c368a818d6de0237"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/RN/WatchBridgeModule.m": {
+    "mtime": 1785595099.5754585,
+    "hash": "da548a2507389cde7428dcee9a8c1332"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/RN/WidgetDataModule.swift": {
+    "mtime": 1785595099.5755985,
+    "hash": "e9ca80d346f9e8352853f3d651364d9d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/RN/WatchBridgeModule.swift": {
+    "mtime": 1785595099.575507,
+    "hash": "5b7c19a8e45fd3eede09f760e7277dd6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/Watch/WatchApp.swift": {
+    "mtime": 1785595099.575719,
+    "hash": "ac6f76dc0b18c7136c9bcfc42db79f0f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/Watch/WatchSessionManager.swift": {
+    "mtime": 1785595099.575773,
+    "hash": "c89ce16c6e30f6b38ecbbbe7bdd0ee75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/Watch/ContentView.swift": {
+    "mtime": 1785595099.5756717,
+    "hash": "eea26dd07456a332528588699207aa54"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/config/syncConfig.js": {
+    "mtime": 1785606975.7404354,
+    "hash": "d4a3d5b7ce52f9dae18815253f52a53f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/plugins/withNativeModules.js": {
+    "mtime": 1785595099.5763874,
+    "hash": "77ba99c74b43f6aae9281bffb32eaefa"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/scripts/sync-testflight-groups.js": {
+    "mtime": 1785595099.576766,
+    "hash": "10f279c8f81a8ff93ca4f6188b55fd59"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/scripts/install-testflight-beta-lane.js": {
+    "mtime": 1785595099.576547,
+    "hash": "2bf4c46b8e0908d2201380f4c5743913"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/scripts/setup_xcode_targets.rb": {
+    "mtime": 1785595099.576596,
+    "hash": "81dd7d3aa020483d6920306059dd3746"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/scripts/fix-ios-build-paths.js": {
+    "mtime": 1785595099.576483,
+    "hash": "093f29cb9b68408e3ac0a9df27f3f0a7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/legacy_packages/UltimateMusician_StarterAndDocs_Package/starter-mobile/screens/SuggestFeatureScreen.js": {
+    "mtime": 1785595098.9491186,
+    "hash": "7e154ad85bda59ed6b8a3e26370496d0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/legacy_packages/UltimateMusician_StarterAndDocs_Package/starter-mobile/screens/DiagnosticsScreen.js": {
+    "mtime": 1785595098.9490647,
+    "hash": "160bc131b25bcd6ceeb4f2f36b40c400"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/App.js": {
+    "mtime": 1785595098.973406,
+    "hash": "5aaeac139f251d505331d77717e10de1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/audioEngine/index.js": {
+    "mtime": 1785595098.9737465,
+    "hash": "6f39fbc4e401ca667647286d210e5f46"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/PlanningScreen.js": {
+    "mtime": 1785595098.9756916,
+    "hash": "b41cae3c705e0ba00dcddfef831cdd65"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/StemsCenterScreen.js": {
+    "mtime": 1785595098.9759214,
+    "hash": "5b46c546110565d0f641b2c8cebfcbb6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/PeopleRolesScreen.js": {
+    "mtime": 1785595098.9756424,
+    "hash": "5610397b20a350200205b77c677cd215"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/HomeScreen.js": {
+    "mtime": 1785595098.9752624,
+    "hash": "275282699455f55319b6c7ecc6a9a20e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/LoginScreen.js": {
+    "mtime": 1785595098.9754407,
+    "hash": "9486e4d006e8d99a3595748ff13b3518"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/MixerScreen.js": {
+    "mtime": 1785595098.9755034,
+    "hash": "a3f45ef0a4cfdb6cd29e8e2dd3c12d0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/LibraryScreen.js": {
+    "mtime": 1785595098.9753237,
+    "hash": "7452f8df341e075c387b528cced81211"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/SongDetailScreen.js": {
+    "mtime": 1785595098.9757938,
+    "hash": "d02c942ab10042fe6c7e2322ce194872"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/NewSongScreen.js": {
+    "mtime": 1785595098.9755898,
+    "hash": "527db08637f5c21d5b47529f14be39ae"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/LiveScreen.js": {
+    "mtime": 1785595098.9753842,
+    "hash": "2dd9b7efe2ec1241de65357d269e1aca"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/screens/RehearsalScreen.js": {
+    "mtime": 1785595098.9757404,
+    "hash": "6b10dccbccb90ab0cdfb79d729c0d374"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/components/TrackFader.js": {
+    "mtime": 1785595098.9739468,
+    "hash": "e3042a0cad38096b28645f9622863603"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/components/Chip.js": {
+    "mtime": 1785595098.9738405,
+    "hash": "b81299aa175e29a146c2dfcb6740fc3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/components/WaveformTimeline.js": {
+    "mtime": 1785595098.9740484,
+    "hash": "8be97e19236e62696b2830ce89606804"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/components/PrimaryButton.js": {
+    "mtime": 1785595098.9738982,
+    "hash": "da935edcaa5a8be487b85000918ccc0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/data/lyrics.js": {
+    "mtime": 1785595098.9741416,
+    "hash": "520224bc65f5925bcec5676c78464689"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/data/models.js": {
+    "mtime": 1785595098.9741924,
+    "hash": "1ede389da04b1a818b845435853a0d4b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/data/storage.js": {
+    "mtime": 1785595098.9742467,
+    "hash": "46be5147dcf0938ab15477fe6583c823"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/App.js": {
+    "mtime": 1785595098.976004,
+    "hash": "0e0dc1550cbe20ab150155b3cf870a6f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/audioEngine/index.js": {
+    "mtime": 1785595098.9761784,
+    "hash": "6f39fbc4e401ca667647286d210e5f46"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/PlanningScreen.js": {
+    "mtime": 1785595098.977498,
+    "hash": "b41cae3c705e0ba00dcddfef831cdd65"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/StemsCenterScreen.js": {
+    "mtime": 1785595098.9776654,
+    "hash": "5b46c546110565d0f641b2c8cebfcbb6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/PeopleRolesScreen.js": {
+    "mtime": 1785595098.9774468,
+    "hash": "5610397b20a350200205b77c677cd215"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/HomeScreen.js": {
+    "mtime": 1785595098.9771812,
+    "hash": "275282699455f55319b6c7ecc6a9a20e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/MixerScreen.js": {
+    "mtime": 1785595098.9773362,
+    "hash": "a3f45ef0a4cfdb6cd29e8e2dd3c12d0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/LibraryScreen.js": {
+    "mtime": 1785595098.9772382,
+    "hash": "7452f8df341e075c387b528cced81211"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/SongDetailScreen.js": {
+    "mtime": 1785595098.977603,
+    "hash": "d02c942ab10042fe6c7e2322ce194872"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/NewSongScreen.js": {
+    "mtime": 1785595098.9773889,
+    "hash": "527db08637f5c21d5b47529f14be39ae"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/LiveScreen.js": {
+    "mtime": 1785595098.9772882,
+    "hash": "2dd9b7efe2ec1241de65357d269e1aca"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/screens/RehearsalScreen.js": {
+    "mtime": 1785595098.9775481,
+    "hash": "6b10dccbccb90ab0cdfb79d729c0d374"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/components/TrackFader.js": {
+    "mtime": 1785595098.9763386,
+    "hash": "e3042a0cad38096b28645f9622863603"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/components/Chip.js": {
+    "mtime": 1785595098.9762516,
+    "hash": "b81299aa175e29a146c2dfcb6740fc3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/components/WaveformTimeline.js": {
+    "mtime": 1785595098.9763863,
+    "hash": "8be97e19236e62696b2830ce89606804"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/components/PrimaryButton.js": {
+    "mtime": 1785595098.9762945,
+    "hash": "da935edcaa5a8be487b85000918ccc0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/data/lyrics.js": {
+    "mtime": 1785595098.9764597,
+    "hash": "520224bc65f5925bcec5676c78464689"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/data/models.js": {
+    "mtime": 1785595098.976507,
+    "hash": "1ede389da04b1a818b845435853a0d4b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/data/storage.js": {
+    "mtime": 1785595098.9765582,
+    "hash": "46be5147dcf0938ab15477fe6583c823"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/jest.setup.js": {
+    "mtime": 1785595098.958468,
+    "hash": "46312bf663a3be1276d00e11c44692d6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/index.js": {
+    "mtime": 1785595098.9563563,
+    "hash": "9b6cb633278092329b08dac0a4f29459"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/metro.config.js": {
+    "mtime": 1785595098.958522,
+    "hash": "c0faeacba370557e3a8a920dd24d93c5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/babel.config.js": {
+    "mtime": 1785595098.9513516,
+    "hash": "39626410bf17113d7391598a3d40b764"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/TEMP_WAVEFORM_TAB.js": {
+    "mtime": 1785595098.9499917,
+    "hash": "c26dc7dcfe0771e5b2087b84ffa19147"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/App.js": {
+    "mtime": 1785595098.9495325,
+    "hash": "41b037eda2e40b0cdc189b5dc2ec74c2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/songMap/model.js": {
+    "mtime": 1785595098.9718964,
+    "hash": "ba1e2d06edf9766873580f1710d6ea55"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/context/AuthContext.js": {
+    "mtime": 1785595098.9535325,
+    "hash": "18e2d50f3c52a1b4ae51142d6f819be5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/context/ThemeContext.js": {
+    "mtime": 1785595098.9535904,
+    "hash": "9fbeab52b0f2125a8ac76bc376baf939"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/index.js": {
+    "mtime": 1785595098.9510524,
+    "hash": "4f7a13e3f8a87f42dc4afacd1ca68d6a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/TimingEngine.js": {
+    "mtime": 1785595098.9509807,
+    "hash": "111d5671e163fff62c6fbf8b0f76e524"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/EventBus.js": {
+    "mtime": 1785595098.9509273,
+    "hash": "d421d24c705bee6cb1a5aca42256ec67"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/AudioAdapter.js": {
+    "mtime": 1785595098.9508715,
+    "hash": "173b1e4d2847afd95aae03944bc62aec"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/modules/Conductor 2.js": {
+    "mtime": 1785595098.9511416,
+    "hash": "ccab9c05f59921abecf603b8890fe516"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/modules/Conductor.js": {
+    "mtime": 1785595098.951197,
+    "hash": "ccab9c05f59921abecf603b8890fe516"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/modules/Loader 2.js": {
+    "mtime": 1785595098.9512491,
+    "hash": "f8d2e71c48edabb83c456c71cfc74a3f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/audioEngine/modules/Loader.js": {
+    "mtime": 1785595098.9513054,
+    "hash": "6c8887333f6b62addd32d401cea3f5fc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/sharedStorage.js": {
+    "mtime": 1785595098.9732478,
+    "hash": "d12afe37e4f52ae0d6a1aa596ec7601f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/desktopBridge.js": {
+    "mtime": 1785595098.9725754,
+    "hash": "0dd56ea1b9bc3f3b52e077ae56f677fc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/platformAudio 2.js": {
+    "mtime": 1785595098.9727483,
+    "hash": "cb36db1541fbb2caaf6910766d0f7736"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/sharedPresetStorage.js": {
+    "mtime": 1785595098.973176,
+    "hash": "6562d190ad55b5ed9f91f2d88a5551e7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/stemPayload.js": {
+    "mtime": 1785595098.9733033,
+    "hash": "bc82b309555f7b200eb154dca2b55cca"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/platformFs.js": {
+    "mtime": 1785595098.9729247,
+    "hash": "c0cfa7614228fec018d5df566f33dcd3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/platformAudio.js": {
+    "mtime": 1785595098.9728155,
+    "hash": "cb36db1541fbb2caaf6910766d0f7736"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/parseSectionsForWaveform.js": {
+    "mtime": 1785595098.9726832,
+    "hash": "8da7f5976298463b52e57ba007abd5fb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/sectionUtils.js": {
+    "mtime": 1785595098.9731069,
+    "hash": "32cd347bf236c5d0b3b570444db049c3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/platformFs 2.js": {
+    "mtime": 1785595098.9728723,
+    "hash": "c0cfa7614228fec018d5df566f33dcd3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/desktopBridge 2.js": {
+    "mtime": 1785595098.9725246,
+    "hash": "0dd56ea1b9bc3f3b52e077ae56f677fc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/responsive.js": {
+    "mtime": 1785595098.972981,
+    "hash": "7d10cd970856f939678ce9d3ed44d729"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/fetchRetry.js": {
+    "mtime": 1785595098.9726293,
+    "hash": "47416bdeac8ae6ae7a0b7bdbf110367c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/utils/sectionUtils 2.js": {
+    "mtime": 1785595098.9730413,
+    "hash": "32cd347bf236c5d0b3b570444db049c3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/shared/contracts/cinestage.types.js": {
+    "mtime": 1785595098.9718199,
+    "hash": "5f3dc0b91748d3a8e36e7d1e1a360a4a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/setlist/model.js": {
+    "mtime": 1785595098.971704,
+    "hash": "0a36438f737c61acaf1881788a8d221e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/UltimateMusician-Bridging-Header.h": {
+    "mtime": 1785595098.9583657,
+    "hash": "6985aa077f152ccba8fa88dee05f14d2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/AudioEngineBridge.m": {
+    "mtime": 1785595098.9571977,
+    "hash": "b667a32107a1c244d0f836cc612303f6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/AudioEngineManager.swift": {
+    "mtime": 1785595098.9572985,
+    "hash": "96345351a7eb5b233a7f1cc5da2a64ab"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/AppDelegate.swift": {
+    "mtime": 1785595098.9571452,
+    "hash": "68e35dd98ceb7c38f6f1d18e55a1a39e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/AudioEngineBridge.swift": {
+    "mtime": 1785595098.9572463,
+    "hash": "a6897a8d453dfbb38f2a9500d32cb4f1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/RegisterScreen.js": {
+    "mtime": 1785595098.9648077,
+    "hash": "66ad5891c321d609df5133e9012b65bf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CineStageScreen.js": {
+    "mtime": 1785595098.9605856,
+    "hash": "559ce25dc5d5c15849ccf6c1048e7cd1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LiveServiceScreen.js": {
+    "mtime": 1785595098.9619486,
+    "hash": "27872a0b5056cea61ba95851c72ab113"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PermissionsScreen.js": {
+    "mtime": 1785595098.9640129,
+    "hash": "cac0f73fc5761b5861d93901390e974f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ProfileScreen.js": {
+    "mtime": 1785595098.9646778,
+    "hash": "ca3098931e23dfe73dccf2520d65cb60"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/StudioScreen.js": {
+    "mtime": 1785595098.966962,
+    "hash": "4129ff65bf546bd129c74c42cb24ef5c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/TestModeScreen.js": {
+    "mtime": 1785595098.9671507,
+    "hash": "edebd6e4c93c145dadf2015a3734d557"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/DronePadScreen.js": {
+    "mtime": 1785595098.9609149,
+    "hash": "b7fbde75f4c050bcfe9bb80e707de5b9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PlanTeamScreen.js": {
+    "mtime": 1785595098.964276,
+    "hash": "eb0f09bb6df08cde8fba59ed51988e49"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PlanningScreen.js": {
+    "mtime": 1785595098.9644225,
+    "hash": "11b18217df57babf9d031bf1a9b1791d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/MessageCenterScreen.js": {
+    "mtime": 1785595098.9621234,
+    "hash": "df242c11e6cbe18ec2ef616a5d1a0b7f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/MixerConsoleScreen.js": {
+    "mtime": 1785595098.9622798,
+    "hash": "0a96bf6d3172aa5abcb1a66b7ba5ca44"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/FatChannelPresetsScreen.js": {
+    "mtime": 1785595098.9610677,
+    "hash": "5668c2a4cffb943d5adb8d0fe0af2ce4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/StemsCenterScreen.js": {
+    "mtime": 1785595098.9668715,
+    "hash": "6b525c1de666d1c017c93daa7feb1f84"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PCOImportScreen.js": {
+    "mtime": 1785595098.963219,
+    "hash": "478d10eb65881ff47ba6ac312bf0978a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/AnalyticsDashboardScreen 2.js": {
+    "mtime": 1785595098.959236,
+    "hash": "d6bea444860c0b643779b4352e76ec61"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PresetsScreen.js": {
+    "mtime": 1785595098.9646125,
+    "hash": "4e3d6f135ce2d0e5b76c0a2f73440fc3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BillingScreen.js": {
+    "mtime": 1785595098.959609,
+    "hash": "cd2eb57dca4e9f374b627ff2f7b9e531"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CineStageDashboardScreen.js": {
+    "mtime": 1785595098.9603655,
+    "hash": "a9d6740048dd5a9e00647cd35a68832e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ProposalsScreen.js": {
+    "mtime": 1785595098.9647427,
+    "hash": "b8129c942c0daeb2be3171c3d373f649"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BlockoutCalendarScreen.js": {
+    "mtime": 1785595098.9597108,
+    "hash": "c0e4fb7bcd356d793d208c225c5b5e53"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CentralAdminScreen 2.js": {
+    "mtime": 1785595098.9600987,
+    "hash": "00b5b5bdf182632b9deae9f019a7e526"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/AvailabilityHeatmapScreen.js": {
+    "mtime": 1785595098.95947,
+    "hash": "2ebecd7b961765373336865ff91ba503"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SystemMapScreen.js": {
+    "mtime": 1785595098.9670916,
+    "hash": "93d7189a1e8655cb9dc23cf675328e95"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CineStageScreen.iphone17 2.js": {
+    "mtime": 1785595098.9604447,
+    "hash": "d17796670141ab80ace2e6c4f55e84bd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ServiceFeedbackScreen.js": {
+    "mtime": 1785595098.9656377,
+    "hash": "7895583bf1c4f77198282f8e6f978c1c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/DeviceRoleScreen.js": {
+    "mtime": 1785595098.9607027,
+    "hash": "9576f60f49d2c43f961ecb723296d27c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PresetEditorScreen.js": {
+    "mtime": 1785595098.9644783,
+    "hash": "8e2c175658fc716a5463f14d66fde985"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PeopleRolesScreen.js": {
+    "mtime": 1785595098.9635866,
+    "hash": "c46a1bcba9a7a2d3731b6831308150ec"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BranchManagerScreen.js": {
+    "mtime": 1785595098.959789,
+    "hash": "9e870c48b2a079edc782f77b165cc3f5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/WaveformDetailScreen.js": {
+    "mtime": 1785595098.9673018,
+    "hash": "f778148329ff1345d544c05e44839d80"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LiveServiceScreen 2.js": {
+    "mtime": 1785595098.9618628,
+    "hash": "27872a0b5056cea61ba95851c72ab113"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/StemMixerScreen.js": {
+    "mtime": 1785595098.9667463,
+    "hash": "9404c5d18157cc64853f9eb7406da803"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/HomeScreen.js": {
+    "mtime": 1785595098.9611511,
+    "hash": "fa9290ada69d046d5177dcf78974ba6e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/NotificationPrefsScreen 2.js": {
+    "mtime": 1785595098.9628174,
+    "hash": "03114329ad320e8bb6a0587130f7b242"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SuggestFeatureScreen.js": {
+    "mtime": 1785595098.9670258,
+    "hash": "f741a4b35168596d9712fc08081e51e1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SettingsScreen.js": {
+    "mtime": 1785595098.966211,
+    "hash": "3e123952395d6a4c356c749173d2e16d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/config.js": {
+    "mtime": 1785595098.9675276,
+    "hash": "5fae2e50888bc8b20254c73c08ee3719"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PlanTeamScreen 2.js": {
+    "mtime": 1785595098.964199,
+    "hash": "eb0f09bb6df08cde8fba59ed51988e49"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/OnboardingSystemMap.js": {
+    "mtime": 1785595098.9629815,
+    "hash": "d7aa6b7748ead909ee2bf97f0098745c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LoginScreen.js": {
+    "mtime": 1785595098.9620223,
+    "hash": "71aa128211c58d1db783d9036d554e9c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ChecklistScreen.js": {
+    "mtime": 1785595098.9602928,
+    "hash": "ff8206fc08f0884c9a3a0cd4b3170755"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SectionMappingScreen.js": {
+    "mtime": 1785595098.9653327,
+    "hash": "6977f766ca74871012e067f62c0f06f3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/DiagnosticsScreen.js": {
+    "mtime": 1785595098.9608488,
+    "hash": "7430867a2f5ac4fbcb71bf79e9bbb237"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/MixerScreen.js": {
+    "mtime": 1785595098.9623675,
+    "hash": "3f82d7a45d7057f56403f9a7d0691a3b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BranchSetupScreen.js": {
+    "mtime": 1785595098.9598663,
+    "hash": "943fcd196efd0037d4775e85dbb41a57"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CalendarScreen.js": {
+    "mtime": 1785595098.9599864,
+    "hash": "5a2edca8433bf52aab22a88da7807299"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/OrganizerScreen.js": {
+    "mtime": 1785595098.9631515,
+    "hash": "e32e07ad09adf77d41643c4132129d8f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/WebhooksScreen 2.js": {
+    "mtime": 1785595098.9673903,
+    "hash": "ded4dd5f0ea3604a33fa8a31090473d1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BridgeSetupScreen.js": {
+    "mtime": 1785595098.9599202,
+    "hash": "e7e7f3465b26c57d6aae6b3d6da3e4db"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/WebhooksScreen.js": {
+    "mtime": 1785595098.9674633,
+    "hash": "ded4dd5f0ea3604a33fa8a31090473d1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/VerifyScreen.js": {
+    "mtime": 1785595098.96722,
+    "hash": "22f7517df40f97baa07c710ee632d658"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ServicePlanScreen.js": {
+    "mtime": 1785595098.9658408,
+    "hash": "b02071079ed1e28e7b86b8e270fbaeba"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PlanningCenterScreen.js": {
+    "mtime": 1785595098.9643586,
+    "hash": "b87e984529a5f695c9a36118b0ef6421"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LibraryScreen.js": {
+    "mtime": 1785595098.9614348,
+    "hash": "50366914c84b00b5389feb9ca435435c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SetlistScreen.js": {
+    "mtime": 1785595098.9661272,
+    "hash": "1dcdda38fc1add7ac3827b83f41720ee"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ServiceFeedbackScreen 2.js": {
+    "mtime": 1785595098.965477,
+    "hash": "7895583bf1c4f77198282f8e6f978c1c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PartSheetScreen.js": {
+    "mtime": 1785595098.9634855,
+    "hash": "8b15d3e253697344a2d3ac86aac2ca5d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/OrganizationScreen.js": {
+    "mtime": 1785595098.963081,
+    "hash": "d0c80c52b6b7376f81fe8b5322879dab"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/DeviceSetupScreen.js": {
+    "mtime": 1785595098.9607787,
+    "hash": "3f0ea7afb23b8a41bb739055762f7810"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PCOIntegrationScreen.js": {
+    "mtime": 1785595098.9633985,
+    "hash": "722a1eca980d7e9ec646edf10729668b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SongDetailScreen.js": {
+    "mtime": 1785595098.9663057,
+    "hash": "b0f6eaa5499ce812268747329f1dedc4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CueGridScreen.js": {
+    "mtime": 1785595098.9606469,
+    "hash": "c3f51a0cc3b8d93b8538c130c6c5e762"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LiveModeScreen.js": {
+    "mtime": 1785595098.9614973,
+    "hash": "b091b31e40f02a6a7fe9ac1a711b17e4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/NotificationPrefsScreen.js": {
+    "mtime": 1785595098.9628985,
+    "hash": "03114329ad320e8bb6a0587130f7b242"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SongMapScreen.js": {
+    "mtime": 1785595098.9663715,
+    "hash": "059d64542a69f89af53c947436e979bf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/AvailabilityHeatmapScreen 2.js": {
+    "mtime": 1785595098.9593914,
+    "hash": "2ebecd7b961765373336865ff91ba503"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/StageDisplayScreen.js": {
+    "mtime": 1785595098.9666414,
+    "hash": "8fd7c3119cd31a6e7fc9a6c974c8fc61"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/RoleSelectScreen.js": {
+    "mtime": 1785595098.9652655,
+    "hash": "c18df29c14932199342f76c0724a0ba8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/NewSongScreen.js": {
+    "mtime": 1785595098.9627352,
+    "hash": "b3c2074a3f9e629734075d0ee9ad6490"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PersonProfileScreen.js": {
+    "mtime": 1785595098.964107,
+    "hash": "6a75a47c69f8e590c2dd32e996d640e9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/SongPlanDetailScreen.js": {
+    "mtime": 1785595098.9665692,
+    "hash": "13aa4ddb93fd23574636069664c97c3c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/BillingScreen 2.js": {
+    "mtime": 1785595098.9595425,
+    "hash": "cd2eb57dca4e9f374b627ff2f7b9e531"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/ExternalSyncScreen.js": {
+    "mtime": 1785595098.9609885,
+    "hash": "caa9c6fb1ca453b649633f406223daa1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LivePerformanceScreen.js": {
+    "mtime": 1785595098.961577,
+    "hash": "f7c9d6795aa8023d32038b7b3dd2d627"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LandingScreen.js": {
+    "mtime": 1785595098.9613142,
+    "hash": "d7d0c8e488a4df192db09e3cd34b6d0b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/NewServiceScreen.js": {
+    "mtime": 1785595098.962553,
+    "hash": "c2478fe590b06e366942a66dfb7ef1d0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PCOIntegrationScreen 2.js": {
+    "mtime": 1785595098.9633088,
+    "hash": "722a1eca980d7e9ec646edf10729668b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/AnalyticsDashboardScreen.js": {
+    "mtime": 1785595098.9593067,
+    "hash": "d6bea444860c0b643779b4352e76ec61"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PresetLibraryBrowserScreen.js": {
+    "mtime": 1785595098.9645472,
+    "hash": "c442c7d5618e5f3eed17da6fbb060334"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/LiveScreen.js": {
+    "mtime": 1785595098.9617653,
+    "hash": "ce2925ced82f1cbf2866ac93fbd7cb87"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/PerformanceScreen.js": {
+    "mtime": 1785595098.9639373,
+    "hash": "9cb31f9454c314decdc09021a29861ce"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CentralAdminScreen.js": {
+    "mtime": 1785595098.960206,
+    "hash": "00b5b5bdf182632b9deae9f019a7e526"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/MusicDirectorRemoteScreen.js": {
+    "mtime": 1785595098.962452,
+    "hash": "60bd5cc9c0bc1071bc80ba5cda016fc0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/KeyChangeScreen.js": {
+    "mtime": 1785595098.9612331,
+    "hash": "35f08ea51cfb300b00dea8f13d8b6b64"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/CineStageScreen.iphone17.js": {
+    "mtime": 1785595098.9605212,
+    "hash": "d17796670141ab80ace2e6c4f55e84bd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/screens/RehearsalScreen.js": {
+    "mtime": 1785595098.9650784,
+    "hash": "19fe78ba11bebfac72e4fe7ae07b8e6e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/StemLevelMeter.js": {
+    "mtime": 1785595098.9528663,
+    "hash": "254df09331d8d40334656c25e0afceaf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ProMixerConsole.js": {
+    "mtime": 1785595098.9524744,
+    "hash": "01a6a5fadcbc038a9d3064d9a6e54ad5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/TrackFader.js": {
+    "mtime": 1785595098.9530811,
+    "hash": "1c3b9629e028556b62ef0f83d6ed4b0e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/DeviceStatusHub.js": {
+    "mtime": 1785595098.9520772,
+    "hash": "8537eee0148947d7e0fac4e1956a9d8e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ProTrackFader.js": {
+    "mtime": 1785595098.9526167,
+    "hash": "1de26ad9529a21bfb54ad44b977473b0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/Chip.js": {
+    "mtime": 1785595098.951507,
+    "hash": "1fd6080acb679d31f563c75ac37aa0b2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/MeterBar.js": {
+    "mtime": 1785595098.9522028,
+    "hash": "15aaee72319850f7bc3ec14d0f5e3fa1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainLogo.iphone17 2.js": {
+    "mtime": 1785595098.9516418,
+    "hash": "1266f56a3e7f37d18cbe3858087d5d18"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainStatus.js": {
+    "mtime": 1785595098.9519067,
+    "hash": "f11d93714d9d07b19294f4aec5ca8a01"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/WaveformView.js": {
+    "mtime": 1785595098.953426,
+    "hash": "e053d003a13e5d6dbce349da809cf636"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainStatus 2.js": {
+    "mtime": 1785595098.9518511,
+    "hash": "f11d93714d9d07b19294f4aec5ca8a01"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageThinkingBar.js": {
+    "mtime": 1785595098.952029,
+    "hash": "eb5d64407fe3c7e04b773495fd025f47"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/StemChannelStrip.js": {
+    "mtime": 1785595098.9528136,
+    "hash": "bb7c7450168b4e1fea382513ee65ca3b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ServiceFeedbackModal.js": {
+    "mtime": 1785595098.9527407,
+    "hash": "6e456155f46e5857254aa7fc23a7abc7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/TestCineStageBrainAnimation.js": {
+    "mtime": 1785595098.9530258,
+    "hash": "3d3c888e4d781ea7f805ddbcb6827e28"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ProTrackFader 2.js": {
+    "mtime": 1785595098.9525402,
+    "hash": "007ce99a8d0647304183a64f222e3e94"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/StemWaveformView.js": {
+    "mtime": 1785595098.9529212,
+    "hash": "4e4bf51a7f2d6c6fa6b9821a397b4e4d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainLogo.js": {
+    "mtime": 1785595098.951791,
+    "hash": "4b27a3f2a8887a4db693153c7b7ddcdf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainLogo.iphone17.js": {
+    "mtime": 1785595098.951714,
+    "hash": "1266f56a3e7f37d18cbe3858087d5d18"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageBrainLogo 2.js": {
+    "mtime": 1785595098.9515765,
+    "hash": "4b27a3f2a8887a4db693153c7b7ddcdf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ProMixerConsole 2.js": {
+    "mtime": 1785595098.9524126,
+    "hash": "7cf95fb898163b5a032678b3262a3b06"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/UltimateWaveform 2.js": {
+    "mtime": 1785595098.9531524,
+    "hash": "edcdbc8299b7ab4de17e0ea3ab60293c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/MiniWaveform.js": {
+    "mtime": 1785595098.952312,
+    "hash": "d08af512f20850295e34a02465023f16"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/TestCineStageBrainAnimation 2.js": {
+    "mtime": 1785595098.952976,
+    "hash": "3d3c888e4d781ea7f805ddbcb6827e28"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/WaveformTimeline.js": {
+    "mtime": 1785595098.9533615,
+    "hash": "a69260cd0dc6cd6739b461481be82ca4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/UltimateWaveform.js": {
+    "mtime": 1785595098.953217,
+    "hash": "edcdbc8299b7ab4de17e0ea3ab60293c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/CineStageProcessingOverlay.js": {
+    "mtime": 1785595098.9519713,
+    "hash": "e9dadebb1a9932601d4ef69fac950f94"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/MiniWaveform 2.js": {
+    "mtime": 1785595098.952256,
+    "hash": "d08af512f20850295e34a02465023f16"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/MessageNotificationWatcher.js": {
+    "mtime": 1785595098.952148,
+    "hash": "ac4a627810f8b3a2a20a0a1f9c8761a3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/VirtualRigView.js": {
+    "mtime": 1785595098.9532826,
+    "hash": "c3c2cb524a9cca1db0d912cf822a2711"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/PrimaryButton.js": {
+    "mtime": 1785595098.952363,
+    "hash": "ea9e94187f66a54a66591e1a0c6a07dc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ChartReferencePanel.js": {
+    "mtime": 1785595098.9514537,
+    "hash": "2a7282e9f805726b25c9685050dbc159"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/components/ServiceFeedbackModal 2.js": {
+    "mtime": 1785595098.9526825,
+    "hash": "6e456155f46e5857254aa7fc23a7abc7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/__tests__/App.test.js": {
+    "mtime": 1785595098.9500816,
+    "hash": "dec3f004c1c6ff578469aef13e22d5d5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/api/cinestageAPI.js": {
+    "mtime": 1785595098.9502206,
+    "hash": "391b4864bc65377d4afc363e1b57b535"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/api/cinestage.js": {
+    "mtime": 1785595098.9501665,
+    "hash": "09eab4dac53adcf3abb97971d3acedf7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/cifrasSeed.js": {
+    "mtime": 1785595098.9553795,
+    "hash": "10c7abe9a8c7e5be727c88d0b2209616"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/blockoutsStore.js": {
+    "mtime": 1785595098.9536881,
+    "hash": "7632d7dfce8551b385cb42cea63087fb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/lyrics.js": {
+    "mtime": 1785595098.9554975,
+    "hash": "0d2078d296845be0819db6682fe8d52c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/servicePlanStore.js": {
+    "mtime": 1785595098.955761,
+    "hash": "54049b206630d5c05d6b4fa887111746"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/models.js": {
+    "mtime": 1785595098.9555793,
+    "hash": "2d91e8f25e1730fe91fc9596df1fc659"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/demoSeed.js": {
+    "mtime": 1785595098.955445,
+    "hash": "d1f3505ddd2f8f53c7c764e1efd81a6b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/chordTranspose.js": {
+    "mtime": 1785595098.9537473,
+    "hash": "f0e3398ac7d19c50ad0d6affd7156587"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/orgScopedStorage.js": {
+    "mtime": 1785595098.9556942,
+    "hash": "def10d7d80c815f79845baaf2351382a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/tblcSeed.js": {
+    "mtime": 1785595098.956056,
+    "hash": "5cf9c8954cfc5020d4ac782e98ea3163"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/servicesStore.js": {
+    "mtime": 1785595098.955875,
+    "hash": "d65ee20c1b16b79689589ff311c256e0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/serviceTemplates.js": {
+    "mtime": 1785595098.955816,
+    "hash": "19f71c1d14be7b87790bb6793f890ec0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/orgScopedStorage 2.js": {
+    "mtime": 1785595098.955639,
+    "hash": "def10d7d80c815f79845baaf2351382a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/data/storage.js": {
+    "mtime": 1785595098.9559548,
+    "hash": "f65a29c54432737219f9007163b42739"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/propresenterMidiMap.js": {
+    "mtime": 1785595098.969922,
+    "hash": "29a4b20c9f6557182856769462f8219b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/serviceFileParser.js": {
+    "mtime": 1785595098.9701827,
+    "hash": "bbb23cff0b4b4e2a40f76202e5f3e899"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/client.js": {
+    "mtime": 1785595098.968348,
+    "hash": "59d255425ec9735428e3d0187f8cbae1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/setlistWavePipeline.js": {
+    "mtime": 1785595098.9703224,
+    "hash": "6874c371ca5087613ec848dea847190a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stemSyncService 2.js": {
+    "mtime": 1785595098.9706829,
+    "hash": "85b90371a23bc0498abfd9183edddf9f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cueSync.js": {
+    "mtime": 1785595098.9688118,
+    "hash": "a9dd694c4d33c640971182273ea02b7b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/songWavePipeline 2.js": {
+    "mtime": 1785595098.970374,
+    "hash": "7c57129ec17d95b63886bdbf3c160021"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestageDataAPI.js": {
+    "mtime": 1785595098.9682424,
+    "hash": "fb2f82b23883e4dc99f43673c550842c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/liveSequencer.js": {
+    "mtime": 1785595098.9691634,
+    "hash": "422af8e158eb6013ec6aeabc3f0cf5b0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/waveformService 2.js": {
+    "mtime": 1785595098.971479,
+    "hash": "3775937dd27bd87c42ade98ba457df67"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/hapticClickTrack.js": {
+    "mtime": 1785595098.9689384,
+    "hash": "40bb2cdf530caef882eeb96c8fbda617"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/congregationEnergy.js": {
+    "mtime": 1785595098.9685931,
+    "hash": "2fa25bef6901f76df4fe1ba8c6ee47df"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/syncService.js": {
+    "mtime": 1785595098.9711893,
+    "hash": "c11f90b9cbc8f75fcd6bbc1da564d08f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/worshipFlowService.js": {
+    "mtime": 1785595098.9716096,
+    "hash": "ae1f1262be772d82ab8865806697309e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stemJobService.js": {
+    "mtime": 1785595098.9706116,
+    "hash": "cfd390cc93d3c0ca5a8e2ad7c0f2b15b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/predictiveConductor 2.js": {
+    "mtime": 1785595098.9697735,
+    "hash": "25dd7ef0140e7fa8682c502f274a9821"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/sessionStore.js": {
+    "mtime": 1785595098.9702313,
+    "hash": "e4aabbe98378a6ce5596822d50ba0762"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/voiceGuide.js": {
+    "mtime": 1785595098.9713356,
+    "hash": "8e8bbeb8525812e20015806039394831"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/supportClient.js": {
+    "mtime": 1785595098.9710433,
+    "hash": "44a0bfadbe3216e5ad4f58f4befd8f08"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/syncClient.js": {
+    "mtime": 1785595098.9710925,
+    "hash": "b50a5f0daca994426811507bd997d6ef"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/waveformService.js": {
+    "mtime": 1785595098.9715562,
+    "hash": "705d520162a2a6f9380e5f4d1d2d95d2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/audioGuide.js": {
+    "mtime": 1785595098.9677436,
+    "hash": "b99e0b0af755f070bf29d3fca47be4f0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/midiClock.js": {
+    "mtime": 1785595098.9693885,
+    "hash": "195447ed02cb11e04ec35cf7c5014b36"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/syncService 2.js": {
+    "mtime": 1785595098.9711397,
+    "hash": "c11f90b9cbc8f75fcd6bbc1da564d08f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/roleStemRouter.js": {
+    "mtime": 1785595098.9701297,
+    "hash": "534dc6ff5fd6eead03f1f0727cfceb84"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stemWaveformService 2.js": {
+    "mtime": 1785595098.970805,
+    "hash": "e9be4bb21101cd4f175de508273d4df0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/setlistStore.js": {
+    "mtime": 1785595098.9702768,
+    "hash": "5a7c91274b1b5f27e57ae858b7c06433"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/padKitStore.js": {
+    "mtime": 1785595098.9695766,
+    "hash": "f5b14758dbc47ad57c34510beea7ac8b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/recordingInputService.js": {
+    "mtime": 1785595098.969974,
+    "hash": "dc6622bc5fb91d4c7c1c1c0b3bfb8e1c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/controllerMapStore.js": {
+    "mtime": 1785595098.9686458,
+    "hash": "48d2862807d1927ae2f2deefe524d152"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/armStore.js": {
+    "mtime": 1785595098.967617,
+    "hash": "678c05ad4d8e4525b91ee4ce333622e3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/loginNotification.js": {
+    "mtime": 1785595098.9692774,
+    "hash": "bb2de7f3bd5f1fd6087416799b49296d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/index.js": {
+    "mtime": 1785595098.968987,
+    "hash": "9c982337bfcfa4f1c8c460d1bb4d582a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/offlineCache.js": {
+    "mtime": 1785595098.9695134,
+    "hash": "07d0fea2f9f60636947604dc4c58f21f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stickySync.js": {
+    "mtime": 1785595098.970908,
+    "hash": "26eb5ca1f9ef6779fc639d6dc44acef7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/config.js": {
+    "mtime": 1785595098.9685233,
+    "hash": "791fde409991bc403bfeb929046da43a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/loginNotification 2.js": {
+    "mtime": 1785595098.9692216,
+    "hash": "bb2de7f3bd5f1fd6087416799b49296d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/fatChannelPresets.js": {
+    "mtime": 1785595098.9688752,
+    "hash": "addafb3a7f5628ac061cbeddf819f453"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/studioAudio.js": {
+    "mtime": 1785595098.9709816,
+    "hash": "4d1eadcde313f5fa19f07b1f4633b52c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/predictiveConductor.js": {
+    "mtime": 1785595098.9698207,
+    "hash": "25dd7ef0140e7fa8682c502f274a9821"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/roleEngine.js": {
+    "mtime": 1785595098.970073,
+    "hash": "6c3714a4b53b304ea428d926b602722f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/livePerformancePolicy.js": {
+    "mtime": 1785595098.9690936,
+    "hash": "422df54d790dbb0e2f630907139efd47"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/tapTempo.js": {
+    "mtime": 1785595098.9712358,
+    "hash": "f26b4721ebe44a80c486bf8460d7166a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/spontaneousPad.js": {
+    "mtime": 1785595098.9704945,
+    "hash": "4b669c89c4daa2e38470b205bf1730f0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/artifactClient.js": {
+    "mtime": 1785595098.967686,
+    "hash": "dd5ffaf1a281321cfe99208fa927ef54"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/markerAiAssist.js": {
+    "mtime": 1785595098.969334,
+    "hash": "52c173b6d62e59f84ac3a5b28603658e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/planningCenterService.js": {
+    "mtime": 1785595098.9697127,
+    "hash": "f095bdff9121fb24b4157f6ed09a64b3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/latencyCalibrationStore.js": {
+    "mtime": 1785595098.9690378,
+    "hash": "7d5f9322fcf5462366b6d72980df6c1b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/audioTagReader.js": {
+    "mtime": 1785595098.9677982,
+    "hash": "66780635842ac6d725c82632c51f8c6b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/offlineCache 2.js": {
+    "mtime": 1785595098.9694545,
+    "hash": "07d0fea2f9f60636947604dc4c58f21f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stemWaveformService.js": {
+    "mtime": 1785595098.9708595,
+    "hash": "e9be4bb21101cd4f175de508273d4df0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/songWavePipeline.js": {
+    "mtime": 1785595098.9704306,
+    "hash": "7c57129ec17d95b63886bdbf3c160021"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/planEntitlements.js": {
+    "mtime": 1785595098.9696383,
+    "hash": "82b0fdfbd5be246fd0c76c0fb06eee4c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/telemetryClient.js": {
+    "mtime": 1785595098.9712853,
+    "hash": "edebbd59cc9d55f8852a6f0ff1d6c6df"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cueMapper.js": {
+    "mtime": 1785595098.9687536,
+    "hash": "bb5265f50b3a131651eac2cbb9e88e41"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/stemSyncService.js": {
+    "mtime": 1785595098.9707477,
+    "hash": "85b90371a23bc0498abfd9183edddf9f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cloudSyncService 2.js": {
+    "mtime": 1785595098.9684067,
+    "hash": "d9965f6c2a25c496edf0a6442108ecdd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/bridgeClient.js": {
+    "mtime": 1785595098.967846,
+    "hash": "a3dfe3290926642bf2a545edbd2452e5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cueDispatcher.js": {
+    "mtime": 1785595098.9687006,
+    "hash": "38ec2ede1a3123f877711001af58884e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cloudSyncService.js": {
+    "mtime": 1785595098.968469,
+    "hash": "d9965f6c2a25c496edf0a6442108ecdd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestageStatus.js": {
+    "mtime": 1785595098.9682941,
+    "hash": "ddd6faeb30fe4d49fddeeefd6468c9a1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/wavePipelineEngine.js": {
+    "mtime": 1785595098.9714108,
+    "hash": "f299b7e3863d12d82ef0f0707be71ffe"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/rehearsalPipelineStore.js": {
+    "mtime": 1785595098.9700296,
+    "hash": "3a5c48b8ab81b3f6feb0cfb108bc8cbd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/predictiveJumpEngine.js": {
+    "mtime": 1785595098.9698715,
+    "hash": "ee2d0aa893ff0a6bfbaba7c8b36af6a4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestage/client.js": {
+    "mtime": 1785595098.9679508,
+    "hash": "61492d5f8fef9de9fe42d5806fc0db3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestage/index.js": {
+    "mtime": 1785595098.9680626,
+    "hash": "34a913b40c42a9f82737b659dfb51d31"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestage/config.js": {
+    "mtime": 1785595098.9680076,
+    "hash": "5f0f9789d2881933681b0bf4b578f89a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestage/roleEngine.js": {
+    "mtime": 1785595098.96817,
+    "hash": "6c3714a4b53b304ea428d926b602722f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/services/cinestage/resolver.js": {
+    "mtime": 1785595098.9681156,
+    "hash": "0c9ab78cd850abae845549f7324515d7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/src/utils/deepLinking.js": {
+    "mtime": 1785595098.9722073,
+    "hash": "052287bd465d923e372bdc668f22d7fa"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/src/utils/deviceManagement.js": {
+    "mtime": 1785595098.9723566,
+    "hash": "a9851e7c1d1d7efbbc584b701a3c176a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/src/utils/transpose.js": {
+    "mtime": 1785595098.9724305,
+    "hash": "d2db4b4187bb4aa78844ad3fd6305c7b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/src/data/models.js": {
+    "mtime": 1785595098.9720323,
+    "hash": "13dcd0fee28158188fb963cd079b7d08"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/src/data/storage.js": {
+    "mtime": 1785595098.9721067,
+    "hash": "c6cb0a7d391c9fab3260ce9d083c8639"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/App.js": {
+    "mtime": 1785595098.9777431,
+    "hash": "926ae4fc4eb49237acc5491650256285"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/audioEngine/index.js": {
+    "mtime": 1785595098.9783003,
+    "hash": "6f39fbc4e401ca667647286d210e5f46"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/utils/sharedStorage.js": {
+    "mtime": 1785595098.9815197,
+    "hash": "18a3412680b4be52c793ade9bc232a82"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/utils/sharedPresetStorage.js": {
+    "mtime": 1785595098.981448,
+    "hash": "2f80b921e46914b3c4340d05620d57d6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/ProfileScreen.js": {
+    "mtime": 1785595098.9806387,
+    "hash": "0edc2c718d3abe00d58c7d541f2d16a0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/TestModeScreen.js": {
+    "mtime": 1785595098.9809668,
+    "hash": "f47d4619021a25834e0b37801c5aea98"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/PlanningScreen.js": {
+    "mtime": 1785595098.9802825,
+    "hash": "b41cae3c705e0ba00dcddfef831cdd65"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/MessageCenterScreen.js": {
+    "mtime": 1785595098.980053,
+    "hash": "f214a6cdcd59491bdf36b687a0b5ef04"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/StemsCenterScreen.js": {
+    "mtime": 1785595098.9808943,
+    "hash": "5b46c546110565d0f641b2c8cebfcbb6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/PresetsScreen.js": {
+    "mtime": 1785595098.9805408,
+    "hash": "e573f1f1777868272cad7c4573e41146"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/PresetEditorScreen.js": {
+    "mtime": 1785595098.9803374,
+    "hash": "40625220994834a0c363e3c9cacfd050"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/PeopleRolesScreen.js": {
+    "mtime": 1785595098.980229,
+    "hash": "5610397b20a350200205b77c677cd215"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/HomeScreen.js": {
+    "mtime": 1785595098.9797,
+    "hash": "275282699455f55319b6c7ecc6a9a20e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/LoginScreen.js": {
+    "mtime": 1785595098.9799685,
+    "hash": "a917efdfe50252b954707123f63e2832"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/SectionMappingScreen.js": {
+    "mtime": 1785595098.9807787,
+    "hash": "f6882d6b269b935b768de2303cd95b31"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/MixerScreen.js": {
+    "mtime": 1785595098.9801083,
+    "hash": "a3f45ef0a4cfdb6cd29e8e2dd3c12d0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/LibraryScreen.js": {
+    "mtime": 1785595098.9798455,
+    "hash": "7452f8df341e075c387b528cced81211"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/DeviceSetupScreen.js": {
+    "mtime": 1785595098.979639,
+    "hash": "224569e9bf475cec6c6be38d3293b411"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/SongDetailScreen.js": {
+    "mtime": 1785595098.9808338,
+    "hash": "d02c942ab10042fe6c7e2322ce194872"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/NewSongScreen.js": {
+    "mtime": 1785595098.9801688,
+    "hash": "527db08637f5c21d5b47529f14be39ae"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/PresetLibraryBrowserScreen.js": {
+    "mtime": 1785595098.9804144,
+    "hash": "318c46348f0ee9aaf62eb76be86e3b75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/LiveScreen.js": {
+    "mtime": 1785595098.9799025,
+    "hash": "7899ef2b56e5d8754e53682e750de4de"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/KeyChangeScreen.js": {
+    "mtime": 1785595098.9797864,
+    "hash": "b5b040d3d50b9c7b5b7989a6b57e1e11"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/screens/RehearsalScreen.js": {
+    "mtime": 1785595098.9806993,
+    "hash": "6b10dccbccb90ab0cdfb79d729c0d374"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/components/TrackFader.js": {
+    "mtime": 1785595098.9785912,
+    "hash": "e3042a0cad38096b28645f9622863603"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/components/Chip.js": {
+    "mtime": 1785595098.9783878,
+    "hash": "b81299aa175e29a146c2dfcb6740fc3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/components/WaveformTimeline.js": {
+    "mtime": 1785595098.9786549,
+    "hash": "8be97e19236e62696b2830ce89606804"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/components/DeviceStatusBar.js": {
+    "mtime": 1785595098.9784522,
+    "hash": "a4edadba41601b00582a355be36068cb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/components/PrimaryButton.js": {
+    "mtime": 1785595098.9785016,
+    "hash": "da935edcaa5a8be487b85000918ccc0c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/api/cinestageAPI.js": {
+    "mtime": 1785595098.977928,
+    "hash": "44d09f10b277a73c0f9bbd910b60e618"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/data/lyrics.js": {
+    "mtime": 1785595098.978755,
+    "hash": "520224bc65f5925bcec5676c78464689"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/data/models.js": {
+    "mtime": 1785595098.9788215,
+    "hash": "1ede389da04b1a818b845435853a0d4b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/data/storage.js": {
+    "mtime": 1785595098.9789171,
+    "hash": "46be5147dcf0938ab15477fe6583c823"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/src/utils/deepLinking.js": {
+    "mtime": 1785595098.9812353,
+    "hash": "dc793a4dac2602c870af9f6733821f2a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/src/utils/deviceManagement.js": {
+    "mtime": 1785595098.9813063,
+    "hash": "513ff6a345f411edf8554f06e7223d69"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/src/utils/transpose.js": {
+    "mtime": 1785595098.981367,
+    "hash": "e551c64b46f47747aaf881eb48fa7abb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/src/data/models.js": {
+    "mtime": 1785595098.9810965,
+    "hash": "3f426d46f6f2361f0848d937217c85f8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/src/data/storage.js": {
+    "mtime": 1785595098.9811583,
+    "hash": "71bb21eb20b41667bfa38f2018af57e9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/App_Original.js": {
+    "mtime": 1785595098.9880326,
+    "hash": "7c029eafdfa16ffd2e153028f642970d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/index.js": {
+    "mtime": 1785595099.5647764,
+    "hash": "3dfe3f0258faf574703a612bb591bd3d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/metro.config.js": {
+    "mtime": 1785595099.5648813,
+    "hash": "0ed42dc2f22dbdab0bd85d29bf0485eb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/babel.config.js": {
+    "mtime": 1785595098.989831,
+    "hash": "39626410bf17113d7391598a3d40b764"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/cloudflare-pages-worker.js": {
+    "mtime": 1785595098.9898787,
+    "hash": "e27a20eb4cfc0c3dd2cadacaa2510b2e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/metro.config 2.js": {
+    "mtime": 1785595099.5648315,
+    "hash": "cb647107e1778efba68d97656c4ba3cc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/App.js": {
+    "mtime": 1785595098.9879694,
+    "hash": "618f7f2681720cd343b755b6de0a2eb7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/Widget/UltimateWidget.swift": {
+    "mtime": 1785595099.5654469,
+    "hash": "837dffb35ac26aaca17118aa8458bc07"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/Widget/WidgetEntry.swift": {
+    "mtime": 1785595099.5654976,
+    "hash": "5a88bdb09e36030879a87cf0df330712"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/RN/WidgetDataModule.m": {
+    "mtime": 1785595099.565112,
+    "hash": "6e47f6afa56308d5c368a818d6de0237"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/RN/WatchBridgeModule.m": {
+    "mtime": 1785595099.5650008,
+    "hash": "da548a2507389cde7428dcee9a8c1332"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/RN/WidgetDataModule.swift": {
+    "mtime": 1785595099.5651615,
+    "hash": "e9ca80d346f9e8352853f3d651364d9d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/RN/WatchBridgeModule.swift": {
+    "mtime": 1785595099.5650568,
+    "hash": "5b7c19a8e45fd3eede09f760e7277dd6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/Watch/WatchApp.swift": {
+    "mtime": 1785595099.5652983,
+    "hash": "ac6f76dc0b18c7136c9bcfc42db79f0f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/Watch/WatchSessionManager.swift": {
+    "mtime": 1785595099.5653496,
+    "hash": "c89ce16c6e30f6b38ecbbbe7bdd0ee75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/Watch/ContentView.swift": {
+    "mtime": 1785595099.5652473,
+    "hash": "eea26dd07456a332528588699207aa54"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/config/syncConfig.js": {
+    "mtime": 1785595098.990145,
+    "hash": "05c419b98c69cbdb3d1face01053f153"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/config/syncConfig.web.js": {
+    "mtime": 1785595098.9902012,
+    "hash": "3fe8a0b5d19c4db90774ff59aac13e78"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/plugins/withNativeModules.js": {
+    "mtime": 1785595099.5662644,
+    "hash": "53f22fc7cd22f11bd7cb9c03ea1c7b70"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/cloudflare/ultimate-playback-sync/worker.js": {
+    "mtime": 1785606411.3775277,
+    "hash": "f3bcdcb96ab961631050a62b9b8a1d9a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/scripts/setup_xcode_targets.rb": {
+    "mtime": 1785595099.5663753,
+    "hash": "14cad50bce671f633e8f2325ebbfd34e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/models_v2/models.js": {
+    "mtime": 1785595099.568232,
+    "hash": "a007a71f1b939405c797ba50c87bcf43"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/context/AuthContext.js": {
+    "mtime": 1785595099.567991,
+    "hash": "ddba6fb4d17d1fd65518d687e2228d3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/context/AuthContext 2.js": {
+    "mtime": 1785595099.5679388,
+    "hash": "4fadc74ffbcfaf053f6efe36c2f067a7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/roleUtils.js": {
+    "mtime": 1785605585.8506253,
+    "hash": "bdf1ed577c0a418405f0e8a721f0104b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/promptCrossPlatform.js": {
+    "mtime": 1785595099.5725796,
+    "hash": "0e04f25913c2be916f99e149147fce1f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/deepLinking.js": {
+    "mtime": 1785595099.572415,
+    "hash": "dc793a4dac2602c870af9f6733821f2a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/deviceManagement.js": {
+    "mtime": 1785595099.5724776,
+    "hash": "513ff6a345f411edf8554f06e7223d69"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/songMedia.js": {
+    "mtime": 1785595099.572758,
+    "hash": "10fd2ec20dd75aff196da21d70aea1ed"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/promptCrossPlatform 2.js": {
+    "mtime": 1785595099.572531,
+    "hash": "0e04f25913c2be916f99e149147fce1f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/transpose.js": {
+    "mtime": 1785595099.5728078,
+    "hash": "e551c64b46f47747aaf881eb48fa7abb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/utils/roleUtils 2.js": {
+    "mtime": 1785595099.572638,
+    "hash": "740480246de9823c3efdf04d61e67ff8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/TestModeScreen.js": {
+    "mtime": 1785595099.5688038,
+    "hash": "814a0582b20a7c93b0f34f5598ac9d24"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/PresetEditorScreen.js": {
+    "mtime": 1785595099.568505,
+    "hash": "d10f9952902bc03d0b13e22a304db4ba"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/SongCreationScreen.js": {
+    "mtime": 1785595099.5686784,
+    "hash": "c8ef3cf0f585b9d7a1effde23f8ffb96"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/HomeScreen.js": {
+    "mtime": 1785595099.5683768,
+    "hash": "a20a70aa217924081d321331fd07115d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/SectionMappingScreen.js": {
+    "mtime": 1785595099.5686219,
+    "hash": "1d1701ea6eedac49067fdf93c212d41f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/SongListScreen.js": {
+    "mtime": 1785595099.5687432,
+    "hash": "c2f7d5ffa5c784a7191d1917d8a21896"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/DeviceSetupScreen.js": {
+    "mtime": 1785595099.5683193,
+    "hash": "26b836ef5052076c88fef260098ca4a9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/PresetLibraryBrowserScreen.js": {
+    "mtime": 1785595099.5685618,
+    "hash": "318c46348f0ee9aaf62eb76be86e3b75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens/KeyChangeScreen.js": {
+    "mtime": 1785595099.568446,
+    "hash": "78328903f4fdee1bd2c97847d259a3e2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components/ChartReferencePanel.js": {
+    "mtime": 1785595099.5666819,
+    "hash": "2a7282e9f805726b25c9685050dbc159"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/api/client.js": {
+    "mtime": 1785595099.5665913,
+    "hash": "92a2e39c68c0304f5717a6ff3f915bf2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/api/client 2.js": {
+    "mtime": 1785595099.5665445,
+    "hash": "92a2e39c68c0304f5717a6ff3f915bf2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/api/cinestage.js": {
+    "mtime": 1785595099.5664937,
+    "hash": "35010113ba5a596c7feae00a2a8f48e3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/data/models.js": {
+    "mtime": 1785595099.5680861,
+    "hash": "2fe89f61cfd97c454816dd68fe5d43fa"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/data/storage.js": {
+    "mtime": 1785595099.5681376,
+    "hash": "39b7e832c0aed13dcf4ec6819cd80a3e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/LeaderDashboardScreen.js": {
+    "mtime": 1785604749.8231118,
+    "hash": "403e1ed3b17d69e2c374f6bcac0ed455"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/PersonalPracticeScreen.js": {
+    "mtime": 1785595099.5703087,
+    "hash": "3294b2d48d429afd0c8a2bcf721f7b91"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/ProfileSetupScreen.js": {
+    "mtime": 1785595099.570373,
+    "hash": "05a0dba67b63a6daa5539d0fddaafce0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/BlockoutCalendarScreen.js": {
+    "mtime": 1785595099.5692081,
+    "hash": "f01ab67aad770d301072018fe03fa73f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/ContentEditorScreen.js": {
+    "mtime": 1785595099.5694382,
+    "hash": "7115f9399d81f7223686024572b32a06"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/ResetPasswordScreen.js": {
+    "mtime": 1785595099.5705752,
+    "hash": "cac6ed7cf0e7de5096037d139d4c2187"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/RegistrationScreen.js": {
+    "mtime": 1785595099.5704594,
+    "hash": "849368970be46deb40febcfc22e02852"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/AdminDashboardScreen.js": {
+    "mtime": 1785606600.2819984,
+    "hash": "bfb3e12f4c25aed92ee73a92ddaf18cf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/MessagesScreen.js": {
+    "mtime": 1785595099.5701683,
+    "hash": "8e110e22ad9fd4fb4050e436cfc10556"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/HomeScreen.js": {
+    "mtime": 1785606562.1189425,
+    "hash": "38760ea85bc531c667e028d7e22da6dc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/CineStageBrainScreen 2.js": {
+    "mtime": 1785595099.5692787,
+    "hash": "8186424e9c50912396aca4393798bbd9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/LoginScreen.js": {
+    "mtime": 1785595099.5700154,
+    "hash": "5a0669da5392e84738dcb80aff6d305e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/FeedbackScreen.js": {
+    "mtime": 1785595099.5695097,
+    "hash": "0ae2427e2f9bf3713b7b73ce71978302"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/SetlistRunnerScreen.js": {
+    "mtime": 1785595099.5707378,
+    "hash": "3958e4d8fea7f369d786fd3cd9a29a76"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/VerifyScreen.js": {
+    "mtime": 1785595099.570966,
+    "hash": "ffecda3699289833f2815e83729efef6"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/SetlistScreen.js": {
+    "mtime": 1785595099.5708973,
+    "hash": "80cb93fbb02fec470479ae5a7f79cd39"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/AssignmentsScreen.js": {
+    "mtime": 1785595099.5691283,
+    "hash": "54a35cbd73d600df03f98908eca24df8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/LyricsViewScreen.js": {
+    "mtime": 1785595099.5700898,
+    "hash": "51cdcd5c824335e2f434142f2437317c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/CineStageBrainScreen.js": {
+    "mtime": 1785595099.569355,
+    "hash": "8186424e9c50912396aca4393798bbd9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/screens_v2/LivePerformanceScreen.js": {
+    "mtime": 1785595099.569938,
+    "hash": "2fb6752711afb3152bf13ed042b05a59"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/AppErrorBoundary.js": {
+    "mtime": 1785595099.5667608,
+    "hash": "4dc03ad992476c9296ace78505deccf8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/CineStageBrainStatus.js": {
+    "mtime": 1785595099.567014,
+    "hash": "42a61139e4ac5f95e10dfbf53fe37181"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/CineStageBrainStatus 2.js": {
+    "mtime": 1785595099.5669546,
+    "hash": "42a61139e4ac5f95e10dfbf53fe37181"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/PreparationHub.js": {
+    "mtime": 1785595099.5672917,
+    "hash": "253bdc2e4aa1989124d8d6af12e61199"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/PushNotificationManager.js": {
+    "mtime": 1785595099.5673451,
+    "hash": "55912b10060418d9103eb2893b177553"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/StemWaveformView.js": {
+    "mtime": 1785595099.5675354,
+    "hash": "0c3f4404622371857a7d956bec82a945"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/CineStageBrainLogo.js": {
+    "mtime": 1785595099.5668907,
+    "hash": "dccad29ce5cad0cebf275a27bb232c78"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/CineStageBrainLogo 2.js": {
+    "mtime": 1785595099.5668304,
+    "hash": "dccad29ce5cad0cebf275a27bb232c78"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/WaveformBar.js": {
+    "mtime": 1785595099.567734,
+    "hash": "8067d7c2fa6febdb0fd7bccfa16725ae"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/UltimateWaveform 2.js": {
+    "mtime": 1785595099.5676026,
+    "hash": "bc21cffa60a0b59a1d36f6a49e0cdde5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/YouTubePlayer 2.js": {
+    "mtime": 1785595099.5677948,
+    "hash": "a92beb50355e9fd5cc0c7c27bfccd990"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/ServiceCommandCenter.js": {
+    "mtime": 1785595099.5674667,
+    "hash": "612f6b881d3c9eb86006099c89a40ae1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/UltimateWaveform.js": {
+    "mtime": 1785595099.5676672,
+    "hash": "9ddd60a57626297a349c43e1bc708617"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/MasterpieceWaveform.js": {
+    "mtime": 1785595099.5670946,
+    "hash": "f233cadba5ce2a8833509c6045abaff7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/MessageNotificationWatcher.js": {
+    "mtime": 1785604763.9777365,
+    "hash": "d0f326845fd159892ef4adaa28f74f37"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/ModernDashboardCard.js": {
+    "mtime": 1785595099.5672317,
+    "hash": "e0ce90ef8b7392164dc3cb524c077e9b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/YouTubePlayer.js": {
+    "mtime": 1785595099.5678558,
+    "hash": "a92beb50355e9fd5cc0c7c27bfccd990"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/components_v2/RoleGate.js": {
+    "mtime": 1785595099.5673935,
+    "hash": "4b5024d3b62049f9c3d9ec96eba362ad"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/cinestage 2.js": {
+    "mtime": 1785595099.5712938,
+    "hash": "f7b37287b3802a5170bddb3140f30630"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/sharedStorage.js": {
+    "mtime": 1785595099.5721707,
+    "hash": "3e02ea9ee509520e900a2c7812e28d05"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/feedback.js": {
+    "mtime": 1785595099.5715942,
+    "hash": "7c459b132a6dcba5b704b4f3136b876f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/hapticClickTrack.js": {
+    "mtime": 1785595099.5716631,
+    "hash": "40bb2cdf530caef882eeb96c8fbda617"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/congregationEnergy.js": {
+    "mtime": 1785595099.5715318,
+    "hash": "2fa25bef6901f76df4fe1ba8c6ee47df"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/sceneManager.js": {
+    "mtime": 1785595099.572049,
+    "hash": "bede037eca74e1d8e957e082285ae1c9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/serviceBundleCache.js": {
+    "mtime": 1785595099.572119,
+    "hash": "a9949c4cbf980aa050e881d34369b4a1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/loginNotification.js": {
+    "mtime": 1785595099.571769,
+    "hash": "08828e62d4fab6dc1157817ca20d993e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/loginNotification 2.js": {
+    "mtime": 1785595099.5717163,
+    "hash": "08828e62d4fab6dc1157817ca20d993e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/widgetDataWriter.js": {
+    "mtime": 1785595099.5723324,
+    "hash": "22c79641233b561811ecdf62d3a9e6e7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/notificationSounds.js": {
+    "mtime": 1785595099.571932,
+    "hash": "45a5cd450bb2f703ba292f9e5f24d402"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/audioEngine.js": {
+    "mtime": 1785595099.5711455,
+    "hash": "0599c7d4f06d763a2f7b5bf2ed6bd3b9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/cinestageStatus 2.js": {
+    "mtime": 1785595099.5714083,
+    "hash": "d229f2d0169daddd7f946fd59be9285e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/pushNotifications.js": {
+    "mtime": 1785595099.5719926,
+    "hash": "72d099b1d8bf53c90d599eaf167d76bc"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/advancedWavePipeline.js": {
+    "mtime": 1785595099.5710652,
+    "hash": "b0e92accf57f706afa33749e2ee762d4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/watchBridge.js": {
+    "mtime": 1785595099.5722833,
+    "hash": "aa015196029278df6a5e7172819a9fac"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/cinestage.js": {
+    "mtime": 1785595099.5713508,
+    "hash": "f7b37287b3802a5170bddb3140f30630"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/cinestageStatus.js": {
+    "mtime": 1785595099.5714624,
+    "hash": "d229f2d0169daddd7f946fd59be9285e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/storage.js": {
+    "mtime": 1785595099.5722296,
+    "hash": "55f46961da4cd4deaebf6af8a53ed618"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/src/services/authAPI.js": {
+    "mtime": 1785595099.571228,
+    "hash": "bd6855edd7b084a8ce5d8ce73ccf0b5a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/tailwind.config.js": {
+    "mtime": 1785595098.987622,
+    "hash": "5474b1d72bad106b463797f46a5cf772"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/vite.config 2.js": {
+    "mtime": 1785595098.9876764,
+    "hash": "7b93f351deb50c27d5a5e6464c9d222e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/vite.config.js": {
+    "mtime": 1785595098.9877257,
+    "hash": "7b93f351deb50c27d5a5e6464c9d222e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/postcss.config 2.js": {
+    "mtime": 1785595098.9829845,
+    "hash": "222a79a9879c7cd4d9980533b7639465"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/tailwind.config 2.js": {
+    "mtime": 1785595098.9875736,
+    "hash": "5474b1d72bad106b463797f46a5cf772"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/postcss.config.js": {
+    "mtime": 1785595098.9830322,
+    "hash": "222a79a9879c7cd4d9980533b7639465"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/main.jsx": {
+    "mtime": 1785595098.9854524,
+    "hash": "2784d35dd88b7c5c6eea33a95b0ceab4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/App.jsx": {
+    "mtime": 1785595098.98481,
+    "hash": "21ad579d3794ccd9176b172f4162f8de"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/App 2.jsx": {
+    "mtime": 1785595098.9847512,
+    "hash": "21ad579d3794ccd9176b172f4162f8de"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/main 2.jsx": {
+    "mtime": 1785595098.9854054,
+    "hash": "2784d35dd88b7c5c6eea33a95b0ceab4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/context/BrainContext.jsx": {
+    "mtime": 1785595098.985169,
+    "hash": "befd90db8eb4f761932a4eef9873cf58"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/config/syncConfig.js": {
+    "mtime": 1785595098.9850886,
+    "hash": "9b02cf9a73c5a0e9ba16ae140ae01cc7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/VerifyScreen.jsx": {
+    "mtime": 1785595098.9872441,
+    "hash": "66f47519e7343489b5471f2035b6b20d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/RegistrationScreen.jsx": {
+    "mtime": 1785595098.986899,
+    "hash": "abbe38e467c5f2c469b659836c682859"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/AdminDashboardScreen.jsx": {
+    "mtime": 1785595098.9855824,
+    "hash": "21519b6f74285311b44da15d3ddf94f0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/LivePerformanceScreen.jsx": {
+    "mtime": 1785595098.98643,
+    "hash": "b32ce5ad7e1c6b920a31ed42316ca329"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/SetlistScreen.jsx": {
+    "mtime": 1785595098.9871416,
+    "hash": "e89703fe293996f4801789610bed34de"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/ResetPasswordScreen.jsx": {
+    "mtime": 1785595098.9869566,
+    "hash": "a27aa8248072e9d41bc18de39610c349"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/AssignmentsScreen.jsx": {
+    "mtime": 1785595098.9856756,
+    "hash": "2da49f03e347809dc6bba4a739bba66a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/LoginScreen.jsx": {
+    "mtime": 1785595098.9865072,
+    "hash": "4b647a92188bf01727930ee10a0e9419"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/PersonalPracticeScreen.jsx": {
+    "mtime": 1785595098.986773,
+    "hash": "4326f37679a48b9644833371fa473042"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/ContentEditorScreen.jsx": {
+    "mtime": 1785595098.9859438,
+    "hash": "0d5e272346fab14714d1d59caaa3e64f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/HomeScreen.jsx": {
+    "mtime": 1785595098.9862127,
+    "hash": "c253aae30d8f1060f0e761ea74bb8753"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/LeaderDashboardScreen.jsx": {
+    "mtime": 1785595098.9863596,
+    "hash": "3a7e6b4c0199e124f175a7b5c850c92f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/ProfileSetupScreen.jsx": {
+    "mtime": 1785595098.98684,
+    "hash": "37ce3bd68eacf828dbae585faa06651a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/LyricsViewScreen.jsx": {
+    "mtime": 1785595098.9865801,
+    "hash": "3ebde3af17daae931d7fed4dd8d4b1ca"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/MessagesScreen.jsx": {
+    "mtime": 1785595098.986661,
+    "hash": "891d74dbb6e2d86bc62c2663a55ab931"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/CineStageBrainScreen.jsx": {
+    "mtime": 1785595098.9858513,
+    "hash": "a7392ea24432bbf1522426e8499b6887"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/FeedbackScreen.jsx": {
+    "mtime": 1785595098.9861107,
+    "hash": "84c43969fc1baced535ac5f624b9ee75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/SetlistRunnerScreen.jsx": {
+    "mtime": 1785595098.9870362,
+    "hash": "026c67f952cb81e8e593b38f792a5546"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/DAWWorkspaceScreen.jsx": {
+    "mtime": 1785595098.986034,
+    "hash": "d9c63ea588e2f6446d6344f4076c7e36"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/screens/BlockoutCalendarScreen.jsx": {
+    "mtime": 1785595098.9857702,
+    "hash": "77ab4119a54010b9da970e45c7883aeb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/components/BrainPanel.jsx": {
+    "mtime": 1785595098.984909,
+    "hash": "0fbdc2cddef04887de4c8ca9d31d05ab"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/components/Sidebar.jsx": {
+    "mtime": 1785595098.9849627,
+    "hash": "86bc798975560dd8bafdeb25e60cae07"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/components/TopBar.jsx": {
+    "mtime": 1785595098.9850142,
+    "hash": "22b66f422c46a19aea7c1ba41ed32c85"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/services/store.js": {
+    "mtime": 1785595098.9875236,
+    "hash": "982188110d2bcff6ae7aff532e1526ec"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/services/api.js": {
+    "mtime": 1785595098.9874692,
+    "hash": "83c7cc203abbc85cad037bb7bee2f768"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/index.js": {
+    "mtime": 1785595098.9840803,
+    "hash": "e7c6ca31816e3d06a6df3ad478c43de8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/index 2.js": {
+    "mtime": 1785595098.9840279,
+    "hash": "e7c6ca31816e3d06a6df3ad478c43de8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/core/RenderContext.js": {
+    "mtime": 1785595098.983609,
+    "hash": "3237b3c46789dd59220f0372531d83db"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/core/AudioBufferBus.js": {
+    "mtime": 1785595098.9835603,
+    "hash": "6e09afccc691f3dba52e887820d62814"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/graph/RoutingGraph.js": {
+    "mtime": 1785595098.9839041,
+    "hash": "983a466dc8edfa70dc636630fd8c1d68"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/graph/TrackProcessor.js": {
+    "mtime": 1785595098.9839702,
+    "hash": "fd59bffdaa034ebd5f88e4b991a4298c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/engine/NodeAudioEngine.js": {
+    "mtime": 1785595098.9836934,
+    "hash": "7f07e7d160c579ae37010d9e19be7d9e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/engine/TransportClock.js": {
+    "mtime": 1785595098.9838045,
+    "hash": "1dc84358f7d4991d07aa4ff3c78180f5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/engine/PlaybackEngine.js": {
+    "mtime": 1785595098.9837544,
+    "hash": "029dbcde0e6e27d1c02d8ca8635757bd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/backend/audio/session/createDemoSession.js": {
+    "mtime": 1785595098.9841735,
+    "hash": "d6b1f1f298413f14de1d5914b0702d09"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/preload.js": {
+    "mtime": 1785595098.98466,
+    "hash": "eea8d10a4a83979bd36b45c234ce0818"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/preload 2.js": {
+    "mtime": 1785595098.9846132,
+    "hash": "eea8d10a4a83979bd36b45c234ce0818"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/main 2.js": {
+    "mtime": 1785595098.984506,
+    "hash": "b0f96579e3089f2b5b729b0441275f6a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/main.js": {
+    "mtime": 1785595098.9845603,
+    "hash": "b0f96579e3089f2b5b729b0441275f6a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/ipc/registerStoreHandlers.js": {
+    "mtime": 1785595098.9844546,
+    "hash": "fce3dafd858b633c5e4a448b3bdb3ca0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/ipc/registerStemHandlers.js": {
+    "mtime": 1785595098.9844046,
+    "hash": "f7fcb6ea6dd46879b21dca81bc2ae727"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/ipc/registerAudioHandlers.js": {
+    "mtime": 1785595098.9842978,
+    "hash": "76744bd66f4c708e59d7f873a5e14eb0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/main/ipc/registerFileHandlers.js": {
+    "mtime": 1785595098.984349,
+    "hash": "5875504af09d239a037a5aee60ac40be"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/models_v2/models.js": {
+    "mtime": 1785595099.577459,
+    "hash": "a007a71f1b939405c797ba50c87bcf43"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/utils/deepLinking.js": {
+    "mtime": 1785595099.5803354,
+    "hash": "dc793a4dac2602c870af9f6733821f2a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/utils/deviceManagement.js": {
+    "mtime": 1785595099.5803974,
+    "hash": "513ff6a345f411edf8554f06e7223d69"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/utils/songMedia.js": {
+    "mtime": 1785595099.580456,
+    "hash": "cff4cd7396c4ae7ad1985db75bf76c59"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/utils/transpose.js": {
+    "mtime": 1785595099.580511,
+    "hash": "e551c64b46f47747aaf881eb48fa7abb"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/TestModeScreen.js": {
+    "mtime": 1785595099.5779946,
+    "hash": "814a0582b20a7c93b0f34f5598ac9d24"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/PresetEditorScreen.js": {
+    "mtime": 1785595099.5776994,
+    "hash": "d10f9952902bc03d0b13e22a304db4ba"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/SongCreationScreen.js": {
+    "mtime": 1785595099.5778806,
+    "hash": "4a9e51b012e1cd28617fd8a8627c609e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/HomeScreen.js": {
+    "mtime": 1785595099.577603,
+    "hash": "a20a70aa217924081d321331fd07115d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/SectionMappingScreen.js": {
+    "mtime": 1785595099.577822,
+    "hash": "1d1701ea6eedac49067fdf93c212d41f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/SongListScreen.js": {
+    "mtime": 1785595099.5779443,
+    "hash": "c2f7d5ffa5c784a7191d1917d8a21896"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/DeviceSetupScreen.js": {
+    "mtime": 1785595099.5775466,
+    "hash": "26b836ef5052076c88fef260098ca4a9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/PresetLibraryBrowserScreen.js": {
+    "mtime": 1785595099.5777552,
+    "hash": "318c46348f0ee9aaf62eb76be86e3b75"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens/KeyChangeScreen.js": {
+    "mtime": 1785595099.5776508,
+    "hash": "78328903f4fdee1bd2c97847d259a3e2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/api/cinestage.js": {
+    "mtime": 1785595099.57697,
+    "hash": "f271df2ee1cb6ad36c6de9fa18287614"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/data/models.js": {
+    "mtime": 1785595099.5773175,
+    "hash": "3f426d46f6f2361f0848d937217c85f8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/data/storage.js": {
+    "mtime": 1785595099.577369,
+    "hash": "4cf87992589391d26fbc7c3a720fce33"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/LeaderDashboardScreen.js": {
+    "mtime": 1785604662.5755148,
+    "hash": "0ba1b2166ce448f3cb052c0ecc245076"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/PersonalPracticeScreen.js": {
+    "mtime": 1785595099.5792375,
+    "hash": "7933f4ac2652876399ec52508b37a579"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/ProfileSetupScreen.js": {
+    "mtime": 1785595099.5792973,
+    "hash": "0dee83a39e9734462a93a40dac4e4bef"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/BlockoutCalendarScreen.js": {
+    "mtime": 1785595099.5784283,
+    "hash": "f01ab67aad770d301072018fe03fa73f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/ContentEditorScreen.js": {
+    "mtime": 1785595099.5785043,
+    "hash": "580cca1d50d553fef74fcf612917b890"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/ResetPasswordScreen.js": {
+    "mtime": 1785595099.5794299,
+    "hash": "4ebc7476fb5f4b9614c219928a444565"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/RegistrationScreen.js": {
+    "mtime": 1785595099.5793672,
+    "hash": "849368970be46deb40febcfc22e02852"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/AdminDashboardScreen.js": {
+    "mtime": 1785606600.19966,
+    "hash": "d0ecd531d9fa9e53b0dc2328c7cc423d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/MessagesScreen.js": {
+    "mtime": 1785595099.5791175,
+    "hash": "63897c2fccb7236bf97a9a948d11c4ff"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/HomeScreen.js": {
+    "mtime": 1785606504.7273946,
+    "hash": "eef9c1170ad601b9015bf2c8182d998e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/LoginScreen.js": {
+    "mtime": 1785595099.5789537,
+    "hash": "c6d2ba0206d8797df65d6de6a07c6cb5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/FeedbackScreen.js": {
+    "mtime": 1785595099.5785642,
+    "hash": "0ae2427e2f9bf3713b7b73ce71978302"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/SetlistRunnerScreen.js": {
+    "mtime": 1785595099.579533,
+    "hash": "a0d5eb7903e9cc662b3198897cb82eef"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/VerifyScreen.js": {
+    "mtime": 1785595099.5796723,
+    "hash": "0beddf0f7068da443f688a4cfcfa7d3a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/SetlistScreen.js": {
+    "mtime": 1785595099.5796072,
+    "hash": "885b595ccf302318a52707731250c69c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/AssignmentsScreen.js": {
+    "mtime": 1785595099.57835,
+    "hash": "813c54dfbb45918546767e5a3023e8e5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/LyricsViewScreen.js": {
+    "mtime": 1785595099.5790281,
+    "hash": "f57c990c63ec38bbeedf4c051f65a8b9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/screens_v2/LivePerformanceScreen.js": {
+    "mtime": 1785595099.5788774,
+    "hash": "025cde1f06e8c6d7819fbf853657deda"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/components_v2/AppErrorBoundary.js": {
+    "mtime": 1785595099.5770535,
+    "hash": "4dc03ad992476c9296ace78505deccf8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/components_v2/PushNotificationManager.js": {
+    "mtime": 1785595099.5771785,
+    "hash": "55912b10060418d9103eb2893b177553"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/components_v2/WaveformBar.js": {
+    "mtime": 1785595099.5772345,
+    "hash": "a8688c9bc2640ac557c8ea18f5a2e82c"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/components_v2/MessageNotificationWatcher.js": {
+    "mtime": 1785604646.181334,
+    "hash": "d0f326845fd159892ef4adaa28f74f37"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/sharedStorage.js": {
+    "mtime": 1785595099.580095,
+    "hash": "3e02ea9ee509520e900a2c7812e28d05"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/feedback.js": {
+    "mtime": 1785595099.5798965,
+    "hash": "810b5318e43db6f59c7cd41fcb5cf951"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/sceneManager.js": {
+    "mtime": 1785595099.5800533,
+    "hash": "bede037eca74e1d8e957e082285ae1c9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/widgetDataWriter.js": {
+    "mtime": 1785595099.5802574,
+    "hash": "22c79641233b561811ecdf62d3a9e6e7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/notificationSounds.js": {
+    "mtime": 1785595099.5799515,
+    "hash": "45a5cd450bb2f703ba292f9e5f24d402"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/audioEngine.js": {
+    "mtime": 1785595099.5797665,
+    "hash": "171e26b934428d6705240ba604fb4bb9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/pushNotifications.js": {
+    "mtime": 1785595099.5800045,
+    "hash": "704723fa9dc155e5180be84c3dc34560"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/watchBridge.js": {
+    "mtime": 1785595099.5802052,
+    "hash": "aa015196029278df6a5e7172819a9fac"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/storage.js": {
+    "mtime": 1785595099.5801537,
+    "hash": "55f46961da4cd4deaebf6af8a53ed618"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/src/services/authAPI.js": {
+    "mtime": 1785595099.579834,
+    "hash": "78e81477977de41179c91b6defaa74b2"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/index.html": {
+    "mtime": 1785595099.5753121,
+    "hash": "be472eb1bc7bb7616156563ab60c5e94"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/INTEGRATION_COMPLETE.md": {
+    "mtime": 1785595098.9472873,
+    "hash": "9db607b41360fbc19296fba715c2d48a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/TESTING_GUIDE.md": {
+    "mtime": 1785595098.947644,
+    "hash": "afc4a1ea266d111e657047138956e0f5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/README.md": {
+    "mtime": 1785606969.6138124,
+    "hash": "cfd6d1d32eba02b98f764d37a44ab79f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/ULTIMATE_PLAYBACK_V2_COMPLETE.md": {
+    "mtime": 1785595098.9478006,
+    "hash": "9cb4df5661af3b0264dc58b7da608ea3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/ULTIMATE_PLAYBACK_INTEGRATION_GUIDE.md": {
+    "mtime": 1785595098.947725,
+    "hash": "231e76f130146a212d630e84aa6017bf"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/COMPLETE_INTEGRATION.md": {
+    "mtime": 1785595098.9470537,
+    "hash": "ec149e8b7fbc647edb4c97353cc625e1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/INTEGRATION_GUIDE.md": {
+    "mtime": 1785595098.947365,
+    "hash": "51a9c6bb1f585e47bafd44077aa8389b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/PHASE_3_COMPLETE.md": {
+    "mtime": 1785595098.9474459,
+    "hash": "15aef39b13c9f5a82b68270a14b6a090"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/native/XCODE_SETUP_GUIDE.md": {
+    "mtime": 1785595099.5759838,
+    "hash": "5fd7cdf55abb4a9c013359a5cb3690af"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/docs/setlist-approval-workflow.md": {
+    "mtime": 1785606600.362435,
+    "hash": "b265f047e5409e21b4248613d17aa7f3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/requirements.txt": {
+    "mtime": 1785595098.9751601,
+    "hash": "03a759bf371845db1d5869ada40e0aa7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/README.md": {
+    "mtime": 1785595098.9734626,
+    "hash": "6006e3f5c45d7d91fb57fbc88142731f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/requirements.txt": {
+    "mtime": 1785595098.9771035,
+    "hash": "03a759bf371845db1d5869ada40e0aa7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/README.md": {
+    "mtime": 1785595098.9760528,
+    "hash": "6006e3f5c45d7d91fb57fbc88142731f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/docs/packs/Ultimate_Musician_Musician_Templates_Master_OpenAI_Pack/templates/bass_template.md": {
+    "mtime": 1785595098.9486885,
+    "hash": "0710ee43f63e221b9c0a3cdf0dd25216"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/docs/packs/Ultimate_Musician_Musician_Templates_Master_OpenAI_Pack/templates/keys_template.md": {
+    "mtime": 1785595098.948859,
+    "hash": "48c83c84cc52b0acaa539c2058c190bd"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/docs/packs/Ultimate_Musician_Musician_Templates_Master_OpenAI_Pack/templates/drums_template.md": {
+    "mtime": 1785595098.948746,
+    "hash": "c3b4ec357462271c4ca30d6ae74f5f3f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/docs/packs/Ultimate_Musician_Musician_Templates_Master_OpenAI_Pack/templates/guitar_template.md": {
+    "mtime": 1785595098.9488027,
+    "hash": "b193d4cf28cc448d223d416a06d0567e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/CINESTAGE_BRAIN_CLOUDFLARE_CONFIG.md": {
+    "mtime": 1785595098.949772,
+    "hash": "51515000f107f3ddbf63772596cf3d56"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/GEMINI 2.md": {
+    "mtime": 1785595098.9498265,
+    "hash": "0dc3b5eeee145e2af8e3808a633af5b0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/README.md": {
+    "mtime": 1785595098.949931,
+    "hash": "9c7d3c41c59f1cda047e6edbb249e300"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/GEMINI.md": {
+    "mtime": 1785595098.9498775,
+    "hash": "0dc3b5eeee145e2af8e3808a633af5b0"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/CINESTAGE_BRAIN_CLOUDFLARE_CONFIG 2.md": {
+    "mtime": 1785595098.9497027,
+    "hash": "51515000f107f3ddbf63772596cf3d56"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/docs/ONE_OF_A_KIND_WAVEPIPELINE_STACK.md": {
+    "mtime": 1785595098.9561443,
+    "hash": "8c00fc77cfd882d42f22b379bbe570c4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/docs/WAVEPIPELINE_MARKET_REFERENCES.md": {
+    "mtime": 1785595098.9562497,
+    "hash": "a6f3e75f87e00d0ea46ce29eecb5cfc8"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/docs/REHEARSAL_LIVE_WAVEFORM_PIPELINE_SPEC.md": {
+    "mtime": 1785595098.956199,
+    "hash": "84b883d0830c846df335af8377757709"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/requirements.txt": {
+    "mtime": 1785595098.9795218,
+    "hash": "03a759bf371845db1d5869ada40e0aa7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/README.md": {
+    "mtime": 1785595098.9778457,
+    "hash": "6006e3f5c45d7d91fb57fbc88142731f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/PRESET_INTEGRATION.md": {
+    "mtime": 1785595098.9778025,
+    "hash": "0fdf775d1c929aab3b96be244b6d8f85"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/index.html": {
+    "mtime": 1785595099.5647173,
+    "hash": "be472eb1bc7bb7616156563ab60c5e94"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/GEMINI 2.md": {
+    "mtime": 1785595098.988151,
+    "hash": "529782822392fd3a8c795f82ba4a910a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/ULTIMATE_PLAYBACK_V2_COMPLETE.md": {
+    "mtime": 1785595098.9883575,
+    "hash": "9cb4df5661af3b0264dc58b7da608ea3"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/COMPLETE_INTEGRATION.md": {
+    "mtime": 1785595098.9881015,
+    "hash": "ec149e8b7fbc647edb4c97353cc625e1"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/GEMINI.md": {
+    "mtime": 1785595098.9882016,
+    "hash": "529782822392fd3a8c795f82ba4a910a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/PHASE_3_COMPLETE.md": {
+    "mtime": 1785595098.9882786,
+    "hash": "15aef39b13c9f5a82b68270a14b6a090"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/native/XCODE_SETUP_GUIDE.md": {
+    "mtime": 1785595099.5655544,
+    "hash": "5fd7cdf55abb4a9c013359a5cb3690af"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/assets/LICENSE 2.txt": {
+    "mtime": 1785595098.9816275,
+    "hash": "8d0bf36c006702cedc09470dc5db564a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/assets/LICENSE.txt": {
+    "mtime": 1785595098.981676,
+    "hash": "8d0bf36c006702cedc09470dc5db564a"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/index.html": {
+    "mtime": 1785595098.9853601,
+    "hash": "ae0912c73647df2bd4d8cc72c093aa4b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/src/renderer/index 2.html": {
+    "mtime": 1785595098.9852672,
+    "hash": "ae0912c73647df2bd4d8cc72c093aa4b"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/workers/ultimate-musician-api/sessions/session_20260128_201607.md": {
+    "mtime": 1785595099.57317,
+    "hash": "1829e73ee21a6ecd5ae78780614b49b7"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/icon.png": {
+    "mtime": 1785595099.5746145,
+    "hash": "2f6810d7cb3fe63b0cf538d521cbf46f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/favicon.png": {
+    "mtime": 1785595099.5742486,
+    "hash": "ecabbb711f32c903ba5ca81987493292"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/splash.png": {
+    "mtime": 1785595099.575056,
+    "hash": "52ced23efef339b6127cd6b83589e96d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/adaptive-icon.png": {
+    "mtime": 1785595099.573595,
+    "hash": "2f6810d7cb3fe63b0cf538d521cbf46f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png": {
+    "mtime": 1785595098.9576178,
+    "hash": "5ce742530d2fbc61a2ffd54730ad7bff"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/Images.xcassets/SplashScreenLegacy.imageset/image@3x.png": {
+    "mtime": 1785595098.958078,
+    "hash": "470acb524b2f9c98d74f2ebd82d4ad49"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/Images.xcassets/SplashScreenLegacy.imageset/image@2x.png": {
+    "mtime": 1785595098.9580097,
+    "hash": "470acb524b2f9c98d74f2ebd82d4ad49"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/ios/UltimateMusician/Images.xcassets/SplashScreenLegacy.imageset/image.png": {
+    "mtime": 1785595098.9579387,
+    "hash": "470acb524b2f9c98d74f2ebd82d4ad49"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/assets/icon.png": {
+    "mtime": 1785595098.950699,
+    "hash": "38e4eedcb0a08189e30cfedb934c0ae4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/assets/splash.png": {
+    "mtime": 1785595098.9507747,
+    "hash": "bc3fb3e5d95c2c17bf34f07df4d855f9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile/assets/adaptive-icon.png": {
+    "mtime": 1785595098.9504642,
+    "hash": "38e4eedcb0a08189e30cfedb934c0ae4"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/assets/icon.png": {
+    "mtime": 1785595098.9781337,
+    "hash": "b30370a0b6e6fd6060a270875f2d5a72"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/assets/splash.png": {
+    "mtime": 1785595098.9782078,
+    "hash": "bc3fb3e5d95c2c17bf34f07df4d855f9"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/assets/adaptive-icon.png": {
+    "mtime": 1785595098.9780717,
+    "hash": "b30370a0b6e6fd6060a270875f2d5a72"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/icon.png": {
+    "mtime": 1785595098.9892893,
+    "hash": "2f6810d7cb3fe63b0cf538d521cbf46f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/favicon.png": {
+    "mtime": 1785595098.9889102,
+    "hash": "ecabbb711f32c903ba5ca81987493292"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/splash.png": {
+    "mtime": 1785595098.9897823,
+    "hash": "52ced23efef339b6127cd6b83589e96d"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/adaptive-icon.png": {
+    "mtime": 1785595098.9888496,
+    "hash": "2f6810d7cb3fe63b0cf538d521cbf46f"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/assets/dmg-background 2.png": {
+    "mtime": 1785595098.9817224,
+    "hash": "3d95a2deca95d5c17992bfc95761525e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_daw/assets/dmg-background.png": {
+    "mtime": 1785595098.9817626,
+    "hash": "3d95a2deca95d5c17992bfc95761525e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/sounds/message-notification.wav": {
+    "mtime": 1785595099.574867,
+    "hash": "6db6bbd465884133be949bb5c2e29388"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/sounds/verse-notification.wav": {
+    "mtime": 1785595099.575004,
+    "hash": "9ff99bae3ab27ac9fe93b9a68dd4e0d5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/assets/sounds/assignment-notification.wav": {
+    "mtime": 1785595099.5747738,
+    "hash": "a93aa25e5fb8e384353ec7ff8490e04e"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/sounds/message-notification.wav": {
+    "mtime": 1785595098.9895632,
+    "hash": "6db6bbd465884133be949bb5c2e29388"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/sounds/verse-notification.wav": {
+    "mtime": 1785595098.9897194,
+    "hash": "9ff99bae3ab27ac9fe93b9a68dd4e0d5"
+  },
+  "/private/tmp/Ultimate-musician-cinestage-vault-audit/apps/ultimate_playback/assets/sounds/assignment-notification.wav": {
+    "mtime": 1785595098.9894595,
+    "hash": "a93aa25e5fb8e384353ec7ff8490e04e"
+  }
+}

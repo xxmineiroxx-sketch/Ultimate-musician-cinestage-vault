@@ -8,6 +8,7 @@ import {
   View,
   Text,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   ScrollView,
   RefreshControl,
@@ -154,6 +155,12 @@ function groupByService(list) {
     map.get(key).push(a);
   }
   return Array.from(map.values());
+}
+
+function isLeadSingerRole(role) {
+  return ['lead singer', 'lead_singer', 'lead vocal', 'lead_vocal', 'vocal lead', 'vocal_lead'].includes(
+    String(role || '').trim().toLowerCase(),
+  );
 }
 function pickPreferredAssignmentStatus(currentValue, nextValue) {
   const normalize = (value) => String(value || '').trim().toLowerCase();
@@ -366,6 +373,13 @@ export default function HomeScreen({ navigation }) {
     roleLabels: [],
   });
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
+  const [showSuggestSong, setShowSuggestSong] = useState(false);
+  const [suggestSongTitle, setSuggestSongTitle] = useState('');
+  const [suggestSongArtist, setSuggestSongArtist] = useState('');
+  const [suggestSongKey, setSuggestSongKey] = useState('');
+  const [suggestSongBpm, setSuggestSongBpm] = useState('');
+  const [suggestSongNotes, setSuggestSongNotes] = useState('');
+  const [savingSongSuggestion, setSavingSongSuggestion] = useState(false);
   const _initDate = new Date();
   const _initTheme = getThemeByDate(_initDate);
   const _initVerses = THEMED_VERSES[_initTheme.key];
@@ -748,6 +762,42 @@ export default function HomeScreen({ navigation }) {
     });
   }
 
+  async function handleSuggestSong() {
+    if (!suggestSongTitle.trim()) {
+      Alert.alert('Song title required', 'Enter a title before sending the suggestion.');
+      return;
+    }
+    setSavingSongSuggestion(true);
+    try {
+      const res = await fetch(`${SYNC_URL}/sync/library/song-propose`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          title: suggestSongTitle.trim(),
+          artist: suggestSongArtist.trim(),
+          key: suggestSongKey.trim(),
+          bpm: parseInt(suggestSongBpm, 10) || 0,
+          notes: suggestSongNotes.trim(),
+          from_email: profile?.email || '',
+          from_name: profile?.name || profile?.email || 'Team Member',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.ok === false) throw new Error(data?.error || 'Could not submit song suggestion.');
+      setShowSuggestSong(false);
+      setSuggestSongTitle('');
+      setSuggestSongArtist('');
+      setSuggestSongKey('');
+      setSuggestSongBpm('');
+      setSuggestSongNotes('');
+      Alert.alert('Submitted', 'Your song suggestion was sent for Admin/Worship Leader approval.');
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSavingSongSuggestion(false);
+    }
+  }
+
   return (
     <ScrollView
       style={styles.container}
@@ -799,12 +849,17 @@ export default function HomeScreen({ navigation }) {
                 {mdRole === 'org_owner' ? '🏛 Org Owner'
                   : mdRole === 'admin'   ? '👑 Admin'
                   : mdRole === 'manager' ? '🛡 Worship Leader'
+                  : mdRole === 'lead_singer' || mdRole === 'setlist_creator' ? '🎤 Lead Singer'
                   : '🎛 Music Director'}
               </Text>
             </View>
-            <Text style={styles.adminCardTitle}>Admin Panel</Text>
+            <Text style={styles.adminCardTitle}>
+              {mdRole === 'lead_singer' || mdRole === 'setlist_creator' ? 'Setlist Planning' : 'Admin Panel'}
+            </Text>
             <Text style={styles.adminCardDesc}>
-              Manage messages, services, team & songs
+              {mdRole === 'lead_singer' || mdRole === 'setlist_creator'
+                ? 'Create setlists, assign vocals and musicians, then submit for approval'
+                : 'Manage messages, services, team & songs'}
             </Text>
           </View>
           <Text style={styles.adminCardArrow}>›</Text>
@@ -894,6 +949,7 @@ export default function HomeScreen({ navigation }) {
             const city = first.branch_city || '';
             const orgLabel = city ? `${orgName} — ${city}` : orgName;
             const roles = group.map(a => ROLE_LABELS[a.role] || a.role);
+            const hasLeadSingerAssignment = group.some((assignment) => isLeadSingerRole(assignment.role));
             return (
               <TouchableOpacity
                 key={first.service_id || first.id}
@@ -920,6 +976,17 @@ export default function HomeScreen({ navigation }) {
                     </View>
                   ))}
                 </View>
+                {hasLeadSingerAssignment && (
+                  <TouchableOpacity
+                    style={styles.leadSingerPlanBtn}
+                    onPress={() => navigation.navigate('AdminDashboard', {
+                      mdRole: 'lead_singer',
+                      focusServiceId: first.service_id || first.id,
+                    })}
+                  >
+                    <Text style={styles.leadSingerPlanBtnText}>Create Setlist & Assign Team</Text>
+                  </TouchableOpacity>
+                )}
               </TouchableOpacity>
             );
           })}
@@ -1039,6 +1106,80 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={showSuggestSong}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSuggestSong(false)}
+      >
+        <Pressable style={styles.suggestBackdrop} onPress={() => setShowSuggestSong(false)}>
+          <Pressable style={styles.suggestSheet} onPress={() => {}}>
+            <Text style={styles.suggestTitle}>Suggest Song</Text>
+            <Text style={styles.suggestSubtitle}>Admin or Worship Leader will approve it before it appears in the library.</Text>
+            <Text style={styles.suggestLabel}>Title *</Text>
+            <TextInput
+              style={styles.suggestInput}
+              placeholder="Song title"
+              placeholderTextColor="#6B7280"
+              value={suggestSongTitle}
+              onChangeText={setSuggestSongTitle}
+            />
+            <Text style={styles.suggestLabel}>Artist</Text>
+            <TextInput
+              style={styles.suggestInput}
+              placeholder="Artist"
+              placeholderTextColor="#6B7280"
+              value={suggestSongArtist}
+              onChangeText={setSuggestSongArtist}
+            />
+            <View style={styles.suggestRow}>
+              <View style={styles.suggestHalf}>
+                <Text style={styles.suggestLabel}>Key</Text>
+                <TextInput
+                  style={styles.suggestInput}
+                  placeholder="G"
+                  placeholderTextColor="#6B7280"
+                  value={suggestSongKey}
+                  onChangeText={setSuggestSongKey}
+                />
+              </View>
+              <View style={styles.suggestHalf}>
+                <Text style={styles.suggestLabel}>BPM</Text>
+                <TextInput
+                  style={styles.suggestInput}
+                  placeholder="120"
+                  placeholderTextColor="#6B7280"
+                  keyboardType="numeric"
+                  value={suggestSongBpm}
+                  onChangeText={setSuggestSongBpm}
+                />
+              </View>
+            </View>
+            <Text style={styles.suggestLabel}>Notes</Text>
+            <TextInput
+              style={[styles.suggestInput, styles.suggestNotes]}
+              placeholder="Why this song fits, source link, arrangement notes..."
+              placeholderTextColor="#6B7280"
+              multiline
+              value={suggestSongNotes}
+              onChangeText={setSuggestSongNotes}
+            />
+            <View style={styles.suggestActions}>
+              <TouchableOpacity style={styles.suggestCancel} onPress={() => setShowSuggestSong(false)}>
+                <Text style={styles.suggestCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.suggestSubmit, savingSongSuggestion && { opacity: 0.6 }]}
+                onPress={handleSuggestSong}
+                disabled={savingSongSuggestion}
+              >
+                <Text style={styles.suggestSubmitText}>{savingSongSuggestion ? 'Sending...' : 'Send for Approval'}</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -1084,6 +1225,17 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.actionContent}>
             <Text style={styles.actionTitle}>Messages</Text>
             <Text style={styles.actionDesc}>Team communication</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setShowSuggestSong(true)}
+        >
+          <Text style={styles.actionIcon}>🎵</Text>
+          <View style={styles.actionContent}>
+            <Text style={styles.actionTitle}>Suggest Song</Text>
+            <Text style={styles.actionDesc}>Send a song idea for approval</Text>
           </View>
         </TouchableOpacity>
 
@@ -1570,6 +1722,19 @@ const styles = StyleSheet.create({
   serviceRoleChipTextPending: {
     color: '#FBD38D',
   },
+  leadSingerPlanBtn: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  leadSingerPlanBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   multiRoleTapHint: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1666,6 +1831,89 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#9CA3AF',
+  },
+
+  suggestBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  suggestSheet: {
+    backgroundColor: '#0B1120',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    padding: 20,
+  },
+  suggestTitle: {
+    color: '#F9FAFB',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  suggestSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  suggestLabel: {
+    color: '#C7D2FE',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  suggestInput: {
+    backgroundColor: '#020617',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 10,
+    color: '#F9FAFB',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginBottom: 12,
+    fontSize: 14,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  suggestHalf: {
+    flex: 1,
+  },
+  suggestNotes: {
+    minHeight: 76,
+    textAlignVertical: 'top',
+  },
+  suggestActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  suggestCancel: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#1F2937',
+  },
+  suggestCancelText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  suggestSubmit: {
+    flex: 1.4,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+  },
+  suggestSubmitText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
   },
 
   actionButton: {
