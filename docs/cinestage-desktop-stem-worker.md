@@ -6,7 +6,7 @@ CineStage stem processing should be desktop-primary for each account holder.
 
 The account holder's desktop app is the heavy-processing node. iPad and mobile apps create, monitor, review, and consume jobs, but they should not be responsible for full YouTube download, Demucs stem separation, waveform analysis, or large file preparation.
 
-Cloudflare Workers stay in the middle as the sync coordinator and metadata store. Cloudflare fallback is used only when no desktop processor is available for the account.
+Cloudflare Workers stay in the middle as the sync coordinator and metadata store. Cloudflare fallback is used only when no stem-capable desktop processor is online for the account.
 
 Stems are not a website catalog in this phase. They are temporary service delivery packages. The account holder can keep a reusable local copy on their desktop, mini PC/Mac, or external hard drive, but the app should not store stem inventory on a public website until a future MultiTracks-style marketplace/product is intentionally built.
 
@@ -22,10 +22,11 @@ Stems are not a website catalog in this phase. They are temporary service delive
 ```mermaid
 flowchart TD
   A["Admin adds YouTube/audio link"] --> B["Sync Worker creates stem job"]
-  B --> C{"Account desktop online?"}
+  B --> C{"Stem-capable account desktop online?"}
   C -->|Yes| D["Desktop Worker downloads/analyzes/separates stems"]
-  C -->|No| E["Job waits or marks Cloudflare fallback eligible"]
+  C -->|No| E["Job routes to Cloudflare fallback when allowed"]
   D --> F["Desktop updates job with stems, analysis, sections, role map"]
+  E --> F
   F --> G["Admin/Worship Leader reviews"]
   G -->|Reject| H["Job rejected with notes"]
   G -->|Approve| I["Job approved"]
@@ -40,9 +41,9 @@ flowchart TD
 - `POST /sync/cinestage/desktop-heartbeat`
   - Desktop app announces it is online and capable of stem processing.
 - `GET /sync/cinestage/desktops`
-  - Lists known desktop workers.
+  - Lists known desktop workers so CineStage Cloud can show whether the desktop processor is online.
 - `POST /sync/stem-jobs`
-  - Creates a desktop-primary stem job from a YouTube/audio link.
+  - Creates a desktop-primary stem job from a YouTube/audio link. If a capable desktop is online, the job becomes `queued_for_desktop`; if no capable desktop is online and fallback is allowed, it becomes `cloudflare_fallback`.
 - `POST /sync/stem-job/claim?id=...`
   - Desktop claims one queued job before processing. Claims include a lease so only one desktop processes a job at a time, and stale claims can be reclaimed.
 - `GET /sync/stem-jobs?status=&processor=&ownerEmail=&serviceId=`
@@ -71,7 +72,7 @@ flowchart TD
 ## Job States
 
 - `queued_for_desktop`: desktop is online and should process.
-- `waiting_for_desktop`: no desktop processor is online.
+- `waiting_for_desktop`: no desktop processor is online and fallback was explicitly disabled.
 - `waiting_for_source`: desktop is online, but the job needs licensed/local source audio or a compliant YouTube preparation step.
 - `cloudflare_fallback`: job is allowed to be picked up by a fallback processor later.
 - `processing`: desktop is working.
@@ -81,6 +82,14 @@ flowchart TD
 - `expired`: temporary playback delivery has passed the cleanup window.
 - `rejected`: output should not be used.
 - `failed`: processing failed.
+
+## CineStage Cloud Status UI
+
+Ultimate Playback now reads `/sync/cinestage/desktops` and shows the stem route in the CineStage Brain card and CineStage Cloud screen.
+
+- Green route: a stem-capable desktop heartbeat was seen in the last five minutes, so new stem jobs go to desktop processing.
+- Amber route: no capable desktop is online, so new stem jobs move to the fallback lane when fallback is allowed.
+- The detailed cloud screen lists online desktop workers with queue depth and active-job state.
 
 ## Output Package
 

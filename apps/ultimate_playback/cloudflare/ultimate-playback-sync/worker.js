@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.2.0-desktop-stem-claims';
+const WORKER_VERSION = '2.3.0-desktop-routing-status';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1121,6 +1121,7 @@ function activeDesktopWorkerFor(store, account = {}) {
   return workers.find((worker) => {
     const updated = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
     if (!updated || updated < cutoff) return false;
+    if (worker.capabilities?.stems === false) return false;
     if (!accountEmail && !accountId) return worker.status === 'online';
     return (
       worker.status === 'online' &&
@@ -1188,11 +1189,17 @@ function normalizeStemJob(body = {}, store = {}) {
     id: body.accountId || account.id || account.accountId,
   });
   const requestedMode = String(body.processingMode || body.processor || 'desktop_primary').trim();
+  const fallbackEligible = body.fallbackEligible !== false;
   const processor = desktopWorker
     ? 'desktop'
     : (requestedMode === 'cloudflare' || requestedMode === 'cloudflare_fallback'
       ? 'cloudflare_fallback'
-      : 'waiting_for_desktop');
+      : (fallbackEligible ? 'cloudflare_fallback' : 'waiting_for_desktop'));
+  const fallbackReason = desktopWorker
+    ? ''
+    : (processor === 'cloudflare_fallback'
+      ? 'no_capable_desktop_online'
+      : 'desktop_required_no_worker_online');
 
   return {
     id: body.id || `stem_job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1216,8 +1223,17 @@ function normalizeStemJob(body = {}, store = {}) {
       name: String(body.requestedBy?.name || body.submittedBy?.name || body.requestedByName || 'Admin').trim(),
     },
     processor,
+    processingRoute: {
+      preferred: 'desktop',
+      selected: processor,
+      desktopOnline: Boolean(desktopWorker),
+      desktopWorkerId: desktopWorker?.id || '',
+      fallbackEligible,
+      fallbackReason,
+    },
     desktopWorkerId: desktopWorker?.id || '',
-    fallbackEligible: body.fallbackEligible !== false,
+    fallbackEligible,
+    fallbackReason,
     status: processor === 'desktop' ? 'queued_for_desktop' : processor,
     progress: 0,
     stems: {},
@@ -1385,7 +1401,9 @@ async function handleCreateStemJob(request, env, store) {
       `CineStage received "${job.title}" for stem processing.`,
       job.processor === 'desktop'
         ? 'The account desktop is online and will do the heavy processing.'
-        : 'No desktop processor is currently online; the job is waiting or eligible for fallback.',
+        : (job.processor === 'cloudflare_fallback'
+          ? 'No capable desktop processor is online, so CineStage moved this job to the fallback lane.'
+          : 'No desktop processor is currently online, and this job requires desktop processing.'),
     ].join('\n'),
     to: 'admin',
     metadata: {
@@ -1393,6 +1411,7 @@ async function handleCreateStemJob(request, env, store) {
       stemJobId: job.id,
       serviceId: job.serviceId,
       processor: job.processor,
+      processingRoute: job.processingRoute,
       status: job.status,
     },
   });

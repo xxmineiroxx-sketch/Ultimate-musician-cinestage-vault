@@ -8,7 +8,9 @@ import { View, StyleSheet, Text, TouchableOpacity, Platform } from "react-native
 import { useTheme } from "../context/ThemeContext";
 import {
   CINESTAGE_API_BASE_URL,
+  getStemProcessingRoute,
   loadBrainSnapshot,
+  summarizeDesktopWorkers,
 } from "../services/cinestage";
 import CineStageBrainLogo from "./CineStageBrainLogo";
 
@@ -47,13 +49,17 @@ export default function CineStageBrainStatus({
     checkedAt: null,
     error: "",
   });
+  const [stemRoute, setStemRoute] = useState(summarizeDesktopWorkers([]));
 
   useEffect(() => {
     let cancelled = false;
 
     async function refreshStatus(force = true) {
       try {
-        const next = await loadBrainSnapshot(force);
+        const [next, route] = await Promise.all([
+          loadBrainSnapshot(force),
+          getStemProcessingRoute(),
+        ]);
         if (cancelled) return;
         setSnapshot({
           loading: false,
@@ -63,6 +69,7 @@ export default function CineStageBrainStatus({
           checkedAt: next.checkedAt,
           error: "",
         });
+        setStemRoute(route);
       } catch (error) {
         if (cancelled) return;
         setSnapshot({
@@ -73,6 +80,7 @@ export default function CineStageBrainStatus({
           checkedAt: Date.now(),
           error: error?.message || "CineStage cloud is unavailable.",
         });
+        setStemRoute(summarizeDesktopWorkers([]));
       }
     }
 
@@ -173,6 +181,22 @@ export default function CineStageBrainStatus({
           </View>
 
           <View style={styles.serverInfo}>
+            <View style={styles.stemRouteRow}>
+              <View
+                style={[
+                  styles.stemRouteDot,
+                  { backgroundColor: stemRoute.desktopOnline ? "#10B981" : "#F59E0B" },
+                ]}
+              />
+              <View style={styles.stemRouteCopy}>
+                <Text style={[styles.stemRouteTitle, { color: colors.text }]}>
+                  {stemRoute.statusLabel}
+                </Text>
+                <Text style={[styles.stemRouteText, { color: colors.subtle }]}>
+                  Stems route: {stemRoute.routeLabel}
+                </Text>
+              </View>
+            </View>
             <Text style={[styles.serverUrl, { color: colors.subtle }]}>
               Server: {server}
             </Text>
@@ -299,6 +323,29 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  stemRouteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  stemRouteDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    marginRight: 8,
+  },
+  stemRouteCopy: {
+    flex: 1,
+  },
+  stemRouteTitle: {
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  stemRouteText: {
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 2,
   },
   serverUrl: {
     fontSize: 10,

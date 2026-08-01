@@ -34,6 +34,9 @@ function formatCheckedAt(value) {
 
 export default function CineStageBrainScreen({ route }) {
   const [brainStatus, setBrainStatus] = useState(route?.params?.brainStatus || null);
+  const [stemProcessingRoute, setStemProcessingRoute] = useState(
+    route?.params?.stemProcessingRoute || CineStageAPI.summarizeDesktopWorkers([])
+  );
   const [loading, setLoading] = useState(!route?.params?.brainStatus);
   const [refreshing, setRefreshing] = useState(false);
   const [lastError, setLastError] = useState("");
@@ -44,8 +47,12 @@ export default function CineStageBrainScreen({ route }) {
     else setLoading(true);
 
     try {
-      const payload = await CineStageAPI.bootstrapBrain(force);
+      const [payload, routeStatus] = await Promise.all([
+        CineStageAPI.bootstrapBrain(force),
+        CineStageAPI.getStemProcessingRoute(),
+      ]);
       setBrainStatus(payload?.brain || null);
+      setStemProcessingRoute(routeStatus);
       setLastError("");
       setCheckedAt(Date.now());
     } catch (error) {
@@ -87,8 +94,12 @@ export default function CineStageBrainScreen({ route }) {
         label: "Agents",
         value: String(brainStatus?.summary?.internal_agent_count || 0),
       },
+      {
+        label: "Stem Route",
+        value: stemProcessingRoute.routeLabel,
+      },
     ],
-    [brainStatus, featureGroups.length, isConnected],
+    [brainStatus, featureGroups.length, isConnected, stemProcessingRoute.routeLabel],
   );
 
   return (
@@ -168,6 +179,39 @@ export default function CineStageBrainScreen({ route }) {
             <Text style={styles.emptyText}>No connected apps reported yet.</Text>
           )}
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Stem Processing</Text>
+        <Text style={styles.cardSub}>
+          CineStage sends stem separation to the account desktop when it is online, then uses the fallback lane when it is not.
+        </Text>
+        <View style={styles.routePanel}>
+          <View style={[
+            styles.routeDot,
+            stemProcessingRoute.desktopOnline ? styles.routeDotOnline : styles.routeDotFallback,
+          ]} />
+          <View style={styles.routeCopy}>
+            <Text style={styles.routeTitle}>{stemProcessingRoute.statusLabel}</Text>
+            <Text style={styles.routeText}>{stemProcessingRoute.detail}</Text>
+            <Text style={styles.routeMeta}>Current route: {stemProcessingRoute.routeLabel}</Text>
+          </View>
+        </View>
+        {stemProcessingRoute.onlineWorkers.length > 0 ? (
+          stemProcessingRoute.onlineWorkers.map((worker) => (
+            <View key={worker.id} style={styles.workerRow}>
+              <View style={styles.connectionLabelWrap}>
+                <View style={styles.connectionDot} />
+                <Text style={styles.connectionLabel}>{worker.name || "CineStage Desktop"}</Text>
+              </View>
+              <Text style={styles.connectionValue} numberOfLines={2}>
+                Queue {worker.queueDepth || 0}{worker.activeJobId ? " · Active job" : ""}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.emptyText}>No stem-capable desktop heartbeat is online.</Text>
+        )}
       </View>
 
       <View style={styles.card}>
@@ -447,6 +491,56 @@ const styles = StyleSheet.create({
     color: "#F8FAFC",
     fontSize: 18,
     fontWeight: "900",
+  },
+  routePanel: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#213048",
+    backgroundColor: "#101827",
+  },
+  routeDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    marginTop: 4,
+  },
+  routeDotOnline: {
+    backgroundColor: "#22C55E",
+  },
+  routeDotFallback: {
+    backgroundColor: "#F59E0B",
+  },
+  routeCopy: {
+    flex: 1,
+  },
+  routeTitle: {
+    color: "#F8FAFC",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  routeText: {
+    marginTop: 4,
+    color: "#CBD5E1",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  routeMeta: {
+    marginTop: 8,
+    color: "#A5B4FC",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  workerRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#162033",
   },
   connectionRow: {
     marginTop: 14,

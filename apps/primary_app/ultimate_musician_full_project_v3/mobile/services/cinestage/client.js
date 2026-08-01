@@ -2,6 +2,7 @@ import {
   CINESTAGE_API_BASE_URL,
   CINESTAGE_REMOTE_API_BASE_URL,
 } from "./config";
+import { SYNC_URL, syncHeaders } from "../../screens/config";
 
 async function http(path, init) {
   const res = await fetch(`${CINESTAGE_API_BASE_URL}${path}`, {
@@ -87,6 +88,55 @@ function buildBootstrapPayload(brain) {
 
 function normalizeBaseUrl(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function isDesktopWorkerOnline(worker, nowMs = Date.now()) {
+  if (!worker) return false;
+  if (String(worker.status || "").toLowerCase() !== "online") return false;
+  if (worker.capabilities?.stems === false) return false;
+  const seenAt = Date.parse(worker.lastSeenAt || worker.updatedAt || "");
+  return Boolean(seenAt && seenAt >= nowMs - (5 * 60 * 1000));
+}
+
+export function summarizeDesktopWorkers(workers = []) {
+  const list = Array.isArray(workers) ? workers : [];
+  const nowMs = Date.now();
+  const onlineWorkers = list.filter((worker) => isDesktopWorkerOnline(worker, nowMs));
+  const primary = onlineWorkers[0] || null;
+
+  return {
+    workers: list,
+    onlineWorkers,
+    primary,
+    desktopOnline: Boolean(primary),
+    route: primary ? "desktop" : "cloudflare_fallback",
+    routeLabel: primary ? "Desktop processing" : "Cloudflare fallback",
+    statusLabel: primary ? "Desktop processor online" : "Desktop offline",
+    detail: primary
+      ? `${primary.name || "CineStage Desktop"} is ready for stems`
+      : "Stem jobs will use the fallback lane",
+    queueDepth: primary?.queueDepth ?? null,
+    activeJobId: primary?.activeJobId || "",
+    lastSeenAt: primary?.lastSeenAt || primary?.updatedAt || "",
+  };
+}
+
+export async function getStemProcessingRoute() {
+  const res = await fetch(`${normalizeBaseUrl(SYNC_URL)}/sync/cinestage/desktops`, {
+    headers: syncHeaders(),
+  });
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(payload?.error || payload?.detail || `Sync ${res.status}`);
+  }
+  const workers = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.desktops)
+      ? payload.desktops
+      : Array.isArray(payload?.workers)
+        ? payload.workers
+        : [];
+  return summarizeDesktopWorkers(workers);
 }
 
 function getBrainBaseCandidates() {

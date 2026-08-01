@@ -408,6 +408,13 @@ export function formatStemJobFailure(job) {
       "Give CineStage another moment to pick it up, then try again.",
     ].join("\n");
   }
+  if (status === "CLOUDFLARE_FALLBACK") {
+    return [
+      "No account desktop is online for this stem job.",
+      "",
+      "CineStage moved it to the fallback lane so it can continue without the desktop worker.",
+    ].join("\n");
+  }
   if (status === "QUEUED_FOR_DESKTOP" || status === "WAITING_FOR_DESKTOP") {
     return [
       "This song is queued for the account desktop.",

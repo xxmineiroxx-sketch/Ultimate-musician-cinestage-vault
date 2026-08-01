@@ -408,6 +408,9 @@ export default function HomeScreen({ navigation }) {
   const [savingSongSuggestion, setSavingSongSuggestion] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [brainStatus, setBrainStatus] = useState(null);
+  const [stemProcessingRoute, setStemProcessingRoute] = useState(
+    CineStageAPI.summarizeDesktopWorkers([])
+  );
   const [practiceStats, setPracticeStats] = useState(null); // { sessionCount, totalMs, mostPracticedSong }
   const _initDate = new Date();
   const _initTheme = getThemeByDate(_initDate);
@@ -834,6 +837,9 @@ export default function HomeScreen({ navigation }) {
       CineStageAPI.bootstrapBrain(true)
         .then((payload) => setBrainStatus(payload?.brain || null))
         .catch(() => setBrainStatus(null)),
+      CineStageAPI.getStemProcessingRoute()
+        .then(setStemProcessingRoute)
+        .catch(() => setStemProcessingRoute(CineStageAPI.summarizeDesktopWorkers([]))),
     ]);
     setRefreshing(false);
   }, [loadDashboardData]);
@@ -852,6 +858,13 @@ export default function HomeScreen({ navigation }) {
       })
       .catch(() => {
         if (!cancelled) setBrainStatus(null);
+      });
+    CineStageAPI.getStemProcessingRoute()
+      .then((route) => {
+        if (!cancelled) setStemProcessingRoute(route);
+      })
+      .catch(() => {
+        if (!cancelled) setStemProcessingRoute(CineStageAPI.summarizeDesktopWorkers([]));
       });
 
     return () => {
@@ -1311,7 +1324,7 @@ export default function HomeScreen({ navigation }) {
       {brainStatus ? (
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => navigation.navigate('CineStageBrain', { brainStatus })}
+          onPress={() => navigation.navigate('CineStageBrain', { brainStatus, stemProcessingRoute })}
         >
           <ModernDashboardCard variant="setup">
             <View style={{ alignItems: 'center' }}>
@@ -1342,6 +1355,29 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.setupText}>
                 Agents: {brainStatus.summary?.internal_agent_count || 0} · Apps: {(brainStatus.apps || []).join(', ')}
               </Text>
+              <View
+                style={{
+                  marginTop: 12,
+                  width: '100%',
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: stemProcessingRoute.desktopOnline ? '#14532D' : '#3F2A08',
+                  backgroundColor: stemProcessingRoute.desktopOnline ? '#071F13' : '#1B1305',
+                  padding: 12,
+                }}
+              >
+                <Text style={[styles.setupText, { color: stemProcessingRoute.desktopOnline ? '#BBF7D0' : '#FDE68A', marginTop: 0, fontWeight: '800' }]}>
+                  {stemProcessingRoute.statusLabel}
+                </Text>
+                <Text style={[styles.setupText, { marginTop: 4 }]}>
+                  Stems route: {stemProcessingRoute.routeLabel}
+                </Text>
+                {stemProcessingRoute.desktopOnline ? (
+                  <Text style={[styles.setupText, { marginTop: 4 }]}>
+                    Queue: {stemProcessingRoute.queueDepth ?? 0}{stemProcessingRoute.activeJobId ? ' · Active job running' : ''}
+                  </Text>
+                ) : null}
+              </View>
               <Text style={[styles.setupText, { color: '#818CF8', marginTop: 8, fontWeight: '700' }]}>
                 Tap to view CineStage cloud status
               </Text>

@@ -4,7 +4,7 @@
  */
 
 import { getSettings } from '../data/storage';
-import { CINESTAGE_URL, SYNC_URL } from '../../config/syncConfig';
+import { CINESTAGE_URL, SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { setCineStageStatus } from '../services/cinestageStatus';
 
 export class CineStageAPI {
@@ -30,6 +30,37 @@ export class CineStageAPI {
     const status = String(brain?.status || '').trim().toLowerCase();
     if (!status) return true;
     return !['offline', 'error', 'unavailable', 'degraded'].includes(status);
+  }
+
+  static isDesktopWorkerOnline(worker, nowMs = Date.now()) {
+    if (!worker) return false;
+    if (String(worker.status || '').toLowerCase() !== 'online') return false;
+    if (worker.capabilities?.stems === false) return false;
+    const seenAt = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
+    return Boolean(seenAt && seenAt >= nowMs - (5 * 60 * 1000));
+  }
+
+  static summarizeDesktopWorkers(workers = []) {
+    const list = Array.isArray(workers) ? workers : [];
+    const nowMs = Date.now();
+    const capableOnline = list.filter((worker) => this.isDesktopWorkerOnline(worker, nowMs));
+    const primary = capableOnline[0] || null;
+
+    return {
+      workers: list,
+      onlineWorkers: capableOnline,
+      primary,
+      desktopOnline: Boolean(primary),
+      route: primary ? 'desktop' : 'cloudflare_fallback',
+      routeLabel: primary ? 'Desktop processing' : 'Cloudflare fallback',
+      statusLabel: primary ? 'Desktop processor online' : 'Desktop offline',
+      detail: primary
+        ? `${primary.name || 'CineStage Desktop'} is ready for stems`
+        : 'Stem jobs will use the next available fallback lane',
+      queueDepth: primary?.queueDepth ?? null,
+      activeJobId: primary?.activeJobId || '',
+      lastSeenAt: primary?.lastSeenAt || primary?.updatedAt || '',
+    };
   }
 
   static normalizeBaseUrl(value) {
@@ -117,9 +148,10 @@ export class CineStageAPI {
   }
 
   static async fetchSyncJson(path, init = {}) {
+    const { headers, ...requestInit } = init;
     const response = await fetch(`${this.normalizeBaseUrl(SYNC_URL)}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
-      ...init,
+      ...requestInit,
+      headers: { ...syncHeaders(), ...(headers || {}) },
     });
 
     const payload = await response.json().catch(() => null);
@@ -479,6 +511,19 @@ export class CineStageAPI {
     });
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return this.fetchSyncJson(`/sync/stem-jobs${suffix}`);
+  }
+
+  static async listDesktopWorkers() {
+    const payload = await this.fetchSyncJson('/sync/cinestage/desktops');
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.desktops)) return payload.desktops;
+    if (Array.isArray(payload?.workers)) return payload.workers;
+    return [];
+  }
+
+  static async getStemProcessingRoute() {
+    const workers = await this.listDesktopWorkers();
+    return this.summarizeDesktopWorkers(workers);
   }
 
   static async updateDesktopStemJob(jobId, payload = {}) {
