@@ -46,6 +46,9 @@ const SERVICE_REMINDER_TYPES = [
   },
 ];
 
+const notificationsEnabled = (preferences = {}, key) =>
+  preferences?.[key] !== false;
+
 async function cancelRemindersForService(serviceId) {
   if (Platform.OS === 'web') return;
   try {
@@ -64,6 +67,12 @@ async function scheduleServiceReminders(group) {
   if (!first?.service_date) return;
 
   const serviceId = first.service_id || first.id;
+  const profile = await getUserProfile().catch(() => null);
+  if (!notificationsEnabled(profile?.notification_preferences, 'reminders')) {
+    await cancelRemindersForService(serviceId);
+    return;
+  }
+
   const serviceName = first.service_name || 'your service';
   const roles = [...new Set(group.map(item => ROLE_LABELS[item.role] || item.role).filter(Boolean))];
   const roleStr = roles.join(', ') || 'team member';

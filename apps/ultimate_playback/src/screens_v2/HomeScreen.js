@@ -70,6 +70,9 @@ const SERVICE_REMINDER_TYPES = [
   },
 ];
 
+const notificationsEnabled = (preferences = {}, key) =>
+  preferences?.[key] !== false;
+
 const THEMED_VERSES = {
   easter: [
     { text: 'He is not here; he has risen, just as he said.', ref: 'Matthew 28:6' },
@@ -569,9 +572,6 @@ export default function HomeScreen({ navigation }) {
   const scheduleServiceReminders = useCallback(async (upcomingGroups) => {
     if (Platform.OS === 'web') return;
     try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') return;
-
       const storedRaw = await AsyncStorage.getItem(SERVICE_REMINDER_STORAGE_KEY).catch(() => null);
       const storedMap = storedRaw ? JSON.parse(storedRaw) : {};
       const storedIds = Object.values(storedMap).flat().filter(Boolean);
@@ -582,6 +582,15 @@ export default function HomeScreen({ navigation }) {
       ));
       notifIdsRef.current = [];
       const nextStoredMap = {};
+
+      if (!notificationsEnabled(profile?.notification_preferences, 'reminders')) {
+        await AsyncStorage.setItem(SERVICE_REMINDER_STORAGE_KEY, JSON.stringify({})).catch(() => {});
+        return;
+      }
+
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+
       const now = Date.now();
 
       for (const group of upcomingGroups) {
@@ -627,7 +636,7 @@ export default function HomeScreen({ navigation }) {
 
       await AsyncStorage.setItem(SERVICE_REMINDER_STORAGE_KEY, JSON.stringify(nextStoredMap)).catch(() => {});
     } catch (_) {}
-  }, []);
+  }, [profile?.notification_preferences]);
 
   const loadDashboardData = useCallback(async () => {
     const userProfile = await getUserProfile();

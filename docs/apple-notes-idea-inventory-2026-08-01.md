@@ -61,7 +61,7 @@ Implementation implication:
 
 - Implemented in Ultimate Playback on 2026-08-01: message notification tone support already exists; service reminders now schedule 3-day and 1-day reminders, and accepted assignments also schedule a service-day reminder.
 - Implemented in Ultimate Playback on 2026-08-01: scheduled reminder IDs are persisted so app restarts do not stack duplicate service reminders.
-- Next: add in-app notification preferences so musicians can choose reminder behavior and tone settings.
+- Implemented in Ultimate Playback on 2026-08-01: Profile now includes musician-controlled notification preferences for message tones, assignment tones, and service reminders.
 - Keep Watch/widget integration as a second phase after mobile notification reliability is proven.
 
 ### 3. Desktop Organizer Console

@@ -11,6 +11,14 @@ function normalize(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeNotificationPreferences(preferences = {}) {
+  return {
+    assignments: preferences?.assignments !== false,
+    messages: preferences?.messages !== false,
+    reminders: preferences?.reminders !== false,
+  };
+}
+
 function createAbortSignal(timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -136,6 +144,7 @@ export default function MessageNotificationWatcher() {
         const email = normalize(profile?.email);
         const fullName = [profile?.name, profile?.lastName].filter(Boolean).join(' ').trim();
         const grantedRole = normalize(profile?.grantedRole);
+        const preferences = normalizeNotificationPreferences(profile?.notification_preferences);
         const identity = `${email}|${fullName.toLowerCase()}|${grantedRole}`;
         const shouldCheckAdmin = ['org_owner', 'admin', 'manager', 'md'].includes(grantedRole);
 
@@ -181,8 +190,8 @@ export default function MessageNotificationWatcher() {
         }
 
         const queue = [];
-        if (shouldPlayAssignment) queue.push('assignment');
-        if (shouldPlayMessage) queue.push('message');
+        if (shouldPlayAssignment && preferences.assignments) queue.push('assignment');
+        if (shouldPlayMessage && preferences.messages) queue.push('message');
         if (queue.length > 0) {
           await playNotificationSequence(queue);
         }

@@ -4,9 +4,11 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
 import {
   View,
   Text,
@@ -16,11 +18,14 @@ import {
   Alert,
   TextInput,
   Image,
+  Platform,
   RefreshControl,
+  Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getUserProfile, saveUserProfile } from '../services/storage';
 import { syncProfileToTeamMembers } from '../services/sharedStorage';
+import { syncPushRegistration } from '../services/pushNotifications';
 import { logout } from '../services/authAPI';
 import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 import { parseRoleAssignments } from '../models_v2/models';
@@ -38,11 +43,24 @@ const PHOTO_MIME_BY_EXT = {
   heif: 'image/heif',
 };
 const MAX_PROFILE_PHOTO_BASE64_LENGTH = 900000;
-const DEFAULT_NOTIFICATION_PREFERENCES = {
-  assignments: true,
-  messages: true,
-  reminders: true,
-};
+const SERVICE_REMINDER_STORAGE_KEY = '@up_assignment_reminders_v1';
+
+const normalizeNotificationPreferences = (preferences = {}) => ({
+  assignments: preferences?.assignments !== false,
+  messages: preferences?.messages !== false,
+  reminders: preferences?.reminders !== false,
+});
+
+async function cancelStoredServiceReminders() {
+  if (Platform.OS === 'web') return;
+  try {
+    const raw = await AsyncStorage.getItem(SERVICE_REMINDER_STORAGE_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    const ids = Object.values(map).flat().filter(Boolean);
+    await Promise.all(ids.map(id => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})));
+    await AsyncStorage.setItem(SERVICE_REMINDER_STORAGE_KEY, JSON.stringify({}));
+  } catch (_) {}
+}
 
 const isPortablePhotoUrl = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -182,6 +200,7 @@ export default function ProfileSetupScreen({ navigation }) {
               || p.inviteRegisteredAt
               || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+            notification_preferences: normalizeNotificationPreferences(p.notification_preferences),
           }],
         }),
       });
@@ -236,6 +255,9 @@ export default function ProfileSetupScreen({ navigation }) {
         playbackRegisteredAt:
           remote.playbackRegisteredAt || localProfile.playbackRegisteredAt || '',
         updatedAt: remote.updatedAt || localProfile.updatedAt || '',
+        notification_preferences: normalizeNotificationPreferences(
+          localProfile.notification_preferences || remote.notification_preferences,
+        ),
       };
     } catch (_) {
       return localProfile;
@@ -292,7 +314,7 @@ export default function ProfileSetupScreen({ navigation }) {
       inviteRegisteredAt: profile?.inviteRegisteredAt || '',
       updatedAt: new Date().toISOString(),
       notification_preferences:
-        profile?.notification_preferences || DEFAULT_NOTIFICATION_PREFERENCES,
+        normalizeNotificationPreferences(profile?.notification_preferences),
     };
     const syncedProfile = {
       ...updatedProfile,
@@ -333,6 +355,9 @@ export default function ProfileSetupScreen({ navigation }) {
         roleAssignments: merged.roleAssignments || normalizedRoles.join(', '),
         roles: normalizedRoles,
         photo_url: portablePhotoUrl || merged.photo_url || '',
+        notification_preferences: normalizeNotificationPreferences(
+          merged.notification_preferences || userProfile.notification_preferences,
+        ),
       };
 
       // Persist the merged profile locally
@@ -402,7 +427,7 @@ export default function ProfileSetupScreen({ navigation }) {
         playbackRegistered:
           profile?.playbackRegistered === true || Boolean(profile?.playbackRegisteredAt),
         notification_preferences:
-          profile?.notification_preferences || DEFAULT_NOTIFICATION_PREFERENCES,
+          normalizeNotificationPreferences(profile?.notification_preferences),
       };
 
       await saveUserProfile(updatedProfile);
@@ -417,6 +442,7 @@ export default function ProfileSetupScreen({ navigation }) {
       }).catch(() => {});
       setProfile(updatedProfile);
       setIsEditing(false);
+      syncPushRegistration(true).catch(() => {});
 
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
@@ -542,6 +568,39 @@ export default function ProfileSetupScreen({ navigation }) {
       { text: 'Cancel', style: 'cancel' },
     ].filter(Boolean));
   }, [formData.photo_url, persistProfilePhoto, pickPhotoFromFiles, pickPhotoFromLibrary]);
+
+  const handleNotificationPreferenceChange = useCallback(async (key, value) => {
+    const baseProfile = profile || {
+      id: `user_${Date.now()}`,
+      name: formData.name,
+      lastName: formData.lastName,
+      email: formData.email,
+      phone: formData.phone,
+      dateOfBirth: formData.dateOfBirth,
+      photo_url: formData.photo_url,
+      roleAssignments: formData.roleAssignments,
+      roles: parseRoleAssignments(formData.roleAssignments),
+    };
+    const nextPreferences = {
+      ...normalizeNotificationPreferences(baseProfile.notification_preferences),
+      [key]: value,
+    };
+    const updatedProfile = {
+      ...baseProfile,
+      notification_preferences: nextPreferences,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await saveUserProfile(updatedProfile);
+    setProfile(updatedProfile);
+    syncPushRegistration(true).catch(() => {});
+
+    if (key === 'reminders' && value === false) {
+      await cancelStoredServiceReminders();
+    }
+  }, [profile, formData]);
+
+  const notificationPreferences = normalizeNotificationPreferences(profile?.notification_preferences);
 
   return (
     <ScrollView
@@ -706,6 +765,46 @@ export default function ProfileSetupScreen({ navigation }) {
           <Text style={styles.editButtonText}>Edit Profile</Text>
         </TouchableOpacity>
       )}
+
+      <View style={styles.preferencesSection}>
+        <Text style={styles.preferencesTitle}>Notification Preferences</Text>
+        <View style={styles.preferenceRow}>
+          <View style={styles.preferenceTextWrap}>
+            <Text style={styles.preferenceLabel}>Message Tones</Text>
+            <Text style={styles.preferenceHelp}>Play a tone when a new team message arrives.</Text>
+          </View>
+          <Switch
+            value={notificationPreferences.messages}
+            onValueChange={(value) => handleNotificationPreferenceChange('messages', value)}
+            trackColor={{ false: '#374151', true: '#4F46E5' }}
+            thumbColor="#F9FAFB"
+          />
+        </View>
+        <View style={styles.preferenceRow}>
+          <View style={styles.preferenceTextWrap}>
+            <Text style={styles.preferenceLabel}>Assignment Tones</Text>
+            <Text style={styles.preferenceHelp}>Play a tone when a service assignment is added.</Text>
+          </View>
+          <Switch
+            value={notificationPreferences.assignments}
+            onValueChange={(value) => handleNotificationPreferenceChange('assignments', value)}
+            trackColor={{ false: '#374151', true: '#4F46E5' }}
+            thumbColor="#F9FAFB"
+          />
+        </View>
+        <View style={[styles.preferenceRow, styles.preferenceRowLast]}>
+          <View style={styles.preferenceTextWrap}>
+            <Text style={styles.preferenceLabel}>Service Reminders</Text>
+            <Text style={styles.preferenceHelp}>Schedule reminders 3 days and 1 day before service.</Text>
+          </View>
+          <Switch
+            value={notificationPreferences.reminders}
+            onValueChange={(value) => handleNotificationPreferenceChange('reminders', value)}
+            trackColor={{ false: '#374151', true: '#4F46E5' }}
+            thumbColor="#F9FAFB"
+          />
+        </View>
+      </View>
 
       {/* Account Info */}
       {profile && (
@@ -921,6 +1020,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  preferencesSection: {
+    padding: 16,
+    backgroundColor: '#0B1120',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginBottom: 24,
+  },
+  preferencesTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#E5E7EB',
+    marginBottom: 8,
+  },
+  preferenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F2937',
+  },
+  preferenceRowLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+  },
+  preferenceTextWrap: {
+    flex: 1,
+  },
+  preferenceLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F9FAFB',
+    marginBottom: 4,
+  },
+  preferenceHelp: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#9CA3AF',
   },
   accountSection: {
     padding: 16,
