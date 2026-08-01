@@ -40,6 +40,21 @@ import { updateWidgetData } from '../services/widgetDataWriter';
 const SETLIST_HIDE_AFTER_SERVICE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MONTHLY_POPUP_SEEN_KEY = '@up_monthly_assignment_popup_seen_v1';
 const LAST_VERSE_DAY_KEY = '@up_last_verse_day_v1';
+const SERVICE_REMINDER_STORAGE_KEY = '@up_assignment_reminders_v1';
+const SERVICE_REMINDER_TYPES = [
+  {
+    key: 'three_day',
+    daysBefore: 3,
+    title: serviceName => `3-Day Reminder: ${serviceName}`,
+    body: roleStr => `You're serving as ${roleStr}. Service is in 3 days.`,
+  },
+  {
+    key: 'one_day',
+    daysBefore: 1,
+    title: serviceName => `Tomorrow: ${serviceName}`,
+    body: roleStr => `You're serving as ${roleStr} tomorrow.`,
+  },
+];
 
 const THEMED_VERSES = {
   easter: [
@@ -700,12 +715,19 @@ export default function HomeScreen({ navigation }) {
     try {
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') return;
-      // Cancel old reminders
-      await Promise.all(notifIdsRef.current.map(id =>
+
+      const storedRaw = await AsyncStorage.getItem(SERVICE_REMINDER_STORAGE_KEY).catch(() => null);
+      const storedMap = storedRaw ? JSON.parse(storedRaw) : {};
+      const storedIds = Object.values(storedMap).flat().filter(Boolean);
+      const idsToCancel = [...new Set([...notifIdsRef.current, ...storedIds])];
+
+      await Promise.all(idsToCancel.map(id =>
         Notifications.cancelScheduledNotificationAsync(id).catch(() => {})
       ));
       notifIdsRef.current = [];
+      const nextStoredMap = {};
       const now = Date.now();
+
       for (const group of upcomingGroups) {
         const a = group[0];
         const serviceDate = a.service_date || a.date;
@@ -716,35 +738,38 @@ export default function HomeScreen({ navigation }) {
         const svcName = a.service_name || a.name || 'Service';
         const roles = [...new Set(group.map(g => ROLE_LABELS[g.role] || g.role).filter(Boolean))];
         const roleStr = roles.join(', ') || 'team member';
-        // 3-day reminder
-        const threeDayMs = svcMs - (3 * 24 * 60 * 60 * 1000);
-        if (threeDayMs > now + 60000) {
+        const serviceId = a.service_id || a.id;
+        const scheduledForService = [];
+
+        for (const reminder of SERVICE_REMINDER_TYPES) {
+          const reminderMs = svcMs - (reminder.daysBefore * 24 * 60 * 60 * 1000);
+          if (reminderMs <= now + 60000) continue;
+
           const id = await Notifications.scheduleNotificationAsync({
             content: {
-              title: `📅 3-Day Reminder: ${svcName}`,
-              body: `You're serving as ${roleStr}. Service is in 3 days — prepare now!`,
+              title: reminder.title(svcName),
+              body: reminder.body(roleStr),
               sound: true,
-              data: { serviceId: a.service_id, type: 'service_reminder' },
+              data: {
+                serviceId,
+                type: 'service_reminder',
+                reminderType: reminder.key,
+              },
             },
-            trigger: { type: 'date', date: new Date(threeDayMs) },
+            trigger: { type: 'date', date: new Date(reminderMs) },
           }).catch(() => null);
-          if (id) notifIdsRef.current.push(id);
+          if (id) {
+            notifIdsRef.current.push(id);
+            scheduledForService.push(id);
+          }
         }
-        // 1-day reminder
-        const oneDayMs = svcMs - (24 * 60 * 60 * 1000);
-        if (oneDayMs > now + 60000) {
-          const id = await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `⚡ Tomorrow: ${svcName}`,
-              body: `Don't forget — you're serving as ${roleStr} tomorrow!`,
-              sound: true,
-              data: { serviceId: a.service_id, type: 'service_reminder' },
-            },
-            trigger: { type: 'date', date: new Date(oneDayMs) },
-          }).catch(() => null);
-          if (id) notifIdsRef.current.push(id);
+
+        if (serviceId && scheduledForService.length > 0) {
+          nextStoredMap[serviceId] = scheduledForService;
         }
       }
+
+      await AsyncStorage.setItem(SERVICE_REMINDER_STORAGE_KEY, JSON.stringify(nextStoredMap)).catch(() => {});
     } catch (_) {}
   }, []);
 

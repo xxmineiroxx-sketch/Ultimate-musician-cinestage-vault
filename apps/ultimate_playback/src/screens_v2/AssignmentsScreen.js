@@ -19,6 +19,32 @@ import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 // ─── Assignment reminder scheduling ────────────────────────────────────────────
 
 const REMINDER_STORAGE_KEY = '@up_assignment_reminders_v1';
+const SERVICE_REMINDER_TYPES = [
+  {
+    key: 'three_day',
+    daysBefore: 3,
+    hour: 19,
+    minute: 0,
+    title: serviceName => `3-Day Reminder: ${serviceName}`,
+    body: roleStr => `You're serving as ${roleStr}. Service is in 3 days.`,
+  },
+  {
+    key: 'one_day',
+    daysBefore: 1,
+    hour: 19,
+    minute: 0,
+    title: serviceName => `Tomorrow: ${serviceName}`,
+    body: roleStr => `You're serving as ${roleStr} tomorrow.`,
+  },
+  {
+    key: 'service_day',
+    daysBefore: 0,
+    hour: 7,
+    minute: 0,
+    title: serviceName => `Service Today: ${serviceName}`,
+    body: roleStr => `You're confirmed as ${roleStr} today.`,
+  },
+];
 
 async function cancelRemindersForService(serviceId) {
   if (Platform.OS === 'web') return;
@@ -39,11 +65,16 @@ async function scheduleServiceReminders(group) {
 
   const serviceId = first.service_id || first.id;
   const serviceName = first.service_name || 'your service';
+  const roles = [...new Set(group.map(item => ROLE_LABELS[item.role] || item.role).filter(Boolean))];
+  const roleStr = roles.join(', ') || 'team member';
 
   // Parse service date (assume 10:00am local time if no time given)
   const dateStr = String(first.service_date);
   const serviceDate = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T10:00:00');
   if (isNaN(serviceDate.getTime())) return;
+
+  const { status } = await Notifications.requestPermissionsAsync().catch(() => ({ status: null }));
+  if (status !== 'granted') return;
 
   const now = Date.now();
 
@@ -52,37 +83,24 @@ async function scheduleServiceReminders(group) {
 
   const scheduledIds = [];
 
-  // Evening-before reminder at 7pm
-  const eveningBefore = new Date(serviceDate);
-  eveningBefore.setDate(eveningBefore.getDate() - 1);
-  eveningBefore.setHours(19, 0, 0, 0);
+  for (const reminder of SERVICE_REMINDER_TYPES) {
+    const reminderDate = new Date(serviceDate);
+    reminderDate.setDate(reminderDate.getDate() - reminder.daysBefore);
+    reminderDate.setHours(reminder.hour, reminder.minute, 0, 0);
+    if (reminderDate.getTime() <= now + 60000) continue;
 
-  if (eveningBefore.getTime() > now + 60000) {
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: '🎵 Service Tomorrow',
-        body: `You're serving at "${serviceName}" tomorrow. You've got this!`,
+        title: reminder.title(serviceName),
+        body: reminder.body(roleStr),
         sound: true,
-        data: { type: 'assignment', serviceId },
+        data: {
+          type: 'service_reminder',
+          reminderType: reminder.key,
+          serviceId,
+        },
       },
-      trigger: { date: eveningBefore },
-    }).catch(() => null);
-    if (id) scheduledIds.push(id);
-  }
-
-  // Morning-of reminder at 7am
-  const morningOf = new Date(serviceDate);
-  morningOf.setHours(7, 0, 0, 0);
-
-  if (morningOf.getTime() > now + 60000) {
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '⏰ Service Today',
-        body: `"${serviceName}" is today — you're confirmed and ready!`,
-        sound: true,
-        data: { type: 'assignment', serviceId },
-      },
-      trigger: { date: morningOf },
+      trigger: { type: 'date', date: reminderDate },
     }).catch(() => null);
     if (id) scheduledIds.push(id);
   }

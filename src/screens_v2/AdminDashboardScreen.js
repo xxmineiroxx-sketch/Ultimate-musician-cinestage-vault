@@ -337,10 +337,11 @@ function assignmentMessageMetaText(message) {
 }
 
 async function fetchJson(url, opts = {}) {
+  const { timeoutMs = 8000, ...fetchOpts } = opts;
   const ctrl = new AbortController();
-  const tid  = setTimeout(() => ctrl.abort(), 8000);
+  const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...opts, signal: ctrl.signal });
+    const res = await fetch(url, { ...fetchOpts, signal: ctrl.signal });
     clearTimeout(tid);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
@@ -671,8 +672,11 @@ export default function AdminDashboardScreen({ navigation, route }) {
           if (p.email) emailToPid[p.email.toLowerCase()] = p.id;
         });
         const svcIds = Object.keys(lib.plans || {});
-        await Promise.all(svcIds.map(async svcId => {
-          const res = await fetchJson(`${SYNC_URL}/sync/assignment/responses?serviceId=${svcId}`, { headers: hdrs }).catch(() => null);
+        await Promise.allSettled(svcIds.map(async svcId => {
+          const res = await fetchJson(`${SYNC_URL}/sync/assignment/responses?serviceId=${svcId}`, {
+            headers: hdrs,
+            timeoutMs: 4000,
+          }).catch(() => null);
           if (!res || typeof res !== 'object') return;
           // Server returns { email: { status, declineReason } }
           const entries = Array.isArray(res) ? res.map(r => [r.email || '', r]) : Object.entries(res);

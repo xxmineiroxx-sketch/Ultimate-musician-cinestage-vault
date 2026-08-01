@@ -59,8 +59,9 @@ The notes define a musician notification layer:
 
 Implementation implication:
 
-- Start with in-app notification preferences and scheduled local notifications.
-- Store notification delivery state so reminders do not duplicate.
+- Implemented in Ultimate Playback on 2026-08-01: message notification tone support already exists; service reminders now schedule 3-day and 1-day reminders, and accepted assignments also schedule a service-day reminder.
+- Implemented in Ultimate Playback on 2026-08-01: scheduled reminder IDs are persisted so app restarts do not stack duplicate service reminders.
+- Next: add in-app notification preferences so musicians can choose reminder behavior and tone settings.
 - Keep Watch/widget integration as a second phase after mobile notification reliability is proven.
 
 ### 3. Desktop Organizer Console
@@ -196,4 +197,3 @@ The notes reinforce the existing architecture:
 - Ultimate Playback: Musician assignment, rehearsal, communication, and live-use app.
 - CineStage Desktop: local heavy processing, asset intelligence, mixer/waveform/stem brain.
 - Cloudflare: always-on sync and fallback processing, not the default expensive stem processor when desktop is online.
-
