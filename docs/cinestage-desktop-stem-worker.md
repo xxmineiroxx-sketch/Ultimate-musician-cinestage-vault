@@ -196,3 +196,9 @@ When R2 is configured:
 - Job stems become Worker download URLs with `delivery: cloudflare_r2` and `downloadable: true`.
 - Publish sends the song/stem metadata to assigned team members.
 - Cleanup deletes temporary R2 stem objects after the retention window.
+
+## Docker Desktop Cross-Check
+
+Docker Desktop was checked on 2026-08-01. The only running container was `upt_db` (`postgis/postgis:15-3.4`). The saved `upt-backend` and `upt-worker` images are about two months old and came from a Pool Tech handoff compose project, not the current Ultimate Musician/Playback app source.
+
+The useful Docker-era CineStage reference source is `/Users/studio/cinestage-main-clean`. It should be mined for Demucs hardening, Redis/Celery local processing, song analysis, waveform intelligence, MIDI presets, and instrument chart ideas. Details are captured in `docs/docker-desktop-audit-2026-08-01.md`.
