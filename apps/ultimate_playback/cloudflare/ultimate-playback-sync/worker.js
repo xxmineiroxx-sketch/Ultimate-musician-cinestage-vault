@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.0.5-auth-support-repair';
+const WORKER_VERSION = '2.1.0-stem-asset-delivery';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const jsonHeaders = {
   'content-type': 'application/json; charset=utf-8',
@@ -42,6 +42,7 @@ function defaultStore() {
     assignmentResponses: {},
     assignmentHistory: [],
     songLibrary: {},
+    sourceUploads: {},
     stemJobs: [],
     desktopWorkers: {},
   };
@@ -881,6 +882,207 @@ function normalizeStemMap(value = {}) {
   );
 }
 
+function safeAssetName(value, fallback = 'stem.wav') {
+  return String(value || fallback)
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 140) || fallback;
+}
+
+function contentTypeForFilename(filename = '') {
+  const ext = String(filename).toLowerCase().split('?')[0].split('#')[0].split('.').pop();
+  switch (ext) {
+    case 'wav':
+      return 'audio/wav';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'm4a':
+    case 'mp4':
+      return 'audio/mp4';
+    case 'aac':
+      return 'audio/aac';
+    case 'flac':
+      return 'audio/flac';
+    case 'ogg':
+    case 'opus':
+      return 'audio/ogg';
+    case 'aif':
+    case 'aiff':
+      return 'audio/aiff';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function stemAssetDownloadUrl(origin, jobId, type) {
+  return `${origin}/sync/stem-assets/download?id=${encodeURIComponent(jobId)}&type=${encodeURIComponent(type)}`;
+}
+
+function stemAssetCanDownload(job = {}) {
+  const expired = job.retention?.expiresAt ? Date.parse(job.retention.expiresAt) < Date.now() : false;
+  if (expired) return false;
+  return ['ready_for_review', 'completed', 'approved', 'published'].includes(job.status);
+}
+
+async function handleUploadStemAsset(request, env, store, url) {
+  if (!env.STEM_ASSETS) {
+    return json({
+      ok: false,
+      error: 'STEM_ASSETS R2 binding is not configured for this Worker.',
+    }, 501);
+  }
+
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+
+  const type = normalizeRole(url.searchParams.get('type') || url.searchParams.get('stem') || '');
+  if (!type) return json({ ok: false, error: 'stem type is required' }, 400);
+
+  const filename = safeAssetName(url.searchParams.get('filename') || `${type}.wav`);
+  const objectKey = `stem-jobs/${job.id}/${type}/${Date.now()}-${filename}`;
+  const body = await request.arrayBuffer();
+  if (!body || body.byteLength === 0) {
+    return json({ ok: false, error: 'empty stem upload' }, 400);
+  }
+
+  await env.STEM_ASSETS.put(objectKey, body, {
+    httpMetadata: {
+      contentType: request.headers.get('content-type') || contentTypeForFilename(filename),
+    },
+    customMetadata: {
+      stemJobId: job.id,
+      stemType: type,
+      uploadedAt: nowIso(),
+    },
+  });
+
+  job.stems ||= {};
+  const origin = new URL(request.url).origin;
+  job.stems[type] = {
+    type,
+    name: filename,
+    url: stemAssetDownloadUrl(origin, job.id, type),
+    objectKey,
+    bytes: body.byteLength,
+    delivery: 'cloudflare_r2',
+    downloadable: true,
+    uploadedAt: nowIso(),
+  };
+  job.stemsUrl = '';
+  job.updatedAt = nowIso();
+  job.readiness = {
+    ...(job.readiness || {}),
+    separated: Object.keys(job.stems || {}).length > 0,
+  };
+
+  await saveStore(env, store);
+  return json({ ok: true, stem: job.stems[type], job: stemJobPublicPayload(job) });
+}
+
+async function handleUploadStemSource(request, env, store, url) {
+  if (!env.STEM_ASSETS) {
+    return json({
+      ok: false,
+      error: 'STEM_ASSETS R2 binding is not configured for this Worker.',
+    }, 501);
+  }
+
+  const uploadId = safeAssetName(url.searchParams.get('uploadId') || `source_${Date.now()}`);
+  const filename = safeAssetName(url.searchParams.get('filename') || 'source-audio');
+  const objectKey = `stem-sources/${uploadId}/${Date.now()}-${filename}`;
+  const body = await request.arrayBuffer();
+  if (!body || body.byteLength === 0) {
+    return json({ ok: false, error: 'empty source upload' }, 400);
+  }
+
+  await env.STEM_ASSETS.put(objectKey, body, {
+    httpMetadata: {
+      contentType: request.headers.get('content-type') || contentTypeForFilename(filename),
+    },
+    customMetadata: {
+      uploadId,
+      uploadedAt: nowIso(),
+    },
+  });
+
+  store.sourceUploads ||= {};
+  store.sourceUploads[uploadId] = {
+    id: uploadId,
+    filename,
+    objectKey,
+    bytes: body.byteLength,
+    uploadedAt: nowIso(),
+  };
+  await saveStore(env, store);
+
+  const origin = new URL(request.url).origin;
+  return json({
+    ok: true,
+    uploadId,
+    fileUrl: `${origin}/sync/stem-sources/download?uploadId=${encodeURIComponent(uploadId)}`,
+    bytes: body.byteLength,
+  });
+}
+
+async function handleDownloadStemAsset(env, store, url) {
+  if (!env.STEM_ASSETS) {
+    return json({
+      ok: false,
+      error: 'STEM_ASSETS R2 binding is not configured for this Worker.',
+    }, 501);
+  }
+
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+  if (!stemAssetCanDownload(job)) {
+    return json({ ok: false, error: 'stem asset is not available for download' }, 403);
+  }
+
+  const type = normalizeRole(url.searchParams.get('type') || url.searchParams.get('stem') || '');
+  const stem = job.stems?.[type];
+  if (!type || !stem?.objectKey) return json({ ok: false, error: 'stem asset not found' }, 404);
+
+  const object = await env.STEM_ASSETS.get(stem.objectKey);
+  if (!object) return json({ ok: false, error: 'stem asset missing from storage' }, 404);
+
+  return new Response(object.body, {
+    headers: {
+      'content-type': object.httpMetadata?.contentType || contentTypeForFilename(stem.name),
+      'content-length': String(object.size || stem.bytes || ''),
+      'content-disposition': `attachment; filename="${safeAssetName(stem.name || `${type}.wav`)}"`,
+      'cache-control': 'private, max-age=300',
+      'access-control-allow-origin': '*',
+    },
+  });
+}
+
+async function handleDownloadStemSource(env, store, url) {
+  if (!env.STEM_ASSETS) {
+    return json({
+      ok: false,
+      error: 'STEM_ASSETS R2 binding is not configured for this Worker.',
+    }, 501);
+  }
+
+  const uploadId = safeAssetName(url.searchParams.get('uploadId') || '');
+  const source = uploadId ? store.sourceUploads?.[uploadId] : null;
+  if (!source?.objectKey) return json({ ok: false, error: 'source upload not found' }, 404);
+
+  const object = await env.STEM_ASSETS.get(source.objectKey);
+  if (!object) return json({ ok: false, error: 'source upload missing from storage' }, 404);
+
+  return new Response(object.body, {
+    headers: {
+      'content-type': object.httpMetadata?.contentType || contentTypeForFilename(source.filename),
+      'content-length': String(object.size || source.bytes || ''),
+      'content-disposition': `attachment; filename="${safeAssetName(source.filename || 'source-audio')}"`,
+      'cache-control': 'private, max-age=300',
+      'access-control-allow-origin': '*',
+    },
+  });
+}
+
 function normalizeRoleStemMap(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {
@@ -1315,6 +1517,12 @@ async function handleCleanupStemJobs(request, env, store) {
 
   if (!dryRun) {
     for (const job of expiredJobs) {
+      if (env.STEM_ASSETS) {
+        const objectKeys = Object.values(job.stems || {})
+          .map((stem) => stem?.objectKey)
+          .filter(Boolean);
+        await Promise.all(objectKeys.map((objectKey) => env.STEM_ASSETS.delete(objectKey).catch(() => null)));
+      }
       job.status = job.status === 'published' ? 'expired' : job.status;
       job.stems = {};
       job.stemsUrl = '';
@@ -1694,6 +1902,10 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
     return handleDesktopHeartbeat(request, env, store);
   }
+  if (path === '/sync/stems/upload' || path === '/sync/stem-sources/upload') {
+    return handleUploadStemSource(request, env, store, url);
+  }
+  if (path === '/sync/stem-assets/upload') return handleUploadStemAsset(request, env, store, url);
   if (path === '/sync/stem-jobs') return handleCreateStemJob(request, env, store);
   if (path === '/sync/stem-job/update' || path === '/sync/stem-jobs/update') {
     return handleUpdateStemJob(request, env, store, url);
@@ -1985,6 +2197,8 @@ async function handleGet(env, store, path, url) {
     if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
     return json(stemJobPublicPayload(job));
   }
+  if (path === '/sync/stem-assets/download') return handleDownloadStemAsset(env, store, url);
+  if (path === '/sync/stem-sources/download') return handleDownloadStemSource(env, store, url);
   if (path === '/sync/grants') {
     return json(Object.entries(store.grants || {}).map(([email, grant]) => ({ email, ...grant })));
   }

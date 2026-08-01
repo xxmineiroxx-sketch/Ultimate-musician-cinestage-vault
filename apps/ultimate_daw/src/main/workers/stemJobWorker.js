@@ -111,6 +111,30 @@ function stemFilePayload(stems = {}, jobOutputDir) {
   );
 }
 
+function contentTypeForFile(filePath = '') {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.wav':
+      return 'audio/wav';
+    case '.mp3':
+      return 'audio/mpeg';
+    case '.m4a':
+    case '.mp4':
+      return 'audio/mp4';
+    case '.aac':
+      return 'audio/aac';
+    case '.flac':
+      return 'audio/flac';
+    case '.ogg':
+    case '.opus':
+      return 'audio/ogg';
+    case '.aif':
+    case '.aiff':
+      return 'audio/aiff';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
 function readManifest(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -228,6 +252,38 @@ class DesktopStemJobWorker {
     });
   }
 
+  async uploadStemAsset(jobId, type, stem) {
+    const filePath = stem?.path || stem?.url?.replace(/^file:\/\//, '');
+    if (!filePath || !fs.existsSync(filePath)) return null;
+
+    const params = new URLSearchParams({
+      id: jobId,
+      type,
+      filename: path.basename(filePath),
+    });
+    const response = await fetch(`${this.syncUrl}/sync/stem-assets/upload?${params.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': contentTypeForFile(filePath) },
+      body: fs.readFileSync(filePath),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const err = new Error(data?.error || `Stem upload failed (${response.status})`);
+      err.status = response.status;
+      throw err;
+    }
+    return data?.stem || null;
+  }
+
+  async uploadStemAssets(jobId, stems = {}) {
+    const uploaded = {};
+    for (const [type, stem] of Object.entries(stems)) {
+      const result = await this.uploadStemAsset(jobId, type, stem);
+      if (result) uploaded[type] = result;
+    }
+    return uploaded;
+  }
+
   async listQueuedJobs() {
     const params = new URLSearchParams({
       processor: 'desktop',
@@ -265,9 +321,11 @@ class DesktopStemJobWorker {
     const manifestPath = path.join(jobDir, 'manifest.json');
     const existing = readManifest(manifestPath);
 
-    if (existing?.stems && Object.keys(existing.stems).length) {
-      await this.updateJob(job.id, this.readyPayload(job, existing.stems, jobDir, key, {
+    const cachedStems = existing?.deliveryStems || existing?.stems || existing?.localStems;
+    if (cachedStems && Object.keys(cachedStems).length) {
+      await this.updateJob(job.id, this.readyPayload(job, cachedStems, jobDir, key, {
         cacheHit: true,
+        deliveryMode: existing.deliveryMode || 'local_cache_only',
         sourceAudioPath: existing.sourceAudioPath || '',
       }));
       return;
@@ -300,7 +358,18 @@ class DesktopStemJobWorker {
           }
         },
       });
-      const stems = stemFilePayload(result.stems || {}, jobDir);
+      const localStems = stemFilePayload(result.stems || {}, jobDir);
+      let stems = localStems;
+      let deliveryMode = 'local_cache_only';
+      try {
+        const uploaded = await this.uploadStemAssets(job.id, localStems);
+        if (Object.keys(uploaded).length) {
+          stems = uploaded;
+          deliveryMode = 'cloudflare_r2';
+        }
+      } catch (uploadErr) {
+        if (![404, 501].includes(uploadErr.status)) throw uploadErr;
+      }
       const manifest = {
         jobId: job.id,
         title: job.title,
@@ -309,13 +378,16 @@ class DesktopStemJobWorker {
         sourceAudioPath,
         model: this.model,
         cacheKey: key,
-        stems,
+        localStems,
+        deliveryStems: stems,
+        deliveryMode,
         preparedAt: nowIso(),
       };
       writeManifest(manifestPath, manifest);
 
       await this.updateJob(job.id, this.readyPayload(job, stems, jobDir, key, {
         sourceAudioPath,
+        deliveryMode,
       }));
     } catch (err) {
       const waitingForSource = err.code === 'SOURCE_PREP_REQUIRED' || err.code === 'SOURCE_MISSING';
@@ -343,7 +415,7 @@ class DesktopStemJobWorker {
         sourceType: job.sourceType,
         model: this.model,
         cacheHit: Boolean(extra.cacheHit),
-        deliveryMode: 'local_cache_only',
+        deliveryMode: extra.deliveryMode || 'local_cache_only',
         sourceAudioPath: extra.sourceAudioPath || '',
         analyzedAt: nowIso(),
       },
@@ -404,5 +476,6 @@ module.exports = {
   cacheKeyFor,
   defaultRoleStemMap,
   resolveSourceAudio,
+  contentTypeForFile,
   stemFilePayload,
 };

@@ -45,8 +45,8 @@ Desktop worker implementation added:
 
 Current limitation:
 - The desktop worker can separate stems locally and submit review-ready metadata.
-- Team download delivery still needs Cloudflare R2 signed URLs, Cloudflare Tunnel, or LAN delivery.
-- Until that is implemented, worker stems are marked `local_cache_only` and `downloadable: false`.
+- When Cloudflare R2 binding `STEM_ASSETS` is configured, desktop uploads processed stems and Playback/iPad can download them from `/sync/stem-assets/download`.
+- Without R2, worker stems are marked `local_cache_only` and `downloadable: false`.
 - YouTube-only requests without a compliant source-prep step move to `waiting_for_source`.
 
 Desktop source decision:

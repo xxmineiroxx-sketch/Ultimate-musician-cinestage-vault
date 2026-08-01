@@ -14,8 +14,9 @@ Improvement added:
 - `apps/ultimate_daw/package.json` now includes `worker:stems` and `worker:stems:once`.
 
 Open product gap:
-- Processed stems still need a real cross-device delivery layer before Playback/iPad can download desktop-generated output.
-- Preferred next options: Cloudflare R2 signed temporary URLs, Cloudflare Tunnel to desktop, or LAN delivery.
+- Processed stems now have an optional R2-backed cross-device delivery layer in code.
+- The deployed sync Worker still needs an R2 bucket binding named `STEM_ASSETS`.
+- Without `STEM_ASSETS`, the desktop worker falls back to local-cache-only stems.
 - YouTube links should stay source-prep blocked unless a compliant downloader is configured.
 
 Related repo docs:

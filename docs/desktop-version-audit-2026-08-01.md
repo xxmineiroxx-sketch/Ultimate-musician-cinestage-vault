@@ -52,10 +52,8 @@ These are built apps or utility apps, not the best place to make source changes.
 
 ## Remaining Gaps
 
-- Processed stem delivery to iPad/Playback still needs a real cross-device storage path. The worker currently marks prepared stems as `local_cache_only` with local file URLs so Admin/Worship Leader can inspect what the account desktop produced.
-- For team downloads, add one of these delivery layers:
-  - Cloudflare R2 temporary signed URLs
-  - a Cloudflare Tunnel to the account desktop
-  - local LAN transfer for same-building rehearsal devices
+- Processed stem delivery to iPad/Playback now has an optional Cloudflare R2 path through the sync Worker.
+- The deployed Worker still needs an R2 bucket binding named `STEM_ASSETS` before team downloads become available in production.
+- If `STEM_ASSETS` is not configured, the desktop worker falls back to `local_cache_only` with `downloadable: false`.
 - YouTube source preparation is intentionally disabled by default. The app should require licensed/local audio unless a compliant downloader is configured.
 - Waveform/BPM/key/section analysis should be wired from `/Users/studio/cinestage-main-clean` after stem delivery is real.

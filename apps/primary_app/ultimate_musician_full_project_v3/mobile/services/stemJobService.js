@@ -12,6 +12,21 @@ const LOCAL_FILE_RE = /^(file|content|ph):\/\//i;
 const STEM_JOB_PENDING_INTERVAL_MS   = 4000;   // 4s between PENDING polls
 const STEM_JOB_PROCESSING_INTERVAL_MS = 8000;   // 8s between PROCESSING polls
 const STEM_JOB_MAX_POLLS = 225;                  // 225 × ~8s ≈ 30 min max
+const DESKTOP_PENDING_STATUSES = new Set([
+  "PENDING",
+  "QUEUED_FOR_DESKTOP",
+  "WAITING_FOR_DESKTOP",
+  "WAITING_FOR_SOURCE",
+  "CLOUDFLARE_FALLBACK",
+]);
+const DESKTOP_PROCESSING_STATUSES = new Set(["PROCESSING"]);
+const DESKTOP_READY_STATUSES = new Set([
+  "READY_FOR_REVIEW",
+  "COMPLETED",
+  "SUCCEEDED",
+  "APPROVED",
+  "PUBLISHED",
+]);
 
 function sanitizeName(value, fallback = "audio") {
   const cleaned = String(value || "")
@@ -125,6 +140,16 @@ export async function submitStemJob({
   sourceUrl,
   title = "Imported Stems",
   songId,
+  serviceId,
+  serviceName,
+  serviceDate,
+  serviceTime,
+  serviceEndTime,
+  artist = "",
+  ownerEmail = "",
+  accountEmail = "",
+  accountId = "",
+  requestedBy,
   separateHarmonies = true,
   voiceCount = 4,
   enhanceInstrumentStems = true,
@@ -138,13 +163,25 @@ export async function submitStemJob({
     title,
   });
 
-  const response = await fetch(`${SYNC_URL}/sync/stems/submit`, {
+  const response = await fetch(`${SYNC_URL}/sync/stem-jobs`, {
     method: "POST",
     headers: syncHeaders(),
     body: JSON.stringify({
-      fileUrl: resolved.fileUrl,
+      sourceUrl: resolved.fileUrl,
       title,
+      artist,
       songId,
+      serviceId,
+      serviceName,
+      serviceDate,
+      serviceTime,
+      serviceEndTime,
+      ownerEmail: ownerEmail || accountEmail || requestedBy?.email || "",
+      accountEmail: accountEmail || ownerEmail || requestedBy?.email || "",
+      accountId,
+      requestedBy,
+      processingMode: "desktop_primary",
+      fallbackEligible: true,
       separateHarmonies,
       voiceCount,
       enhanceInstrumentStems,
@@ -159,9 +196,34 @@ export async function submitStemJob({
   }
 
   return {
-    job,
+    job: normalizeDesktopStemJob(job?.job || job),
     fileUrl: resolved.fileUrl,
     uploadedLocalFile: resolved.uploadedLocalFile,
+  };
+}
+
+function normalizeDesktopStemJob(job = {}) {
+  const result = {
+    ...(job.result || {}),
+    stems: job.result?.stems || job.stems || {},
+    harmonies: job.result?.harmonies || job.harmonies || {},
+    sections: job.result?.sections || job.sections || job.analysis?.sections || [],
+    cueMarkers: job.result?.cueMarkers || job.cueMarkers || job.analysis?.cueMarkers || [],
+    waveformPeaks: job.result?.waveformPeaks || job.waveformPeaks || job.analysis?.waveformPeaks || null,
+    sourceUrl: job.result?.sourceUrl || job.sourceUrl || "",
+    title: job.result?.title || job.title || "",
+    artist: job.result?.artist || job.artist || "",
+    bpm: job.result?.bpm || job.analysis?.bpm || job.bpm || null,
+    key: job.result?.key || job.analysis?.key || job.key || "",
+  };
+
+  return {
+    ...job,
+    result,
+    status: String(job.status || "PENDING").toUpperCase(),
+    readyForReview: Boolean(job.readyForReview),
+    readyForPlayback: Boolean(job.readyForPlayback),
+    stemRetention: job.retention || job.stemRetention || {},
   };
 }
 
@@ -214,6 +276,16 @@ export async function kickStemJob({
 }
 
 export async function getStemJob(jobId) {
+  try {
+    const response = await fetch(`${SYNC_URL}/sync/stem-job?id=${encodeURIComponent(jobId)}`, {
+      headers: syncHeaders(),
+    });
+    const job = await response.json().catch(() => null);
+    if (response.ok && job?.id) return normalizeDesktopStemJob(job);
+  } catch {
+    // New desktop-primary queue unreachable — fall through to legacy routes.
+  }
+
   // 1. Try CF KV (authoritative for queue-submitted jobs)
   try {
     const response = await fetch(`${SYNC_URL}/sync/stems/job/${jobId}`, {
@@ -241,7 +313,7 @@ export async function getStemJob(jobId) {
 }
 
 function getStemResultCount(job) {
-  const stems = job?.result?.stems;
+  const stems = job?.result?.stems || job?.stems;
   if (Array.isArray(stems)) return stems.length;
   if (stems && typeof stems === "object") return Object.keys(stems).length;
   return 0;
@@ -267,8 +339,7 @@ function extractCpuFallbackFailure(error) {
 export function hasStemJobResult(job) {
   const status = String(job?.status || "").toUpperCase();
   return (
-    status === "COMPLETED"
-    || status === "SUCCEEDED"
+    DESKTOP_READY_STATUSES.has(status)
     || getStemResultCount(job) > 0
   );
 }
@@ -283,10 +354,13 @@ export async function pollStemJob(jobId, {
   let current = initialJob || await getStemJob(jobId);
   let polls = 0;
 
-  while (current?.status === "PENDING" || current?.status === "PROCESSING") {
+  while (
+    DESKTOP_PENDING_STATUSES.has(String(current?.status || "").toUpperCase())
+    || DESKTOP_PROCESSING_STATUSES.has(String(current?.status || "").toUpperCase())
+  ) {
     const previousStatus = current.status;
     const delayMs =
-      previousStatus === "PROCESSING"
+      String(previousStatus || "").toUpperCase() === "PROCESSING"
         ? processingIntervalMs
         : pendingIntervalMs;
 
@@ -332,6 +406,21 @@ export function formatStemJobFailure(job) {
       "This job is still queued.",
       "",
       "Give CineStage another moment to pick it up, then try again.",
+    ].join("\n");
+  }
+  if (status === "QUEUED_FOR_DESKTOP" || status === "WAITING_FOR_DESKTOP") {
+    return [
+      "This song is queued for the account desktop.",
+      "",
+      "Open Ultimate Musician Desktop on the account holder machine and keep it online so CineStage can do the heavy stem processing.",
+    ].join("\n");
+  }
+
+  if (status === "WAITING_FOR_SOURCE") {
+    return [
+      "CineStage needs source audio before this song can be processed.",
+      "",
+      "Use a licensed local audio file or configure a compliant YouTube source-prep step on the desktop worker.",
     ].join("\n");
   }
 

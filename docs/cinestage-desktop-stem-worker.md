@@ -57,6 +57,14 @@ flowchart TD
   - Finds or cleans expired temporary stem delivery metadata after the service retention window.
 - `POST /sync/stem-job/reject?id=...`
   - Rejects a stem job with notes.
+- `POST /sync/stem-assets/upload?id=...&type=...&filename=...`
+  - Desktop uploads a processed stem into temporary R2 delivery storage when `STEM_ASSETS` is configured.
+- `GET /sync/stem-assets/download?id=...&type=...`
+  - Playback/iPad downloads an approved or reviewable stem asset from temporary R2 delivery storage.
+- `POST /sync/stems/upload?uploadId=...&filename=...`
+  - iPhone/iPad uploads licensed local source audio so the desktop can download and process it.
+- `GET /sync/stem-sources/download?uploadId=...`
+  - Desktop downloads the uploaded source audio for processing.
 
 ## Job States
 
@@ -160,19 +168,31 @@ Current worker behavior:
 2. Poll `GET /sync/stem-jobs?processor=desktop&status=queued_for_desktop`.
 3. Download direct audio URLs or use local/file URLs as source audio.
 4. Run Demucs stem separation.
-5. Save stems and a manifest in the account holder's local cache.
-6. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
-7. Include `roleStemMap`, readiness flags, and local cache metadata.
-8. Call `POST /sync/stem-jobs/cleanup` so expired published jobs clear temporary metadata.
+5. Upload processed stems to `/sync/stem-assets/upload` when Cloudflare R2 is configured.
+6. Save stems and a manifest in the account holder's local cache.
+7. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
+8. Include `roleStemMap`, readiness flags, and local cache metadata.
+9. Call `POST /sync/stem-jobs/cleanup` so expired published jobs clear temporary metadata and R2 objects.
 
-## Delivery Gap To Close Next
+## Cloudflare R2 Delivery
 
-The desktop worker can now do local heavy processing, but team downloads still need a real delivery layer. The sync Worker accepts stem metadata, but there is not yet a durable processed-stem upload endpoint for desktop output.
+The sync Worker now supports optional R2-backed temporary delivery. Add an R2 bucket binding named `STEM_ASSETS` to the deployed Cloudflare Worker.
 
-Use one of these next:
+Example `wrangler.toml` binding:
 
-- Cloudflare R2 temporary objects with signed URLs, deleted after the retention window.
-- Cloudflare Tunnel to the account desktop for direct temporary downloads.
-- LAN delivery for local rehearsal environments, with Cloudflare fallback when the desktop is offline.
+```toml
+[[r2_buckets]]
+binding = "STEM_ASSETS"
+bucket_name = "ultimate-stem-assets"
+```
 
-Until that layer is added, worker output is marked with `delivery: local_cache_only` and `downloadable: false`. That is deliberate so Playback does not pretend a local desktop path can be downloaded by an iPad.
+If R2 is not configured, the upload endpoints return `501` and the desktop worker falls back to `delivery: local_cache_only` with `downloadable: false`. That fallback is deliberate so Playback does not pretend a local desktop path can be downloaded by an iPad.
+
+When R2 is configured:
+
+- iPhone/iPad local source uploads go to R2 through `/sync/stems/upload`.
+- Desktop downloads the source URL and processes stems.
+- Desktop uploads each processed stem through `/sync/stem-assets/upload`.
+- Job stems become Worker download URLs with `delivery: cloudflare_r2` and `downloadable: true`.
+- Publish sends the song/stem metadata to assigned team members.
+- Cleanup deletes temporary R2 stem objects after the retention window.
