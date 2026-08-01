@@ -4,11 +4,29 @@
  */
 
 import { getSettings } from '../data/storage';
+import { SYNC_URL } from '../../config/syncConfig';
 
 export class CineStageAPI {
+  static normalizeBaseUrl(value) {
+    return String(value || '').replace(/\/+$/, '');
+  }
+
   static async getApiBase() {
     const settings = await getSettings();
     return settings.apiBase;
+  }
+
+  static async fetchSyncJson(path, init = {}) {
+    const response = await fetch(`${this.normalizeBaseUrl(SYNC_URL)}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+      ...init,
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || payload?.detail || `Sync request failed (${response.status})`);
+    }
+    return payload;
   }
 
   /**
@@ -67,5 +85,62 @@ export class CineStageAPI {
       }),
     });
     return await response.json();
+  }
+
+  static async createDesktopStemJob(payload) {
+    return this.fetchSyncJson('/sync/stem-jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        processingMode: payload?.processingMode || 'desktop_primary',
+        fallbackEligible: payload?.fallbackEligible !== false,
+      }),
+    });
+  }
+
+  static async listDesktopStemJobs(filters = {}) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        params.set(key, String(value));
+      }
+    });
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.fetchSyncJson(`/sync/stem-jobs${suffix}`);
+  }
+
+  static async updateDesktopStemJob(jobId, payload = {}) {
+    return this.fetchSyncJson(`/sync/stem-job/update?id=${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async approveDesktopStemJob(jobId, payload = {}) {
+    return this.fetchSyncJson(`/sync/stem-job/approve?id=${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async publishDesktopStemJob(jobId, payload = {}) {
+    return this.fetchSyncJson(`/sync/stem-job/publish?id=${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async rejectDesktopStemJob(jobId, payload = {}) {
+    return this.fetchSyncJson(`/sync/stem-job/reject?id=${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async sendDesktopHeartbeat(payload = {}) {
+    return this.fetchSyncJson('/sync/cinestage/desktop-heartbeat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 }

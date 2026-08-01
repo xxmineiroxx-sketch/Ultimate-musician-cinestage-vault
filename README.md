@@ -26,6 +26,7 @@ Current approval model:
 Durable planning notes:
 - Setlist workflow: `docs/setlist-approval-workflow.md`
 - Full repo audit: `docs/repo-audit-2026-08-01.md`
+- CineStage desktop stem worker: `docs/cinestage-desktop-stem-worker.md`
 - Full iCloud inventory: `docs/icloud-full-inventory-2026-08-01.md`
 - iCloud idea inventory: `docs/icloud-idea-inventory-2026-08-01.md`
 - Repeatable full iCloud scan: `scripts/icloud-full-inventory.sh`

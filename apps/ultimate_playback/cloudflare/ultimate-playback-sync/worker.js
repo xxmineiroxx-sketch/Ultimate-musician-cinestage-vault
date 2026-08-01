@@ -42,6 +42,8 @@ function defaultStore() {
     assignmentResponses: {},
     assignmentHistory: [],
     songLibrary: {},
+    stemJobs: [],
+    desktopWorkers: {},
   };
 }
 
@@ -855,6 +857,378 @@ function normalizePendingSong(body = {}) {
   };
 }
 
+function normalizeStemMap(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, stem]) => {
+        const normalizedKey = normalizeRole(key);
+        if (!normalizedKey) return null;
+        if (typeof stem === 'string') {
+          return [normalizedKey, { url: stem, type: normalizedKey }];
+        }
+        if (stem && typeof stem === 'object') {
+          return [normalizedKey, {
+            ...stem,
+            type: stem.type || normalizedKey,
+            url: stem.url || stem.fileUrl || stem.file_url || stem.path || '',
+          }];
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .filter(([, stem]) => stem.url),
+  );
+}
+
+function normalizeRoleStemMap(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      lead_vocal: ['vocals'],
+      vocal: ['vocals'],
+      soprano: ['vocals'],
+      alto: ['vocals'],
+      tenor: ['vocals'],
+      keys: ['piano', 'other'],
+      piano: ['piano'],
+      synth_pad: ['other'],
+      guitar: ['guitar', 'other'],
+      electric_guitar: ['guitar', 'other'],
+      acoustic_guitar: ['guitar', 'other'],
+      bass: ['bass'],
+      drums: ['drums'],
+    };
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([role, stems]) => [
+        normalizeRole(role),
+        Array.isArray(stems) ? stems.map(normalizeRole).filter(Boolean) : [normalizeRole(stems)].filter(Boolean),
+      ])
+      .filter(([role, stems]) => role && stems.length),
+  );
+}
+
+function activeDesktopWorkerFor(store, account = {}) {
+  const accountEmail = normalizeIdentifier(account.email || account.accountEmail || account.ownerEmail || account.identifier);
+  const accountId = String(account.id || account.accountId || '').trim();
+  const workers = Object.values(store.desktopWorkers || {});
+  const cutoff = Date.now() - (5 * 60 * 1000);
+  return workers.find((worker) => {
+    const updated = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
+    if (!updated || updated < cutoff) return false;
+    if (!accountEmail && !accountId) return worker.status === 'online';
+    return (
+      worker.status === 'online' &&
+      (
+        (accountEmail && normalizeIdentifier(worker.accountEmail) === accountEmail) ||
+        (accountId && String(worker.accountId || '').trim() === accountId)
+      )
+    );
+  }) || null;
+}
+
+function normalizeStemJob(body = {}, store = {}) {
+  const account = body.account || {};
+  const ownerEmail = normalizeIdentifier(
+    body.ownerEmail ||
+    body.accountEmail ||
+    account.email ||
+    account.accountEmail ||
+    body.requestedBy?.email ||
+    body.submittedBy?.email,
+  );
+  const desktopWorker = activeDesktopWorkerFor(store, {
+    email: ownerEmail,
+    id: body.accountId || account.id || account.accountId,
+  });
+  const requestedMode = String(body.processingMode || body.processor || 'desktop_primary').trim();
+  const processor = desktopWorker
+    ? 'desktop'
+    : (requestedMode === 'cloudflare' || requestedMode === 'cloudflare_fallback'
+      ? 'cloudflare_fallback'
+      : 'waiting_for_desktop');
+
+  return {
+    id: body.id || `stem_job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    songId: String(body.songId || body.librarySongId || '').trim(),
+    librarySongId: String(body.librarySongId || body.songId || '').trim(),
+    serviceId: String(body.serviceId || '').trim(),
+    serviceName: String(body.serviceName || body.service?.name || body.service?.title || '').trim(),
+    title: String(body.title || body.songTitle || 'Untitled Song').trim(),
+    artist: String(body.artist || body.songArtist || '').trim(),
+    sourceUrl: String(body.sourceUrl || body.file_url || body.fileUrl || body.audioUrl || body.youtubeUrl || '').trim(),
+    sourceType: /(?:youtube\.com|youtu\.be)/i.test(String(body.sourceUrl || body.file_url || body.fileUrl || body.audioUrl || body.youtubeUrl || ''))
+      ? 'youtube'
+      : 'audio',
+    ownerEmail,
+    accountId: String(body.accountId || account.id || account.accountId || '').trim(),
+    requestedBy: {
+      email: normalizeIdentifier(body.requestedBy?.email || body.submittedBy?.email || ownerEmail),
+      name: String(body.requestedBy?.name || body.submittedBy?.name || body.requestedByName || 'Admin').trim(),
+    },
+    processor,
+    desktopWorkerId: desktopWorker?.id || '',
+    fallbackEligible: body.fallbackEligible !== false,
+    status: processor === 'desktop' ? 'queued_for_desktop' : processor,
+    progress: 0,
+    stems: {},
+    roleStemMap: normalizeRoleStemMap(body.roleStemMap),
+    analysis: {},
+    sections: [],
+    cueMarkers: [],
+    readiness: {
+      downloaded: false,
+      separated: false,
+      analyzed: false,
+      mappedToRoles: false,
+      approved: false,
+      published: false,
+    },
+    reviewNotes: '',
+    error: '',
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+}
+
+function visibleStemJobs(store, url) {
+  const status = String(url.searchParams.get('status') || 'all').trim();
+  const processor = String(url.searchParams.get('processor') || '').trim();
+  const ownerEmail = normalizeIdentifier(url.searchParams.get('ownerEmail') || url.searchParams.get('accountEmail') || '');
+  const serviceId = String(url.searchParams.get('serviceId') || '').trim();
+  return (store.stemJobs || []).filter((job) => (
+    (status === 'all' || !status || job.status === status) &&
+    (!processor || job.processor === processor) &&
+    (!ownerEmail || normalizeIdentifier(job.ownerEmail) === ownerEmail) &&
+    (!serviceId || job.serviceId === serviceId)
+  ));
+}
+
+function findStemJob(store, url) {
+  const id = String(url.searchParams.get('id') || '').trim();
+  if (!id) return null;
+  return (store.stemJobs || []).find((job) => job.id === id) || null;
+}
+
+function stemJobPublicPayload(job = {}) {
+  return {
+    ...job,
+    desktopRequired: job.processor === 'waiting_for_desktop',
+    readyForReview: ['completed', 'ready_for_review'].includes(job.status),
+    readyForPlayback: ['approved', 'published'].includes(job.status),
+  };
+}
+
+function applyStemJobToSong(song, job) {
+  if (!song || !job) return;
+  song.songId ||= job.librarySongId || job.songId;
+  song.mediaUrl ||= job.sourceUrl;
+  song.audioUrl ||= job.sourceUrl;
+  song.youtubeUrl ||= job.sourceType === 'youtube' ? job.sourceUrl : song.youtubeUrl;
+  song.stemJobId = job.id;
+  song.stemStatus = job.status;
+  song.stemsUrl = job.stemsUrl || song.stemsUrl || '';
+  song.assets ||= {};
+  song.assets.stems = normalizeStemMap(job.stems);
+  song.analysis = {
+    ...(song.analysis || {}),
+    ...(job.analysis || {}),
+    sections: Array.isArray(job.sections) ? job.sections : (job.analysis?.sections || []),
+    cueMarkers: Array.isArray(job.cueMarkers) ? job.cueMarkers : (job.analysis?.cueMarkers || []),
+    roleStemMap: job.roleStemMap || {},
+    stemJobId: job.id,
+  };
+  song.waveformPeaks = job.analysis?.waveformPeaks || job.waveformPeaks || song.waveformPeaks || null;
+  song.cueMarkers = Array.isArray(job.cueMarkers) ? job.cueMarkers : song.cueMarkers || [];
+  song.roleStemMap = job.roleStemMap || song.roleStemMap || {};
+  song.stemReadiness = job.readiness || {};
+  song.updatedAt = nowIso();
+}
+
+async function handleDesktopHeartbeat(request, env, store) {
+  const body = await readJson(request);
+  const id = String(body.id || body.desktopId || body.workerId || '').trim() ||
+    `desktop_${normalizeIdentifier(body.accountEmail || body.ownerEmail || 'account') || 'account'}`;
+  store.desktopWorkers ||= {};
+  store.desktopWorkers[id] = {
+    ...(store.desktopWorkers[id] || {}),
+    id,
+    name: String(body.name || body.desktopName || 'CineStage Desktop').trim(),
+    accountEmail: normalizeIdentifier(body.accountEmail || body.ownerEmail || body.email),
+    accountId: String(body.accountId || '').trim(),
+    status: body.status === 'offline' ? 'offline' : 'online',
+    capabilities: {
+      stems: body.capabilities?.stems !== false,
+      demucs: body.capabilities?.demucs !== false,
+      youtubeDownload: body.capabilities?.youtubeDownload !== false,
+      waveform: body.capabilities?.waveform !== false,
+      roleStemMap: body.capabilities?.roleStemMap !== false,
+    },
+    appVersion: String(body.appVersion || '').trim(),
+    lastSeenAt: nowIso(),
+    updatedAt: nowIso(),
+  };
+  await saveStore(env, store);
+  return json({ ok: true, desktop: store.desktopWorkers[id] });
+}
+
+async function handleCreateStemJob(request, env, store) {
+  const body = await readJson(request);
+  const job = normalizeStemJob(body, store);
+  if (!job.sourceUrl) return json({ ok: false, error: 'sourceUrl or YouTube URL is required' }, 400);
+  store.stemJobs ||= [];
+  store.stemJobs.unshift(job);
+
+  addSystemMessage(store, {
+    from_email: job.requestedBy.email || job.ownerEmail,
+    from_name: job.requestedBy.name || 'Admin',
+    subject: `CineStage stem job: ${job.title}`,
+    message: [
+      `CineStage received "${job.title}" for stem processing.`,
+      job.processor === 'desktop'
+        ? 'The account desktop is online and will do the heavy processing.'
+        : 'No desktop processor is currently online; the job is waiting or eligible for fallback.',
+    ].join('\n'),
+    to: 'admin',
+    metadata: {
+      type: 'stem_job_created',
+      stemJobId: job.id,
+      serviceId: job.serviceId,
+      processor: job.processor,
+      status: job.status,
+    },
+  });
+
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job) });
+}
+
+async function handleUpdateStemJob(request, env, store, url) {
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+  const body = await readJson(request);
+  const nextStatus = String(body.status || job.status || '').trim();
+  const progress = Number(body.progress ?? job.progress ?? 0);
+
+  Object.assign(job, {
+    status: nextStatus || job.status,
+    progress: Math.max(0, Math.min(100, progress || 0)),
+    processor: body.processor || job.processor,
+    desktopWorkerId: body.desktopWorkerId || body.workerId || job.desktopWorkerId,
+    stems: Object.keys(body.stems || {}).length ? normalizeStemMap(body.stems) : job.stems,
+    stemsUrl: body.stemsUrl || body.stems_url || job.stemsUrl || '',
+    roleStemMap: body.roleStemMap ? normalizeRoleStemMap(body.roleStemMap) : job.roleStemMap,
+    analysis: body.analysis && typeof body.analysis === 'object' ? body.analysis : job.analysis,
+    sections: Array.isArray(body.sections) ? body.sections : job.sections,
+    cueMarkers: Array.isArray(body.cueMarkers) ? body.cueMarkers : job.cueMarkers,
+    waveformPeaks: body.waveformPeaks || job.waveformPeaks || null,
+    error: String(body.error || '').trim(),
+    updatedAt: nowIso(),
+  });
+  job.readiness = {
+    ...(job.readiness || {}),
+    ...(body.readiness || {}),
+    downloaded: body.readiness?.downloaded ?? job.readiness?.downloaded ?? progress > 5,
+    separated: body.readiness?.separated ?? job.readiness?.separated ?? Object.keys(job.stems || {}).length > 0,
+    analyzed: body.readiness?.analyzed ?? job.readiness?.analyzed ?? Boolean(job.analysis && Object.keys(job.analysis).length),
+    mappedToRoles: body.readiness?.mappedToRoles ?? job.readiness?.mappedToRoles ?? Boolean(job.roleStemMap && Object.keys(job.roleStemMap).length),
+  };
+
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job) });
+}
+
+async function handleApproveStemJob(request, env, store, url) {
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+  const body = await readJson(request);
+  job.status = 'approved';
+  job.progress = 100;
+  job.approvedAt = nowIso();
+  job.approvedBy = body.approvedBy || null;
+  job.reviewNotes = String(body.notes || body.reviewNotes || '').trim();
+  job.readiness = {
+    ...(job.readiness || {}),
+    approved: true,
+  };
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job) });
+}
+
+async function handlePublishStemJob(request, env, store, url) {
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+  if (!['approved', 'published'].includes(job.status)) {
+    return json({ ok: false, error: 'stem job must be approved before publishing' }, 400);
+  }
+
+  const plan = job.serviceId ? store.plans?.[job.serviceId] : null;
+  const planSong = findPlanSongForSync(plan?.songs || [], {
+    rawSongId: job.songId,
+    librarySongId: job.librarySongId,
+  }) || (plan?.songs || []).find((song) => (
+    job.title &&
+    String(song?.title || song?.songTitle || '').trim().toLowerCase() === job.title.toLowerCase()
+  ));
+
+  const librarySongId = pickFirstNonEmpty(job.librarySongId, job.songId, planSong?.songId, planSong?.id, `song_${job.id}`);
+  store.songLibrary ||= {};
+  const librarySong = store.songLibrary[librarySongId] || buildLibrarySongSeed(librarySongId, {
+    title: job.title,
+    artist: job.artist,
+    planSong,
+  });
+  store.songLibrary[librarySongId] = librarySong;
+
+  applyStemJobToSong(librarySong, { ...job, librarySongId });
+  applyStemJobToSong(planSong, { ...job, librarySongId });
+
+  job.status = 'published';
+  job.publishedAt = nowIso();
+  job.librarySongId = librarySongId;
+  job.readiness = {
+    ...(job.readiness || {}),
+    approved: true,
+    published: true,
+  };
+
+  const recipients = teamMessageRecipients(plan?.team || []);
+  if (job.serviceId && recipients.length) {
+    addSystemMessage(store, {
+      subject: `Practice stems ready: ${job.title}`,
+      message: [
+        `CineStage stems are ready for "${job.title}".`,
+        'Open Playback to practice the part assigned to your role.',
+      ].join('\n'),
+      to: 'assigned_team',
+      recipients,
+      metadata: {
+        type: 'stem_job_published',
+        stemJobId: job.id,
+        serviceId: job.serviceId,
+        songId: librarySongId,
+        recipientCount: recipients.length,
+      },
+    });
+  }
+
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job), song: librarySong });
+}
+
+async function handleRejectStemJob(request, env, store, url) {
+  const job = findStemJob(store, url);
+  if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+  const body = await readJson(request);
+  job.status = 'rejected';
+  job.rejectedAt = nowIso();
+  job.rejectReason = String(body.reason || body.notes || '').trim();
+  await saveStore(env, store);
+  return json({ ok: true, job: stemJobPublicPayload(job) });
+}
+
 function songFromPendingSong(song = {}) {
   return {
     id: song.librarySongId || `song_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -1201,6 +1575,22 @@ async function handlePost(request, env, store, path, url) {
   }
 
   if (path === '/sync/publish') return handlePublish(request, env, store);
+  if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
+    return handleDesktopHeartbeat(request, env, store);
+  }
+  if (path === '/sync/stem-jobs') return handleCreateStemJob(request, env, store);
+  if (path === '/sync/stem-job/update' || path === '/sync/stem-jobs/update') {
+    return handleUpdateStemJob(request, env, store, url);
+  }
+  if (path === '/sync/stem-job/approve' || path === '/sync/stem-jobs/approve') {
+    return handleApproveStemJob(request, env, store, url);
+  }
+  if (path === '/sync/stem-job/publish' || path === '/sync/stem-jobs/publish') {
+    return handlePublishStemJob(request, env, store, url);
+  }
+  if (path === '/sync/stem-job/reject' || path === '/sync/stem-jobs/reject') {
+    return handleRejectStemJob(request, env, store, url);
+  }
   if (path === '/sync/setlist/submit') return handleSubmitSetlist(request, env, store);
   if (path === '/sync/setlist/approve') return handleApproveSetlist(request, env, store, url);
   if (path === '/sync/setlist/reject') return handleRejectSetlist(request, env, store, url);
@@ -1465,6 +1855,17 @@ async function handleGet(env, store, path, url) {
   }
 
   if (path === '/sync/people') return json(store.people);
+  if (path === '/sync/cinestage/desktops' || path === '/sync/desktop/workers') {
+    return json(Object.values(store.desktopWorkers || {}));
+  }
+  if (path === '/sync/stem-jobs') {
+    return json(visibleStemJobs(store, url).map(stemJobPublicPayload));
+  }
+  if (path === '/sync/stem-job') {
+    const job = findStemJob(store, url);
+    if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
+    return json(stemJobPublicPayload(job));
+  }
   if (path === '/sync/grants') {
     return json(Object.entries(store.grants || {}).map(([email, grant]) => ({ email, ...grant })));
   }
