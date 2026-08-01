@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.3.0-desktop-routing-status';
+const WORKER_VERSION = '2.4.0-service-readiness';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -78,6 +78,12 @@ function normalizePhone(value) {
 
 function normalizeRole(value) {
   return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function collectionItems(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
 }
 
 function personRoleKeys(person = {}) {
@@ -1771,6 +1777,156 @@ function buildServicePreflight({ assignmentGroup = [], setlist = [], librarySong
   };
 }
 
+function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
+  const services = serviceMapFromStore(store);
+  const selectedServices = String(serviceId || '').trim()
+    ? [services[String(serviceId || '').trim()]].filter(Boolean)
+    : Object.values(services);
+  const desktops = collectionItems(store.desktopWorkers);
+  const onlineDesktopCount = desktops.filter((worker) => {
+    const updated = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
+    return worker.status === 'online' && updated && updated >= Date.now() - (5 * 60 * 1000);
+  }).length;
+  const assignmentStatsPacket = assignmentStatsFor(store, { month });
+  const assignmentStats = Array.isArray(assignmentStatsPacket.people)
+    ? assignmentStatsPacket.people
+    : Object.values(assignmentStatsPacket.byPerson || {});
+
+  const readiness = selectedServices.map((service) => {
+    const id = String(service?.id || '').trim();
+    const plan = store.plans?.[id] || {};
+    const songs = setlistFor(store, id);
+    const team = Array.isArray(plan.team) ? plan.team : [];
+    const pendingSetlist = collectionItems(store.pendingSetlists).find((entry) => (
+      entry.serviceId === id && ['pending', 'rejected'].includes(entry.status)
+    )) || null;
+    const proposals = collectionItems(store.proposals).filter((proposal) => (
+      !proposal.serviceId || proposal.serviceId === id
+    ));
+    const pendingProposals = proposals.filter((proposal) => proposal.status === 'pending');
+    const stemJobs = collectionItems(store.stemJobs)
+      .filter((job) => job.serviceId === id)
+      .map(stemJobPublicPayload);
+    const missingCharts = songs.filter((song) => !song.hasLyrics && !song.hasChordChart);
+    const missingStemSongs = songs.filter((song) => {
+      const songId = String(song.id || song.songId || song.librarySongId || '').trim().toLowerCase();
+      const matchingJob = stemJobs.find((job) => (
+        [job.songId, job.librarySongId, job.title]
+          .filter(Boolean)
+          .map((value) => String(value).trim().toLowerCase())
+          .includes(songId) ||
+        String(job.title || '').trim().toLowerCase() === String(song.title || '').trim().toLowerCase()
+      ));
+      return !song.stemsUrl && !song.assets?.stems && !matchingJob?.readyForPlayback;
+    });
+    const assignmentRows = team.map((member) => {
+      const person = findPerson(store, {
+        id: member.personId,
+        email: member.email,
+        identifier: member.email,
+      }) || {};
+      const status = member.status || member.response || 'pending';
+      const load = assignmentStats.find((entry) => (
+        (member.personId && entry.personId === member.personId) ||
+        (member.email && normalizeIdentifier(entry.email) === normalizeIdentifier(member.email))
+      )) || null;
+      return {
+        personId: member.personId || person.id || '',
+        email: normalizeIdentifier(member.email || person.email),
+        name: member.name || person.name || '',
+        role: member.role || '',
+        status,
+        monthlyAssignments: load?.total || 0,
+        byRole: load?.byRole || {},
+      };
+    });
+    const acceptedCount = assignmentRows.filter((member) => (
+      ['accepted', 'confirmed', 'registered'].includes(normalizeRole(member.status))
+    )).length;
+    const declinedCount = assignmentRows.filter((member) => normalizeRole(member.status) === 'declined').length;
+    const pendingCount = Math.max(0, assignmentRows.length - acceptedCount - declinedCount);
+    const statusChecks = {
+      setlistSubmitted: Boolean(pendingSetlist) || plan.status === 'pending_approval' || plan.status === 'published',
+      setlistApproved: plan.status === 'published' || service.status === 'published',
+      teamAssigned: team.length > 0,
+      teamConfirmed: team.length > 0 && pendingCount === 0 && declinedCount === 0,
+      chartsReady: songs.length > 0 && missingCharts.length === 0,
+      stemsReady: songs.length > 0 && missingStemSongs.length === 0,
+      proposalsCleared: pendingProposals.length === 0,
+      desktopOnline: onlineDesktopCount > 0,
+      published: plan.status === 'published' || service.status === 'published',
+    };
+    const blocking = [];
+    if (!statusChecks.teamAssigned) blocking.push('Assign at least one team member.');
+    if (songs.length === 0) blocking.push('Add songs to the setlist.');
+    if (pendingSetlist?.status === 'pending') blocking.push('Inspect pending setlist submission.');
+    if (pendingSetlist?.status === 'rejected') blocking.push('Waiting on requested setlist changes.');
+    if (pendingCount > 0) blocking.push(`${pendingCount} assignment${pendingCount === 1 ? '' : 's'} still pending.`);
+    if (declinedCount > 0) blocking.push(`${declinedCount} assignment${declinedCount === 1 ? '' : 's'} declined.`);
+    if (missingCharts.length > 0) blocking.push(`${missingCharts.length} song${missingCharts.length === 1 ? '' : 's'} missing lyrics/chords.`);
+    if (pendingProposals.length > 0) blocking.push(`${pendingProposals.length} content proposal${pendingProposals.length === 1 ? '' : 's'} waiting for review.`);
+    if (missingStemSongs.length > 0) blocking.push(`${missingStemSongs.length} song${missingStemSongs.length === 1 ? '' : 's'} missing approved stems.`);
+
+    const scoreWeights = [
+      statusChecks.teamAssigned,
+      songs.length > 0,
+      statusChecks.setlistApproved,
+      statusChecks.teamConfirmed,
+      statusChecks.chartsReady,
+      statusChecks.proposalsCleared,
+      statusChecks.stemsReady,
+      statusChecks.desktopOnline,
+    ];
+    const score = Math.round((scoreWeights.filter(Boolean).length / scoreWeights.length) * 100);
+    const route = onlineDesktopCount > 0 ? 'desktop' : 'cloudflare_fallback';
+
+    return {
+      serviceId: id,
+      serviceName: service.name || service.title || 'Service',
+      serviceDate: service.date || '',
+      serviceTime: service.time || '',
+      status: service.status || plan.status || 'draft',
+      score,
+      route,
+      desktopOnline: onlineDesktopCount > 0,
+      counts: {
+        songs: songs.length,
+        team: team.length,
+        accepted: acceptedCount,
+        pendingAssignments: pendingCount,
+        declinedAssignments: declinedCount,
+        missingCharts: missingCharts.length,
+        pendingProposals: pendingProposals.length,
+        stemJobs: stemJobs.length,
+        readyStemJobs: stemJobs.filter((job) => job.readyForPlayback).length,
+        missingStems: missingStemSongs.length,
+      },
+      statusChecks,
+      blocking,
+      team: assignmentRows,
+      pendingSetlist,
+      pendingProposals: pendingProposals.slice(0, 8),
+      stemJobs,
+      missingCharts: missingCharts.map((song) => ({ id: song.id, title: song.title })),
+      generatedAt: nowIso(),
+    };
+  }).sort((a, b) => `${a.serviceDate || '9999-99-99'}T${a.serviceTime || '23:59'}`.localeCompare(`${b.serviceDate || '9999-99-99'}T${b.serviceTime || '23:59'}`));
+
+  return {
+    ok: true,
+    version: 'service-readiness-v1',
+    month: month || monthKeyFromDate(),
+    desktop: {
+      online: onlineDesktopCount > 0,
+      onlineCount: onlineDesktopCount,
+      totalKnown: desktops.length,
+      route: onlineDesktopCount > 0 ? 'desktop' : 'cloudflare_fallback',
+    },
+    services: readiness,
+    generatedAt: nowIso(),
+  };
+}
+
 function serviceBundleFor(store, { serviceId = '', email = '' } = {}) {
   const id = String(serviceId || '').trim();
   if (!id) return null;
@@ -2391,6 +2547,12 @@ async function handleGet(env, store, path, url) {
     });
     if (!bundle) return json({ ok: false, error: 'serviceId is required' }, 400);
     return json(bundle);
+  }
+  if (path === '/sync/service-readiness' || path === '/sync/readiness') {
+    return json(serviceReadinessFor(store, {
+      serviceId: url.searchParams.get('serviceId') || '',
+      month: url.searchParams.get('month') || '',
+    }));
   }
   if (path === '/sync/setlist') return json(setlistFor(store, url.searchParams.get('serviceId') || ''));
   if (path.includes('/blockouts')) return json(store.blockouts || []);

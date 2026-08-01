@@ -40,8 +40,8 @@ The current ecosystem already includes most of the requested product surface. Th
 - Mixer scene/preset/feedback detection ideas from iCloud.
 - Asset indexing for stems, scenes, presets, Kontakt sounds, Ableton sessions, and keyboard libraries.
 
-## Best Next Build
+## First Build Slice
 
-Build the Service Readiness Dashboard first, backed by a normalized `/sync/service-readiness?serviceId=...` endpoint.
+Implemented first slice on 2026-08-01: Playback Admin Dashboard Readiness tab backed by a normalized `/sync/service-readiness?serviceId=...` endpoint.
 
 This connects existing features into one clear product workflow instead of scattering more screens.

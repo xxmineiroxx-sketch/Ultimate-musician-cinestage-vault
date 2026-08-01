@@ -18,10 +18,10 @@ Implemented in repo:
 - Submitting a setlist creates an Admin Panel message; approval creates a message for assigned team members.
 - Everyone can suggest songs; suggestions stay pending until Admin/Worship Leader approves or rejects them.
 - Musicians can edit/add lyrics, chord charts, and instrument-specific parts as proposals; approval applies them to the live service/library song.
+- Playback Admin Dashboard now has a Readiness tab backed by `/sync/service-readiness`, showing service score, blockers, assignment confirmation gaps, chart/proposal gaps, stem status, and desktop/cloud processing route.
 - Repo documentation added at `docs/setlist-approval-workflow.md`.
 - Standalone GitHub sync server `xxmineiroxx-sketch/ultimate-sync-server` now mirrors the same setlist approval endpoints in `server.js`.
 
 Product rule:
 - AI and helper roles can prepare plans, but sending a plan to the whole team requires Admin or Worship Leader approval.
 - Song library changes and musician chart edits also require Admin or Worship Leader approval unless made directly by an approved leader/admin role.
-

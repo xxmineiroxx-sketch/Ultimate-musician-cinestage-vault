@@ -131,7 +131,7 @@ const playbackGrantLabel = (role) => (
 );
 
 const ADMIN_LIBRARY_CACHE_KEY = '@up_admin_library_cache_v1';
-const TABS = ['Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
+const TABS = ['Readiness', 'Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
 
 const ROLE_CHIPS = [
   'Worship Leader', 'Music Director', 'Lead Singer', 'Vocal Lead', 'Vocal BGV',
@@ -417,6 +417,12 @@ function assignmentMessageMetaText(message) {
   return [statusLabel, serviceName, stamp].filter(Boolean).join(' • ');
 }
 
+function readinessTone(score) {
+  if (score >= 85) return { label: 'Ready', color: '#34D399', bg: '#052E1A', border: '#059669' };
+  if (score >= 60) return { label: 'Review', color: '#FBBF24', bg: '#2D2305', border: '#B45309' };
+  return { label: 'Blocked', color: '#F87171', bg: '#2D0B0B', border: '#DC2626' };
+}
+
 async function fetchJson(url, opts = {}) {
   const { timeoutMs = 20000, ...fetchOpts } = opts;
   const ctrl = new AbortController();
@@ -513,6 +519,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const [services, setServices] = useState([]);
   const [people, setPeople]     = useState([]);
   const [plans, setPlans]       = useState({});
+  const [readiness, setReadiness] = useState(null);
 
   // Messages
   const [selectedMsg, setSelectedMsg]   = useState(null);
@@ -703,7 +710,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
     try {
       const hdrs = syncHeaders();
-      const [prof, msgs, rawLib, props, pSvcs, pSongs, pSetlists] = await Promise.all([
+      const [prof, msgs, rawLib, props, pSvcs, pSongs, pSetlists, readinessPacket] = await Promise.all([
         getUserProfile(),
         fetchJson(`${SYNC_URL}/sync/messages/admin`, { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library-pull`,   { headers: hdrs }).catch(() => ({})),
@@ -711,6 +718,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         fetchJson(`${SYNC_URL}/sync/services/pending`,        { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`,   { headers: hdrs }).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/setlist/pending`,         { headers: hdrs }).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/service-readiness`,        { headers: hdrs }).catch(() => null),
       ]);
       const lib = normalizeObject(rawLib);
       setProfile(prof);
@@ -777,6 +785,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending_approval') : []);
       setPendingSetlists(Array.isArray(pSetlists) ? pSetlists : []);
+      setReadiness(readinessPacket && readinessPacket.ok ? readinessPacket : null);
 
       // Build blockouts dict: { 'YYYY-MM-DD': ['email1', ...] }
       const bDict = {};
@@ -1745,6 +1754,187 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
           })}
 
       </View>
+    );
+  };
+
+  // ── Render: Readiness — operational service health ─────────────────────
+  const renderReadiness = () => {
+    const readinessServices = normalizeArrayOrObjectValues(readiness?.services)
+      .filter((item) => !isLeadSingerPlanner || isLeadSingerForService(item.serviceId));
+    const visibleReadiness = readinessServices.length
+      ? readinessServices
+      : services.map((svc) => {
+          const plan = normalizePlan(plans[svc.id]);
+          const songs = planSongs(plan);
+          const team = planTeam(plan);
+          return {
+            serviceId: svc.id,
+            serviceName: svc.name || svc.title || 'Service',
+            serviceDate: svc.date || '',
+            serviceTime: svc.time || '',
+            score: Math.round(([songs.length > 0, team.length > 0, svc.status === 'published'].filter(Boolean).length / 3) * 100),
+            route: 'unknown',
+            desktopOnline: false,
+            counts: {
+              songs: songs.length,
+              team: team.length,
+              accepted: team.filter((member) => normalizeAssignmentStatus(member.status) === 'accepted').length,
+              pendingAssignments: team.filter((member) => normalizeAssignmentStatus(member.status) === 'pending').length,
+              declinedAssignments: team.filter((member) => normalizeAssignmentStatus(member.status) === 'declined').length,
+              missingCharts: songs.filter((song) => !song.lyrics && !song.chordChart && !song.chordSheet).length,
+              pendingProposals: proposals.filter((proposal) => proposal.status === 'pending' && (!proposal.serviceId || proposal.serviceId === svc.id)).length,
+              missingStems: songs.length,
+            },
+            blocking: [
+              ...(songs.length ? [] : ['Add songs to the setlist.']),
+              ...(team.length ? [] : ['Assign team members.']),
+              ...(svc.status === 'published' ? [] : ['Publish or approve this service.']),
+            ],
+          };
+        });
+
+    const sorted = [...visibleReadiness].sort((a, b) => (
+      `${a.serviceDate || '9999-99-99'}T${a.serviceTime || '23:59'}`
+        .localeCompare(`${b.serviceDate || '9999-99-99'}T${b.serviceTime || '23:59'}`)
+    ));
+    const avg = sorted.length
+      ? Math.round(sorted.reduce((sum, item) => sum + Number(item.score || 0), 0) / sorted.length)
+      : 0;
+    const desktopRoute = readiness?.desktop?.route || (readiness?.desktop?.online ? 'desktop' : 'cloudflare_fallback');
+    const openItems = sorted.reduce((sum, item) => sum + normalizeArrayOrObjectValues(item.blocking).length, 0);
+    const pendingSetlistCount = pendingSetlists.filter((item) => item.status === 'pending').length;
+    const pendingProposalCount = proposals.filter((item) => item.status === 'pending').length;
+
+    return (
+      <ScrollView
+        contentContainerStyle={s.tabContent}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
+      >
+        <View style={s.readinessHeader}>
+          <View style={s.readinessMetric}>
+            <Text style={s.readinessMetricValue}>{avg}%</Text>
+            <Text style={s.readinessMetricLabel}>Avg Ready</Text>
+          </View>
+          <View style={s.readinessMetric}>
+            <Text style={s.readinessMetricValue}>{openItems}</Text>
+            <Text style={s.readinessMetricLabel}>Open Items</Text>
+          </View>
+          <View style={s.readinessMetric}>
+            <Text style={s.readinessMetricValue}>{pendingSetlistCount + pendingProposalCount}</Text>
+            <Text style={s.readinessMetricLabel}>Reviews</Text>
+          </View>
+        </View>
+
+        <View style={s.routeBanner}>
+          <View style={[s.routeDot, { backgroundColor: desktopRoute === 'desktop' ? '#22C55E' : '#F59E0B' }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.routeTitle}>
+              Stems route: {desktopRoute === 'desktop' ? 'Desktop processing' : 'Cloudflare fallback'}
+            </Text>
+            <Text style={s.routeSub}>
+              {desktopRoute === 'desktop'
+                ? `${readiness?.desktop?.onlineCount || 1} desktop worker online for heavy processing.`
+                : 'No desktop worker is online, so new eligible jobs use the fallback lane.'}
+            </Text>
+          </View>
+        </View>
+
+        {!readiness?.ok && (
+          <View style={s.readinessNotice}>
+            <Text style={s.readinessNoticeText}>
+              Readiness endpoint is not available from this Worker yet. Showing local app data only.
+            </Text>
+          </View>
+        )}
+
+        {sorted.length === 0 && !loading ? (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>📋</Text>
+            <Text style={s.emptyText}>No services to inspect yet.</Text>
+          </View>
+        ) : sorted.map((item) => {
+          const tone = readinessTone(Number(item.score || 0));
+          const counts = item.counts || {};
+          const blockers = normalizeArrayOrObjectValues(item.blocking);
+          return (
+            <TouchableOpacity
+              key={item.serviceId}
+              style={s.readinessCard}
+              activeOpacity={0.82}
+              onPress={() => {
+                const svc = services.find((service) => service.id === item.serviceId);
+                if (svc) setExpandedSvc(svc);
+                setTab('Services');
+              }}
+            >
+              <View style={s.readinessCardTop}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.readinessTitle} numberOfLines={1}>{item.serviceName}</Text>
+                  <Text style={s.readinessDate}>
+                    {formatServiceDate(item.serviceDate)}{item.serviceTime ? ` · ${item.serviceTime}` : ''}
+                  </Text>
+                </View>
+                <View style={[s.readinessScore, { backgroundColor: tone.bg, borderColor: tone.border }]}>
+                  <Text style={[s.readinessScoreValue, { color: tone.color }]}>{item.score || 0}%</Text>
+                  <Text style={[s.readinessScoreLabel, { color: tone.color }]}>{tone.label}</Text>
+                </View>
+              </View>
+
+              <View style={s.readinessGrid}>
+                <View style={s.readinessCell}>
+                  <Text style={s.readinessCellValue}>{counts.songs || 0}</Text>
+                  <Text style={s.readinessCellLabel}>Songs</Text>
+                </View>
+                <View style={s.readinessCell}>
+                  <Text style={s.readinessCellValue}>{counts.team || 0}</Text>
+                  <Text style={s.readinessCellLabel}>Team</Text>
+                </View>
+                <View style={s.readinessCell}>
+                  <Text style={s.readinessCellValue}>{counts.accepted || 0}</Text>
+                  <Text style={s.readinessCellLabel}>Accepted</Text>
+                </View>
+                <View style={s.readinessCell}>
+                  <Text style={[s.readinessCellValue, counts.declinedAssignments > 0 && { color: '#F87171' }]}>
+                    {counts.pendingAssignments || 0}/{counts.declinedAssignments || 0}
+                  </Text>
+                  <Text style={s.readinessCellLabel}>Pend/Decl</Text>
+                </View>
+              </View>
+
+              <View style={s.readinessStatusRow}>
+                <View style={[s.readinessChip, (counts.missingCharts || 0) === 0 && s.readinessChipOk]}>
+                  <Text style={[s.readinessChipText, (counts.missingCharts || 0) === 0 && s.readinessChipTextOk]}>
+                    Charts {counts.missingCharts || 0}
+                  </Text>
+                </View>
+                <View style={[s.readinessChip, (counts.pendingProposals || 0) === 0 && s.readinessChipOk]}>
+                  <Text style={[s.readinessChipText, (counts.pendingProposals || 0) === 0 && s.readinessChipTextOk]}>
+                    Proposals {counts.pendingProposals || 0}
+                  </Text>
+                </View>
+                <View style={[s.readinessChip, (counts.missingStems || 0) === 0 && s.readinessChipOk]}>
+                  <Text style={[s.readinessChipText, (counts.missingStems || 0) === 0 && s.readinessChipTextOk]}>
+                    Stems {counts.missingStems || 0}
+                  </Text>
+                </View>
+              </View>
+
+              {blockers.length > 0 ? (
+                <View style={s.blockerList}>
+                  {blockers.slice(0, 4).map((blocker, i) => (
+                    <Text key={`${item.serviceId}_blocker_${i}`} style={s.blockerText}>• {blocker}</Text>
+                  ))}
+                  {blockers.length > 4 ? (
+                    <Text style={s.blockerMore}>+{blockers.length - 4} more</Text>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={s.readyLine}>Ready to publish and rehearse.</Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
     );
   };
 
@@ -2742,6 +2932,8 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         {TABS.map(t => {
           const pendingCount = t === 'Proposals'
             ? proposals.filter(p => p.status === 'pending').length + pendingSetlists.length
+            : t === 'Readiness'
+              ? normalizeArrayOrObjectValues(readiness?.services).reduce((sum, item) => sum + normalizeArrayOrObjectValues(item.blocking).length, 0)
             : 0;
           return (
             <TouchableOpacity key={t}
@@ -2761,6 +2953,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       </ScrollView>
 
       <View style={{ flex: 1 }}>
+        {tab === 'Readiness'  && renderReadiness()}
         {tab === 'Messages'   && renderMessages()}
         {tab === 'Calendar'   && renderCalendar()}
         {tab === 'Services'   && renderServices()}
@@ -3147,6 +3340,38 @@ const s = StyleSheet.create({
   tabBadge: { backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   tabBadgeText: { fontSize: 10, fontWeight: '800', color: '#FFF' },
   tabContent: { padding: 16, paddingBottom: 40 },
+
+  // Readiness
+  readinessHeader: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  readinessMetric: { flex: 1, minHeight: 72, backgroundColor: '#0B1120', borderRadius: 10, borderWidth: 1, borderColor: '#1E2A40', alignItems: 'center', justifyContent: 'center' },
+  readinessMetricValue: { fontSize: 22, fontWeight: '900', color: '#F9FAFB', lineHeight: 26 },
+  readinessMetricLabel: { fontSize: 10, fontWeight: '800', color: '#6B7280', textTransform: 'uppercase', marginTop: 3 },
+  routeBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#07111F', borderRadius: 10, borderWidth: 1, borderColor: '#1E2A40', padding: 12, marginBottom: 10 },
+  routeDot: { width: 10, height: 10, borderRadius: 5 },
+  routeTitle: { fontSize: 13, fontWeight: '800', color: '#E5E7EB' },
+  routeSub: { fontSize: 11, color: '#94A3B8', marginTop: 2, lineHeight: 16 },
+  readinessNotice: { backgroundColor: '#2D2305', borderRadius: 10, borderWidth: 1, borderColor: '#B45309', padding: 10, marginBottom: 12 },
+  readinessNoticeText: { fontSize: 12, color: '#FBBF24', lineHeight: 17 },
+  readinessCard: { backgroundColor: '#0B1120', borderRadius: 12, borderWidth: 1, borderColor: '#243047', padding: 14, marginBottom: 12 },
+  readinessCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  readinessTitle: { fontSize: 15, fontWeight: '800', color: '#F9FAFB' },
+  readinessDate: { fontSize: 12, color: '#94A3B8', marginTop: 3 },
+  readinessScore: { width: 70, minHeight: 52, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  readinessScoreValue: { fontSize: 18, fontWeight: '900', lineHeight: 21 },
+  readinessScoreLabel: { fontSize: 9, fontWeight: '900', textTransform: 'uppercase', marginTop: 2 },
+  readinessGrid: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  readinessCell: { flex: 1, minHeight: 50, borderRadius: 8, backgroundColor: '#020617', borderWidth: 1, borderColor: '#1F2937', alignItems: 'center', justifyContent: 'center' },
+  readinessCellValue: { fontSize: 16, fontWeight: '900', color: '#E5E7EB' },
+  readinessCellLabel: { fontSize: 9, fontWeight: '800', color: '#64748B', textTransform: 'uppercase', marginTop: 2 },
+  readinessStatusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  readinessChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7, backgroundColor: '#2D2305', borderWidth: 1, borderColor: '#B45309' },
+  readinessChipOk: { backgroundColor: '#052E1A', borderColor: '#059669' },
+  readinessChipText: { fontSize: 11, fontWeight: '800', color: '#FBBF24' },
+  readinessChipTextOk: { color: '#34D399' },
+  blockerList: { gap: 4, borderTopWidth: 1, borderTopColor: '#1F2937', paddingTop: 10 },
+  blockerText: { fontSize: 12, color: '#CBD5E1', lineHeight: 17 },
+  blockerMore: { fontSize: 11, color: '#818CF8', fontWeight: '800', marginTop: 2 },
+  readyLine: { fontSize: 12, color: '#34D399', fontWeight: '800', borderTopWidth: 1, borderTopColor: '#1F2937', paddingTop: 10 },
 
   // Calendar
   calMonthHeader: { fontSize: 13, fontWeight: '800', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, marginTop: 8 },

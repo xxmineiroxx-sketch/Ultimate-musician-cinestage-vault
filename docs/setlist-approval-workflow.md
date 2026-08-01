@@ -22,6 +22,7 @@ flowchart TD
   F --> G["Assigned team members receive the approved setlist message"]
   G --> H["Assignment history records who served this month"]
   H --> I["Admin sees monthly assignment counts per person"]
+  I --> J["Service Readiness shows blockers before publishing"]
 ```
 
 ## Product Rules
@@ -37,6 +38,7 @@ flowchart TD
 - Monthly stats should help leaders rotate people fairly and avoid overusing the same members.
 - Any team member can suggest a song; it stays pending until Admin/Worship Leader approves it into the library.
 - Musicians can submit lyrics, chord charts, and instrument-specific notes as proposals; Admin/Worship Leader approval applies them live.
+- Service Readiness should show whether the service is ready across setlist approval, team confirmations, chart completeness, proposal review, stem readiness, and desktop/cloud processing route.
 
 ## Implemented Sync Surface
 
@@ -54,6 +56,7 @@ flowchart TD
 - `GET /sync/setlist/creators`: lists people allowed to create setlists.
 - `GET /sync/setlist/pending`: lists setlists awaiting approval.
 - `GET /sync/assignment-stats?month=YYYY-MM`: returns per-person assignment counts for the month.
+- `GET /sync/service-readiness?serviceId=&month=YYYY-MM`: returns a normalized readiness packet with service score, blockers, assignment counts, proposal gaps, chart gaps, stem job state, and desktop/cloud route.
 
 ## Implemented App Behavior
 
@@ -62,3 +65,4 @@ flowchart TD
 - Service Planner submissions include role metadata so the backend recognizes the permission.
 - Admin/Worship Leader approval publishes the plan to Playback.
 - Team roster management stays limited to Admin/Worship Leader roles.
+- Playback Admin Dashboard now includes a Readiness tab for leaders to inspect open blockers before publishing or rehearsal.

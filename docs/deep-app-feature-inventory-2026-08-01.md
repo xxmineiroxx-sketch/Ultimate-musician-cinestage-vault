@@ -364,8 +364,8 @@ Recommendation:
 
 ### P0 - Must do before adding more large features
 
-1. Build Service Readiness Dashboard.
-2. Normalize service packet data between Musician, Playback, Desktop, and Worker.
+1. Build Service Readiness Dashboard. Implemented in first Playback/Worker slice on 2026-08-01 with `/sync/service-readiness` and Playback Admin Readiness tab.
+2. Continue normalizing service packet data between Musician, Playback, Desktop, and Worker.
 3. Clean or archive duplicate ` 2.js` files after review.
 4. Add release env validation for localhost/secrets.
 5. Add Worker smoke tests for approval and stem-job state transitions.
@@ -415,12 +415,12 @@ The dashboard should become the bridge between Ultimate Musician, Ultimate Playb
 
 ### Worker
 
-- Add or normalize one `/sync/service-readiness?serviceId=...` endpoint.
+- Added one `/sync/service-readiness?serviceId=...` endpoint.
 - Response should include service meta, review status, team status, assignment stats, proposals, chart completeness, stem jobs, desktop route, and publish status.
 
 ### Playback
 
-- Add a compact readiness section in AdminDashboard/LeaderDashboard.
+- Added a compact readiness tab in AdminDashboard/LeaderDashboard.
 - For normal members, show only "My Readiness" on Home/Practice.
 
 ### Musician
