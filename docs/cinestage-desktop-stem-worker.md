@@ -62,6 +62,7 @@ flowchart TD
 
 - `queued_for_desktop`: desktop is online and should process.
 - `waiting_for_desktop`: no desktop processor is online.
+- `waiting_for_source`: desktop is online, but the job needs licensed/local source audio or a compliant YouTube preparation step.
 - `cloudflare_fallback`: job is allowed to be picked up by a fallback processor later.
 - `processing`: desktop is working.
 - `completed` or `ready_for_review`: stems and analysis are ready for inspection.
@@ -120,14 +121,58 @@ Important fields:
 
 ## Next Implementation Step
 
-Build the desktop worker loop:
+The first desktop worker loop now exists in `apps/ultimate_daw/src/main/workers/stemJobWorker.js`.
+
+Run it from the desktop app folder:
+
+```bash
+cd apps/ultimate_daw
+UM_SYNC_URL="https://your-sync-worker.example" \
+UM_ACCOUNT_EMAIL="account@example.com" \
+npm run worker:stems
+```
+
+For a single poll/processing pass:
+
+```bash
+cd apps/ultimate_daw
+UM_STEM_RUN_ONCE=true \
+UM_SYNC_URL="https://your-sync-worker.example" \
+UM_ACCOUNT_EMAIL="account@example.com" \
+npm run worker:stems:once
+```
+
+Supported environment:
+
+- `UM_SYNC_URL`: Cloudflare sync Worker base URL.
+- `UM_ACCOUNT_EMAIL`: account holder email used to match queued desktop jobs.
+- `UM_ACCOUNT_ID`: optional account/org ID.
+- `UM_DESKTOP_ID`: stable desktop worker ID. Defaults to the machine hostname.
+- `UM_DESKTOP_NAME`: display name in Admin/iPad status views.
+- `UM_STEM_CACHE_DIR`: local cache root. Defaults to `~/Music/Ultimate Musician/Stem Cache`.
+- `UM_STEM_MODEL`: Demucs model. Defaults to `htdemucs_6s`.
+- `UM_STEM_POLL_INTERVAL_MS`: job poll interval. Defaults to 60000.
+- `UM_STEM_ALLOW_YOUTUBE_DOWNLOAD`: off by default. Keep off unless a compliant source-prep/downloader is configured.
+
+Current worker behavior:
 
 1. Send heartbeat every 60 seconds.
 2. Poll `GET /sync/stem-jobs?processor=desktop&status=queued_for_desktop`.
-3. Download/prepare source audio.
+3. Download direct audio URLs or use local/file URLs as source audio.
 4. Run Demucs stem separation.
-5. Run BPM/key/section/waveform analysis.
-6. Upload or expose stem assets.
-7. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
-8. Save local cache metadata if the account holder keeps the processed song.
-9. After service expiration, call `POST /sync/stem-jobs/cleanup` and delete temporary local/app delivery copies.
+5. Save stems and a manifest in the account holder's local cache.
+6. Call `POST /sync/stem-job/update?id=...` with `status: ready_for_review`.
+7. Include `roleStemMap`, readiness flags, and local cache metadata.
+8. Call `POST /sync/stem-jobs/cleanup` so expired published jobs clear temporary metadata.
+
+## Delivery Gap To Close Next
+
+The desktop worker can now do local heavy processing, but team downloads still need a real delivery layer. The sync Worker accepts stem metadata, but there is not yet a durable processed-stem upload endpoint for desktop output.
+
+Use one of these next:
+
+- Cloudflare R2 temporary objects with signed URLs, deleted after the retention window.
+- Cloudflare Tunnel to the account desktop for direct temporary downloads.
+- LAN delivery for local rehearsal environments, with Cloudflare fallback when the desktop is offline.
+
+Until that layer is added, worker output is marked with `delivery: local_cache_only` and `downloadable: false`. That is deliberate so Playback does not pretend a local desktop path can be downloaded by an iPad.

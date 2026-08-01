@@ -13,56 +13,68 @@ function registerStemHandlers({ ipcMain }) {
   ipcMain.handle('stems:separate', async (event, payload) => {
     const { audioPath, outputDir, model = 'htdemucs_6s' } = payload;
 
-    // Ensure output directory exists
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    return new Promise((resolve, reject) => {
-      const args = ['-m', 'demucs', '--out', outputDir, '-n', model, audioPath];
-      const proc = spawn('python3', args);
-
-      function sendLine(line) {
+    return separateStems({
+      audioPath,
+      outputDir,
+      model,
+      onProgress(line) {
         if (line && !event.sender.isDestroyed()) {
           event.sender.send('stems:progress', { line });
         }
+      },
+    });
+  });
+}
+
+function separateStems({ audioPath, outputDir, model = 'htdemucs_6s', onProgress } = {}) {
+  if (!audioPath) return Promise.reject(new Error('audioPath is required'));
+  if (!outputDir) return Promise.reject(new Error('outputDir is required'));
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  return new Promise((resolve, reject) => {
+    const args = ['-m', 'demucs', '--out', outputDir, '-n', model, audioPath];
+    const proc = spawn('python3', args);
+
+    function sendLine(line) {
+      if (line && typeof onProgress === 'function') onProgress(line);
+    }
+
+    // Demucs prints progress to stderr.
+    proc.stderr.on('data', (chunk) => {
+      const lines = chunk.toString().split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) sendLine(trimmed);
+      }
+    });
+
+    proc.stdout.on('data', (chunk) => {
+      const lines = chunk.toString().split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) sendLine(trimmed);
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to launch python3: ${err.message}`));
+    });
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Demucs exited with code ${code}`));
+        return;
       }
 
-      // Demucs prints progress to stderr
-      proc.stderr.on('data', (chunk) => {
-        const lines = chunk.toString().split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed) sendLine(trimmed);
-        }
-      });
-
-      proc.stdout.on('data', (chunk) => {
-        const lines = chunk.toString().split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed) sendLine(trimmed);
-        }
-      });
-
-      proc.on('error', (err) => {
-        reject(new Error(`Failed to launch python3: ${err.message}`));
-      });
-
-      proc.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`Demucs exited with code ${code}`));
-          return;
-        }
-
-        try {
-          // Demucs outputs to: <outputDir>/<model>/<song_name>/*.wav
-          const stems = scanStemOutput(outputDir, model, audioPath);
-          resolve({ success: true, stems });
-        } catch (err) {
-          resolve({ success: true, stems: {} });
-        }
-      });
+      try {
+        const stems = scanStemOutput(outputDir, model, audioPath);
+        resolve({ success: true, stems });
+      } catch (err) {
+        resolve({ success: true, stems: {} });
+      }
     });
   });
 }
@@ -117,4 +129,10 @@ function buildStemMap(wavFiles) {
   return stems;
 }
 
-module.exports = { registerStemHandlers };
+module.exports = {
+  buildStemMap,
+  findWavFiles,
+  registerStemHandlers,
+  scanStemOutput,
+  separateStems,
+};

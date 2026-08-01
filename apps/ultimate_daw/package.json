@@ -13,7 +13,9 @@
     "dist": "vite build && electron-builder --mac --publish never",
     "dist:win": "vite build && electron-builder --win --publish never",
     "electron:dev": "cross-env UM_DEV_SERVER_URL=http://localhost:5173 electron .",
-    "electron": "electron ."
+    "electron": "electron .",
+    "worker:stems": "node src/main/workers/stemJobWorker.js",
+    "worker:stems:once": "cross-env UM_STEM_RUN_ONCE=true node src/main/workers/stemJobWorker.js"
   },
   "dependencies": {
     "electron-store": "^8.2.0",

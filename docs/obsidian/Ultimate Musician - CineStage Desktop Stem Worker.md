@@ -37,3 +37,19 @@ Product rule:
 
 Repo detail:
 - Full spec: `docs/cinestage-desktop-stem-worker.md`
+
+Desktop worker implementation added:
+- Repo path: `apps/ultimate_daw/src/main/workers/stemJobWorker.js`
+- Run command: `cd apps/ultimate_daw && UM_SYNC_URL="https://your-sync-worker.example" UM_ACCOUNT_EMAIL="account@example.com" npm run worker:stems`
+- Single pass command: `cd apps/ultimate_daw && UM_STEM_RUN_ONCE=true UM_SYNC_URL="https://your-sync-worker.example" UM_ACCOUNT_EMAIL="account@example.com" npm run worker:stems:once`
+
+Current limitation:
+- The desktop worker can separate stems locally and submit review-ready metadata.
+- Team download delivery still needs Cloudflare R2 signed URLs, Cloudflare Tunnel, or LAN delivery.
+- Until that is implemented, worker stems are marked `local_cache_only` and `downloadable: false`.
+- YouTube-only requests without a compliant source-prep step move to `waiting_for_source`.
+
+Desktop source decision:
+- Use repo `apps/ultimate_daw` as the source of truth.
+- iCloud `UltimateMusicianDesktop` is a useful reference for local stem cache, waveform cache, and settings bridge.
+- iCloud `UltimateMusicianDAW` is older than the repo DAW for this workflow.
