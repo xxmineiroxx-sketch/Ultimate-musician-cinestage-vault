@@ -27,6 +27,7 @@ __MACOSX/
 *.ipa
 *.apk
 *.zip
+!apps/primary_app/ultimate_musician_full_project_v3/mobile/assets/fat-channel-presets/Fat_Channel_Presets.zip
 .vscode/
 .idea/
 *.mp4
