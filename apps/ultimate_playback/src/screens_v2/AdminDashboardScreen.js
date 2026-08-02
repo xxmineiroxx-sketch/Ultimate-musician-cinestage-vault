@@ -131,7 +131,8 @@ const playbackGrantLabel = (role) => (
 );
 
 const ADMIN_LIBRARY_CACHE_KEY = '@up_admin_library_cache_v1';
-const TABS = ['Readiness', 'Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
+const ADMIN_TABS = ['Readiness', 'Messages', 'Calendar', 'Services', 'Team', 'Library', 'Proposals'];
+const LEAD_SINGER_TABS = ['Calendar', 'Services', 'Team', 'Library'];
 
 const ROLE_CHIPS = [
   'Worship Leader', 'Music Director', 'Lead Singer', 'Vocal Lead', 'Vocal BGV',
@@ -483,18 +484,22 @@ function isPastService(svc, today = todayDateStr()) {
 export default function AdminDashboardScreen({ navigation, route = {} }) {
   const insets = useSafeAreaInsets();
   const { mdRole, focusServiceId } = route.params || {};
-  // org_owner and admin have full access; manager can approve but not delete/grant; md is legacy
+  // Admin and Worship Leader have full access. Lead Singer gets scoped
+  // planning access only for services where they are assigned as lead singer.
   const isOrgOwner = mdRole === 'org_owner';
   const isAdmin    = mdRole === 'admin' || isOrgOwner;
-  // Worship Leader ('manager') and Music Director ('md') share the same access level
-  const isManager  = mdRole === 'manager' || mdRole === 'md';
-  // canApprove = org_owner, admin, worship_leader, md
-  const canApprove = isAdmin || isManager;
-  // add/edit members, add songs, create services — available to all elevated roles
-  const canManageMembers = isAdmin || isManager;
-  // Only Org Owner and Admin can delete services
-  const canDeleteServices = isAdmin;
+  const isWorshipLeader = mdRole === 'manager' || mdRole === 'worship_leader';
+  const isMusicDirector = mdRole === 'md';
+  const hasFullAccess = isAdmin || isWorshipLeader || isMusicDirector;
   const isLeadSingerPlanner = ['lead_singer', 'lead_vocal', 'vocal_lead', 'setlist_creator'].includes(mdRole);
+  const visibleTabs = isLeadSingerPlanner ? LEAD_SINGER_TABS : ADMIN_TABS;
+  const canApprove = hasFullAccess;
+  const canCreateServices = hasFullAccess;
+  const canDeleteServices = hasFullAccess;
+  const canManageRoster = hasFullAccess;
+  const canGrantRoles = hasFullAccess;
+  const canManageLibrary = hasFullAccess;
+  const canPlanAssignedServices = hasFullAccess || isLeadSingerPlanner;
 
   const isLeadSingerForService = (svcId) => {
     if (!isLeadSingerPlanner) return false;
@@ -513,6 +518,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState(null);
   const [error, setError]     = useState(null);
+
+  useEffect(() => {
+    if (!visibleTabs.includes(tab)) {
+      setTab(visibleTabs[0] || 'Services');
+    }
+  }, [tab, visibleTabs]);
 
   // Server data
   const [messages, setMessages] = useState([]);
@@ -986,6 +997,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Create service ──────────────────────────────────────────────────────
   const handleCreateService = async () => {
+    if (!canCreateServices) {
+      Alert.alert('Not allowed', 'Lead Singers can plan assigned services, but cannot create new services.');
+      return;
+    }
     if (!newSvcName.trim()) { Alert.alert('Required', 'Service name is required.'); return; }
     if (!newSvcDate.trim()) { Alert.alert('Required', 'Date is required (YYYY-MM-DD).'); return; }
     const normalizedTime = normalizeServiceTime(newSvcTime.trim());
@@ -1012,6 +1027,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   };
 
   const handleDeleteService = useCallback(async (svc) => {
+    if (!canDeleteServices) {
+      Alert.alert('Not allowed', 'Only Admins and Worship Leaders can delete services.');
+      return;
+    }
     if (!svc?.id) return;
     setDeletingServiceId(svc.id);
     try {
@@ -1038,7 +1057,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
     } finally {
       setDeletingServiceId(null);
     }
-  }, [loadAll]);
+  }, [canDeleteServices, loadAll]);
 
   const confirmDeleteService = useCallback((svc) => {
     if (!svc?.id) return;
@@ -1062,6 +1081,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const handleAddSong = async (song) => {
     const target = svcForSong || expandedSvc;
     if (!target) return;
+    if (!canPlanAssignedServices || (isLeadSingerPlanner && !isLeadSingerForService(target.id))) {
+      Alert.alert('Not allowed', 'Lead Singers can add songs only to services where they are assigned as Lead Singer.');
+      return;
+    }
     try {
       const plan = normalizePlan(plans[target.id] || { songs: [], team: [], notes: '' });
       const existingSongs = planSongs(plan);
@@ -1078,6 +1101,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Remove song ─────────────────────────────────────────────────────────
   const handleRemoveSong = async (svcId, songId) => {
+    if (!canPlanAssignedServices || (isLeadSingerPlanner && !isLeadSingerForService(svcId))) {
+      Alert.alert('Not allowed', 'Lead Singers can edit only services where they are assigned as Lead Singer.');
+      return;
+    }
     try {
       const plan = normalizePlan(plans[svcId] || { songs: [], team: [], notes: '' });
       plan.songs = planSongs(plan).filter(s => s.id !== songId);
@@ -1087,6 +1114,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Assign team member ──────────────────────────────────────────────────
   const handleAssign = async (person) => {
+    if (!assignTarget?.id || !canPlanAssignedServices || (isLeadSingerPlanner && !isLeadSingerForService(assignTarget.id))) {
+      Alert.alert('Not allowed', 'Lead Singers can assign team only for services where they are assigned as Lead Singer.');
+      return;
+    }
     if (!chipRole.trim()) { Alert.alert('Select Role', 'Tap a role chip first.'); return; }
     setSaving(true);
     try {
@@ -1133,6 +1164,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Remove team member from service ────────────────────────────────────
   const handleRemoveFromService = async (svcId, personId, role) => {
+    if (!canPlanAssignedServices || (isLeadSingerPlanner && !isLeadSingerForService(svcId))) {
+      Alert.alert('Not allowed', 'Lead Singers can edit only services where they are assigned as Lead Singer.');
+      return;
+    }
     try {
       const plan = normalizePlan(plans[svcId] || { songs: [], team: [], notes: '' });
       plan.team = planTeam(plan).filter(t => !(t.personId === personId && t.role === role));
@@ -1142,6 +1177,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Add member to people list (MD + Admin) ──────────────────────────────
   const handleAddMember = async () => {
+    if (!canManageRoster) {
+      Alert.alert('Not allowed', 'Lead Singers can assign existing team members, but cannot add new members.');
+      return;
+    }
     if (!newMemberName.trim()) { Alert.alert('Required', 'Name is required.'); return; }
     setSavingMember(true);
     try {
@@ -1182,6 +1221,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const [publishingId, setPublishingId] = useState(null);
 
   const handlePublish = async (svc) => {
+    if (!hasFullAccess) {
+      Alert.alert('Not allowed', 'Lead Singers submit setlists for Admin or Worship Leader approval.');
+      return;
+    }
     const plan = normalizePlan(plans[svc.id]);
     const team = planTeam(plan);
     if (team.length === 0) {
@@ -1210,6 +1253,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Assign vocal part to person ─────────────────────────────────────────
   const handleAssignVocalPart = async (svcId, songId, partKey, person) => {
+    if (!canPlanAssignedServices || (isLeadSingerPlanner && !isLeadSingerForService(svcId))) {
+      Alert.alert('Not allowed', 'Lead Singers can assign vocals only for services where they are assigned as Lead Singer.');
+      return;
+    }
     setSavingVocals(true);
     try {
       const svcVocals = { ...(vocalAssignments[svcId] || {}) };
@@ -1238,6 +1285,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Delete member (Admin only) ──────────────────────────────────────────
   const handleDeleteMember = (person) => {
+    if (!canManageRoster) {
+      Alert.alert('Not allowed', 'Lead Singers cannot remove team members.');
+      return;
+    }
     Alert.alert('Remove member?', `Remove ${person.name} from the team?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
@@ -1452,6 +1503,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Grant app role (Admin only) ─────────────────────────────────────────
   const handleGrantRole = async () => {
+    if (!canGrantRoles) {
+      Alert.alert('Not allowed', 'Only Admins and Worship Leaders can change team permissions.');
+      return;
+    }
     if (!showGrantRole || !grantingRole) return;
     setSavingGrant(true);
     try {
@@ -1474,6 +1529,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Edit member (Admin + Manager) ──────────────────────────────────────
   const handleEditMember = async () => {
+    if (!canManageRoster) {
+      Alert.alert('Not allowed', 'Lead Singers cannot edit team member profiles.');
+      return;
+    }
     if (!showEditMember || !editName.trim()) return;
     setSavingEdit(true);
     try {
@@ -1492,6 +1551,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Add song to library (Admin + Manager) ───────────────────────────────
   const handleAddSongToLibrary = async () => {
+    if (!canManageLibrary) {
+      Alert.alert('Not allowed', 'Lead Singers can add existing songs to a setlist, but cannot add songs to the library.');
+      return;
+    }
     if (!newSongTitle.trim()) { Alert.alert('Required', 'Song title is required.'); return; }
     setSavingNewSong(true);
     try {
@@ -1573,7 +1636,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
     : libraryAll;
 
   // ── New Service form (shared between Calendar + Services) ───────────────
-  const renderNewServiceForm = () => showNewService ? (
+  const renderNewServiceForm = () => canCreateServices && showNewService ? (
     <View style={s.formCard}>
       <Text style={s.formLabel}>Service Name</Text>
       <TextInput style={s.formInput} value={newSvcName} onChangeText={setNewSvcName}
@@ -1940,23 +2003,28 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
   // ── Render: Calendar — ONLY for creating service dates ──────────────────
   const renderCalendar = () => {
-    const markedDateSet = new Set(services.map(s => s.date).filter(Boolean));
+    const calendarServices = isLeadSingerPlanner
+      ? services.filter((svc) => isLeadSingerForService(svc.id))
+      : services;
+    const markedDateSet = new Set(calendarServices.map(s => s.date).filter(Boolean));
     const selectedSvc = calSelectedDate
-      ? services.find(s => s.date === calSelectedDate) || null
+      ? calendarServices.find(s => s.date === calSelectedDate) || null
       : null;
 
     function handleCalDayTap(dateStr) {
       setCalSelectedDate(dateStr);
-      const existing = services.find(s => s.date === dateStr);
+      const existing = calendarServices.find(s => s.date === dateStr);
       if (existing) {
         // Day already has a service — just show info, no editing here
         setShowNewService(false);
-      } else {
+      } else if (canCreateServices) {
         // Empty day → open create form
         setNewSvcDate(dateStr);
         setNewSvcName('');
         setNewSvcTime('');
         setShowNewService(true);
+      } else {
+        setShowNewService(false);
       }
     }
 
@@ -2004,7 +2072,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         )}
 
         {/* Create service form — shown for empty days */}
-        {showNewService && !selectedSvc && (
+        {canCreateServices && showNewService && !selectedSvc && (
           <View style={s.formCard}>
             <View style={s.formCardHeader}>
               <Text style={s.formCardTitle}>New Service — {newSvcDate}</Text>
@@ -2029,7 +2097,9 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         {services.length === 0 && !loading && !showNewService && (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>📅</Text>
-            <Text style={s.emptyText}>No services yet{'\n'}Tap any day to schedule one</Text>
+            <Text style={s.emptyText}>
+              {canCreateServices ? 'No services yet\nTap any day to schedule one' : 'No services available yet'}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -2053,8 +2123,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       const plan   = normalizePlan(plans[svc.id]);
       const songs  = planSongs(plan);
       const team   = planTeam(plan);
-      // Admin/Org Owner → Publish directly. Manager/MD → Submit for Approval.
-      const canPublishDirect = isAdmin;
+      const canPublishDirect = hasFullAccess;
 
       const card = (
         <View key={svc.id} style={[s.svc2Card, isOpen && { borderColor: '#8B5CF6' }]}>
@@ -2130,7 +2199,9 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         {allSvcs.length === 0 && !loading ? (
           <View style={s.empty}>
             <Text style={s.emptyIcon}>🗓</Text>
-            <Text style={s.emptyText}>No services yet.{'\n'}Create one from the Calendar tab.</Text>
+            <Text style={s.emptyText}>
+              {canCreateServices ? 'No services yet.\nCreate one from the Calendar tab.' : 'No assigned services yet.'}
+            </Text>
           </View>
         ) : (
           <View>
@@ -2188,33 +2259,37 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadAll} tintColor="#8B5CF6" />}
       >
         {/* ── Register / Invite Card ── */}
-        <View style={s.teamRegisterCard}>
-          <View style={s.teamRegisterTop}>
-            <View style={s.teamRegisterIconWrap}>
-              <Text style={s.teamRegisterIcon}>🔗</Text>
+        {canManageRoster ? (
+          <View style={s.teamRegisterCard}>
+            <View style={s.teamRegisterTop}>
+              <View style={s.teamRegisterIconWrap}>
+                <Text style={s.teamRegisterIcon}>🔗</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.teamRegisterTitle}>Invite Members</Text>
+                <Text style={s.teamRegisterSub}>Share the link or add manually below</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.teamRegisterTitle}>Invite Members</Text>
-              <Text style={s.teamRegisterSub}>Share the link or add manually below</Text>
+            <View style={s.teamRegisterLinkRow}>
+              <Text style={s.teamRegisterLink} numberOfLines={1}>{joinLink}</Text>
+              <TouchableOpacity
+                style={s.teamRegisterShareBtn}
+                onPress={() => Share.share({ message: `Join our team on Ultimate Playback: ${joinLink}` })}
+              >
+                <Text style={s.teamRegisterShareTxt}>Share</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <View style={s.teamRegisterLinkRow}>
-            <Text style={s.teamRegisterLink} numberOfLines={1}>{joinLink}</Text>
-            <TouchableOpacity
-              style={s.teamRegisterShareBtn}
-              onPress={() => Share.share({ message: `Join our team on Ultimate Playback: ${joinLink}` })}
-            >
-              <Text style={s.teamRegisterShareTxt}>Share</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        ) : null}
 
         {/* ── Add Member form ── */}
-        <TouchableOpacity style={s.teamAddBtn} onPress={() => setShowAddMember(v => !v)}>
-          <Text style={s.teamAddBtnTxt}>{showAddMember ? '✕  Cancel' : '+  Add Member'}</Text>
-        </TouchableOpacity>
+        {canManageRoster && (
+          <TouchableOpacity style={s.teamAddBtn} onPress={() => setShowAddMember(v => !v)}>
+            <Text style={s.teamAddBtnTxt}>{showAddMember ? '✕  Cancel' : '+  Add Member'}</Text>
+          </TouchableOpacity>
+        )}
 
-        {showAddMember && (
+        {canManageRoster && showAddMember && (
           <View style={s.formCard}>
             <Text style={s.formLabel}>Name *</Text>
             <TextInput style={s.formInput} value={newMemberName} onChangeText={setNewMemberName}
@@ -2244,10 +2319,18 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         )}
 
         {/* ── Permission notice ── */}
-        {isManager && !isAdmin && (
+        {isWorshipLeader && !isAdmin && (
           <View style={s.mdNoticeBanner}>
             <Text style={s.mdNoticeText}>
-              🛡 Manager: You can add, edit & assign members. Only Admins can delete or grant Admin roles.
+              🛡 Worship Leader: full access to services, team, library, approvals, and publishing.
+            </Text>
+          </View>
+        )}
+
+        {isLeadSingerPlanner && (
+          <View style={s.mdNoticeBanner}>
+            <Text style={s.mdNoticeText}>
+              🎤 Lead Singer: view the roster and assign existing members inside your assigned services. Roster add, edit, remove, and permissions stay with Admin/Worship Leader.
             </Text>
           </View>
         )}
@@ -2302,7 +2385,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
               </View>
               {/* Actions */}
               <View style={s.tmActions}>
-                {canManageMembers && (
+                {canManageRoster && (
                   <TouchableOpacity style={s.tmActionBtn} onPress={() => {
                     setShowEditMember(person);
                     setEditName(person.name || '');
@@ -2312,12 +2395,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                     <Text style={s.tmActionBtnTxt}>✏️</Text>
                   </TouchableOpacity>
                 )}
-                {canManageMembers && (
+                {canGrantRoles && (
                   <TouchableOpacity style={[s.tmActionBtn, s.tmActionBtnPurple]} onPress={() => { setShowGrantRole(person); setGrantingRole(''); }}>
                     <Text style={s.tmActionBtnTxt}>🔑</Text>
                   </TouchableOpacity>
                 )}
-                {isAdmin && (
+                {canManageRoster && (
                   <TouchableOpacity style={[s.tmActionBtn, s.tmActionBtnRed]} onPress={() => handleDeleteMember(person)}>
                     <Text style={[s.tmActionBtnTxt, { color: '#F87171' }]}>✕</Text>
                   </TouchableOpacity>
@@ -2356,8 +2439,8 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
         </View>
       )}
 
-      {/* Add Song to Library — Admin + Manager */}
-      {canManageMembers && (
+      {/* Add Song to Library — Admin/Worship Leader/Music Director */}
+      {canManageLibrary && (
         <>
           <TouchableOpacity
             style={[s.addBtn, { margin: 12, marginBottom: showAddSong ? 0 : 4 }]}
@@ -2466,7 +2549,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
             ) || '';
             navigation.navigate('ContentEditor', {
               song: item, serviceId: svcId, type: 'lyrics',
-              existing: item.lyrics || '', isAdmin: true,
+              existing: item.lyrics || '', isAdmin: hasFullAccess,
             });
           }}>
             <View style={s.songHeader}>
@@ -2793,7 +2876,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
 
     return (
       <View style={{ flex: 1 }}>
-        {canManageMembers && (
+        {hasFullAccess && (
           <TouchableOpacity
             style={[s.addBtn, { margin: 12, marginBottom: 4 }]}
             onPress={() => {
@@ -2886,7 +2969,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
               <Text style={s.adminBubbleText}>{r.message}</Text>
             </View>
           ))}
-          <Text style={s.replyLabel}>Reply as {isOrgOwner ? 'Org Owner' : isAdmin ? 'Admin' : isManager ? 'Manager' : 'Music Director'}</Text>
+          <Text style={s.replyLabel}>Reply as {isOrgOwner ? 'Org Owner' : isAdmin ? 'Admin' : isWorshipLeader ? 'Worship Leader' : 'Music Director'}</Text>
           <TextInput style={s.replyInput} value={replyText} onChangeText={setReplyText}
             placeholder="Type reply..." placeholderTextColor="#6B7280" multiline textAlignVertical="top" />
           <TouchableOpacity style={[s.replyBtn, sendingReply && s.replyBtnDisabled]}
@@ -2907,12 +2990,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
           <Text style={s.backText}>✕</Text>
         </TouchableOpacity>
         <View style={s.topCenter}>
-          <View style={[s.mdBadge, isAdmin && s.adminBadgeStyle]}>
+          <View style={[s.mdBadge, hasFullAccess && s.adminBadgeStyle]}>
             <Text style={s.mdBadgeText}>
-              {isOrgOwner ? '🏛 Org Owner' : isAdmin ? '👑 Admin' : mdRole === 'md' ? '🎼 Music Director' : isManager ? '🛡 Worship Leader' : '🎛 Panel'}
+              {isOrgOwner ? '🏛 Org Owner' : isAdmin ? '👑 Admin' : isWorshipLeader ? '🛡 Worship Leader' : mdRole === 'md' ? '🎼 Music Director' : isLeadSingerPlanner ? '🎤 Lead Singer' : '🎛 Panel'}
             </Text>
           </View>
-          <Text style={s.topBarTitle}>Admin Dashboard</Text>
+          <Text style={s.topBarTitle}>{isLeadSingerPlanner ? 'Service Planning' : 'Admin Dashboard'}</Text>
         </View>
         <TouchableOpacity onPress={loadAll}>
           <Text style={s.refreshText}>⟳</Text>
@@ -2929,7 +3012,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       {/* Tab bar */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={s.tabBar} contentContainerStyle={s.tabBarContent}>
-        {TABS.map(t => {
+        {visibleTabs.map(t => {
           const pendingCount = t === 'Proposals'
             ? proposals.filter(p => p.status === 'pending').length + pendingSetlists.length
             : t === 'Readiness'
@@ -3227,7 +3310,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
             <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
               Set service access for {showGrantRole?.name}
-              {isManager && !isAdmin ? '\n🎼 Worship Leader / MD: can grant Lead Singer or Service Planner access' : ''}
+              {(isWorshipLeader || isMusicDirector) && !isAdmin ? '\n🎼 Worship Leader / MD: full access, including Lead Singer and Service Planner permissions' : ''}
               {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, Lead Singer, or Service Planner' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>

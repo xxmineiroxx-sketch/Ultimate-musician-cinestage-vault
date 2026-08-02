@@ -6,14 +6,15 @@ Decision: CineStage/Ultimate Musician should treat setlist publishing as an appr
 
 Roles:
 - Admin: grants access, approves or rejects setlists.
-- Worship Leader: grants Lead Singer or Service Planner access, approves or rejects setlists.
-- Lead Singer: assigned to lead a specific service, builds that service setlist, assigns vocals and musicians, and submits it for inspection.
+- Worship Leader: full Admin Panel access for services, team, library, approvals, publishing, and Lead Singer assignment.
+- Lead Singer: assigned to lead a specific service, sees Calendar, Services, Team, and Library only, adds existing songs to the service setlist, assigns existing vocals/musicians, and submits it for inspection.
 - Team Member: receives approved setlists and is counted in monthly assignment history.
 
 Implemented in repo:
 - Cloudflare sync Worker now supports pending setlists, approval/rejection, creator grants, and monthly assignment stats.
 - Admin dashboard now supports assigning a service Lead Singer and shows each member's assignment count for the current month.
 - App UI now separates direct publishing from Submit for Approval, with Lead Singer shown as a planning entry point only for assigned services.
+- Lead Singer cannot create/delete services, manage roster members, grant permissions, or change the master song library.
 - Assigning a service Lead Singer sends that singer a direct message so they know they can create the setlist and assign the team.
 - Submitting a setlist creates an Admin Panel message; approval creates a message for assigned team members.
 - Everyone can suggest songs; suggestions stay pending until Admin/Worship Leader approves or rejects them.

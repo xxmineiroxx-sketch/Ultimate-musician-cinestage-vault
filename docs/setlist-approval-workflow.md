@@ -5,8 +5,8 @@ This workflow makes CineStage/Ultimate Musician the planning brain while keeping
 ## Roles
 
 - Admin: manages access, reviews setlists, approves or rejects publishing.
-- Worship Leader: can grant Lead Singer or Service Planner access, reviews setlists, approves or rejects publishing.
-- Lead Singer: assigned to lead a specific service, builds that service setlist, assigns vocals and musicians, and submits it for review.
+- Worship Leader: full Admin Panel access for services, team, library, approvals, publishing, and Lead Singer assignment.
+- Lead Singer: assigned to lead a specific service, can use Calendar, Services, Team, and Library views, adds existing songs to that service setlist, assigns existing vocals/musicians, and submits it for review.
 - Team Member: receives the approved setlist when assigned to the service.
 
 ## Flow
@@ -29,6 +29,9 @@ flowchart TD
 
 - A Lead Singer cannot directly publish to the whole team.
 - A Lead Singer can submit only for a service where they are assigned as Lead Singer.
+- A Lead Singer cannot create or delete services.
+- A Lead Singer cannot add, edit, remove, invite, or grant permissions to team members.
+- A Lead Singer cannot add or remove songs from the master library; they can only add existing library songs to the assigned service setlist.
 - Assigning a Lead Singer sends that singer a direct message and opens their setlist planning entry point.
 - Submitting a completed setlist creates an Admin Panel message for Admin/Worship Leader inspection.
 - Approval turns a pending setlist into the service plan that members receive.
@@ -62,6 +65,7 @@ flowchart TD
 
 - Admin and Worship Leader can assign Lead Singer from a service roster.
 - Lead Singer sees a Setlist Planning entry point and can edit only services where they are assigned as Lead Singer.
+- Lead Singer Admin Panel is limited to Calendar, Services, Team, and Library. Messages, Readiness, and Proposals stay hidden.
 - Service Planner submissions include role metadata so the backend recognizes the permission.
 - Admin/Worship Leader approval publishes the plan to Playback.
 - Team roster management stays limited to Admin/Worship Leader roles.
