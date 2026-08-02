@@ -702,15 +702,24 @@ export default function HomeScreen({ navigation }) {
         } finally { clearTimeout(_tid); }
         if (roleRes?.ok) {
           const data = await roleRes.json();
-          // Use grantedRole (Playback permission: md/admin) if available, else org role
-          const role = normalizeGrantRole(data.grantedRole || null);
+          // Use Playback grant first, then org role/profile fallback. A sparse
+          // Worker response must not hide an already-known admin panel.
+          const role = normalizeGrantRole(
+            data.grantedRole ||
+            data.role ||
+            data.orgRole ||
+            userProfile.grantedRole ||
+            userProfile.role ||
+            userProfile.orgRole ||
+            null
+          );
           if (role) {
             setMdRole(role);
             if (userProfile.grantedRole !== role) {
               await saveUserProfile({ ...userProfile, grantedRole: role });
             }
           } else {
-            setMdRole(null);
+            setMdRole((prevRole) => prevRole || null);
           }
         }
       } catch (_) {}

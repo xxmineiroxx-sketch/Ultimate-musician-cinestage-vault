@@ -2482,6 +2482,35 @@ async function handleGet(env, store, path, url) {
   }
 
   if (path === '/sync/people') return json(store.people);
+  if (path === '/sync/role') {
+    const email = normalizeIdentifier(url.searchParams.get('email') || '');
+    const person = findPerson(store, { email, identifier: email }) || {};
+    const grant = email ? store.grants?.[email] || {} : {};
+    const user = email ? store.users?.[lookupKey(email)] || {} : {};
+    const grantedRole = grant.grantedRole || grant.role || user.grantedRole || person.grantedRole || '';
+    const orgRole = user.orgRole || person.orgRole || person.role || '';
+    const roles = [
+      ...(Array.isArray(person.roles) ? person.roles : []),
+      ...(Array.isArray(grant.roles) ? grant.roles : []),
+      person.roleAssignments,
+      grant.roleAssignments,
+      grantedRole,
+      orgRole,
+    ].flatMap((role) => String(role || '').split(/[,/|]/g))
+      .map((role) => role.trim())
+      .filter(Boolean);
+
+    return json({
+      ok: true,
+      email,
+      role: grantedRole || orgRole || roles[0] || '',
+      grantedRole,
+      orgRole,
+      roles: [...new Set(roles)],
+      roleAssignments: person.roleAssignments || grant.roleAssignments || roles.join(', '),
+      canCreateSetlists: Boolean(grant.canCreateSetlists || canCreateSetlist(store, person, '', {})),
+    });
+  }
   if (path === '/sync/cinestage/desktops' || path === '/sync/desktop/workers') {
     return json(Object.values(store.desktopWorkers || {}));
   }
