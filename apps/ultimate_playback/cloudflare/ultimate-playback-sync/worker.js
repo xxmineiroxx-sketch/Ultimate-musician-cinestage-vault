@@ -112,6 +112,10 @@ function collectionItems(value) {
   return [];
 }
 
+function stemJobItems(store = {}) {
+  return collectionItems(store.stemJobs).filter((job) => job && typeof job === 'object');
+}
+
 function personRoleKeys(person = {}) {
   const values = [
     person.role,
@@ -1303,7 +1307,7 @@ function visibleStemJobs(store, url) {
   const processor = String(url.searchParams.get('processor') || '').trim();
   const ownerEmail = normalizeIdentifier(url.searchParams.get('ownerEmail') || url.searchParams.get('accountEmail') || '');
   const serviceId = String(url.searchParams.get('serviceId') || '').trim();
-  return (store.stemJobs || []).filter((job) => (
+  return stemJobItems(store).filter((job) => (
     (status === 'all' || !status || job.status === status) &&
     (!processor || job.processor === processor) &&
     (!ownerEmail || normalizeIdentifier(job.ownerEmail) === ownerEmail) &&
@@ -1314,7 +1318,7 @@ function visibleStemJobs(store, url) {
 function findStemJob(store, url) {
   const id = String(url.searchParams.get('id') || '').trim();
   if (!id) return null;
-  return (store.stemJobs || []).find((job) => job.id === id) || null;
+  return stemJobItems(store).find((job) => job.id === id) || null;
 }
 
 function stemJobClaimExpired(job = {}, now = Date.now()) {
@@ -1422,7 +1426,7 @@ async function handleCreateStemJob(request, env, store) {
   const body = await readJson(request);
   const job = normalizeStemJob(body, store);
   if (!job.sourceUrl) return json({ ok: false, error: 'sourceUrl or YouTube URL is required' }, 400);
-  store.stemJobs ||= [];
+  store.stemJobs = stemJobItems(store);
   store.stemJobs.unshift(job);
 
   addSystemMessage(store, {
@@ -1525,7 +1529,7 @@ async function handleUpdateStemJob(request, env, store, url) {
 
 async function handleClaimStemJob(request, env, store, url) {
   const body = await readJson(request);
-  const job = findStemJob(store, url) || (store.stemJobs || []).find((candidate) => (
+  const job = findStemJob(store, url) || stemJobItems(store).find((candidate) => (
     candidate.status === 'queued_for_desktop' &&
     candidate.processor === 'desktop' &&
     (!body.ownerEmail || normalizeIdentifier(candidate.ownerEmail) === normalizeIdentifier(body.ownerEmail)) &&
@@ -1670,7 +1674,7 @@ async function handleCleanupStemJobs(request, env, store) {
   const body = await readJson(request);
   const dryRun = body.dryRun !== false;
   const now = Date.now();
-  const expiredJobs = (store.stemJobs || []).filter((job) => (
+  const expiredJobs = stemJobItems(store).filter((job) => (
     job.retention?.expiresAt &&
     Date.parse(job.retention.expiresAt) <= now &&
     !['cleaned', 'archived_metadata'].includes(job.retention?.cleanupStatus)
