@@ -19,6 +19,27 @@ function Spinner() {
   );
 }
 
+function normalizeSections(data) {
+  if (Array.isArray(data?.sections)) return data.sections;
+  if (Array.isArray(data?.lyrics)) return data.lyrics;
+  const raw = typeof data?.lyrics === 'string' ? data.lyrics : '';
+  if (!raw) return [];
+  const sections = [];
+  let current = null;
+  for (const line of raw.split('\n')) {
+    const match = line.match(/^\[(.+?)\]$/);
+    if (match) {
+      if (current) sections.push(current);
+      current = { label: match[1], text: '' };
+    } else {
+      if (!current) current = { label: '', text: '' };
+      current.text = current.text ? `${current.text}\n${line}` : line;
+    }
+  }
+  if (current) sections.push(current);
+  return sections.filter((section) => section.label || String(section.text || '').trim());
+}
+
 export default function LivePerformanceScreen() {
   const navigate = useNavigate();
   const [liveData, setLiveData] = useState(null);
@@ -56,7 +77,7 @@ export default function LivePerformanceScreen() {
     return () => clearInterval(pollRef.current);
   }, [fetchLiveStatus]);
 
-  const sections = liveData?.sections || liveData?.lyrics || [];
+  const sections = normalizeSections(liveData);
   const currentSection = sections[sectionIndex] || null;
   const hasPrev = sectionIndex > 0;
   const hasNext = sectionIndex < sections.length - 1;
@@ -86,18 +107,18 @@ export default function LivePerformanceScreen() {
     );
   }
 
-  // Error state
-  if (error && !liveData) {
+  // Error / offline state
+  if ((error && !liveData) || !liveData?.isLive) {
     return (
       <div className="h-full bg-black flex flex-col items-center justify-center gap-6 px-8 text-center">
-        <div className="w-16 h-16 rounded-full bg-red-900/30 flex items-center justify-center">
-          <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center border border-slate-800">
+          <svg className="w-8 h-8 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.924-.833-2.694 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
           </svg>
         </div>
         <div>
-          <p className="text-white text-xl font-semibold">No live feed</p>
-          <p className="text-slate-400 mt-2">{error}</p>
+          <p className="text-white text-xl font-semibold">No live performance active</p>
+          <p className="text-slate-400 mt-2">{error || 'Use Setlist Runner to start a live broadcast.'}</p>
         </div>
         <button
           onClick={() => navigate(-1)}

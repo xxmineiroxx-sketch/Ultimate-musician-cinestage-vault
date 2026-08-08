@@ -118,3 +118,16 @@ Last local scan after VS recovery:
 - Desktop/laptop workers do heavy processing.
 - Mobile apps receive ready status and musician-specific packages.
 - Service exports should expire after the service plus the configured TTL, defaulting to 2 hours.
+
+## Desktop Live And Setlist Repair
+
+August 8, 2026 desktop audit fixes:
+
+- `apps/ultimate_daw` now uses the live Cloudflare Worker URL instead of the older Pages URL.
+- Cloudflare Worker now exposes `/sync/live-status` for Live Performance GET/POST state.
+- Setlist Runner publishes the active song to `/sync/live-status` when the runner starts/stops or changes songs.
+- Live Performance now shows a clear offline state when nothing is live instead of rendering an empty live screen.
+- Setlist and Setlist Runner now accept the Worker array response from `/sync/setlist`.
+- Assignment service resolution now prefers `service_id` before assignment `id`, avoiding `service_person` ids being used as service ids.
+- Pending assignment rows are treated as valid rehearsal/run access until the musician responds.
+- Worker now exposes `/sync/services` plus service proposal approve/reject routes used by the desktop Admin and Leader dashboards.

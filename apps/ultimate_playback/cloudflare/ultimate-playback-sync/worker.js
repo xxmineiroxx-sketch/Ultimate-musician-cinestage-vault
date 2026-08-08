@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.1-admin-role-guard';
+const WORKER_VERSION = '2.4.2-live-status';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -37,6 +37,7 @@ function defaultStore() {
     messages: [],
     grants: {},
     proposals: [],
+    pendingServices: [],
     pendingSongs: [],
     pendingSetlists: [],
     blockouts: [],
@@ -46,6 +47,7 @@ function defaultStore() {
     sourceUploads: {},
     stemJobs: [],
     desktopWorkers: {},
+    liveStatus: null,
   };
 }
 
@@ -837,6 +839,86 @@ function serviceMapFromStore(store) {
   return map;
 }
 
+function normalizeServiceProposal(body = {}) {
+  const submittedBy = body.submittedBy || body.submitter || {};
+  const id = String(body.id || body.serviceId || `svc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim();
+  const name = String(body.name || body.title || body.serviceName || 'Service').trim();
+  return {
+    id,
+    name,
+    title: name,
+    date: String(body.date || body.serviceDate || '').trim(),
+    time: String(body.time || body.serviceTime || '').trim(),
+    type: String(body.type || body.serviceType || 'standard').trim(),
+    serviceType: String(body.type || body.serviceType || 'standard').trim(),
+    notes: String(body.notes || '').trim(),
+    status: body.status || 'pending_approval',
+    created_by_email: normalizeIdentifier(body.created_by_email || submittedBy.email),
+    submitted_by: normalizeIdentifier(body.submitted_by || submittedBy.email),
+    submittedBy: {
+      email: normalizeIdentifier(submittedBy.email || body.created_by_email || body.submitted_by),
+      name: String(submittedBy.name || body.created_by_name || 'Service Planner').trim(),
+    },
+    createdAt: body.createdAt || nowIso(),
+    updatedAt: nowIso(),
+  };
+}
+
+async function handleProposeService(request, env, store) {
+  const body = await readJson(request);
+  const service = normalizeServiceProposal(body);
+  if (!service.name || !service.date) {
+    return json({ ok: false, error: 'service name and date are required' }, 400);
+  }
+  store.pendingServices ||= [];
+  const idx = store.pendingServices.findIndex((item) => item.id === service.id);
+  if (idx >= 0) store.pendingServices[idx] = { ...store.pendingServices[idx], ...service };
+  else store.pendingServices.unshift(service);
+  addSystemMessage(store, {
+    from_email: service.submittedBy.email,
+    from_name: service.submittedBy.name,
+    subject: `Service proposal: ${service.name}`,
+    message: `${service.submittedBy.name || 'Service Planner'} proposed ${service.name} for ${service.date}.`,
+    to: 'admin',
+    metadata: { type: 'service_proposed', serviceId: service.id, status: service.status },
+  });
+  await saveStore(env, store);
+  return json({ ok: true, service });
+}
+
+async function handleApproveService(request, env, store, url) {
+  const id = String(url.searchParams.get('id') || '').trim();
+  const body = await readJson(request);
+  store.pendingServices ||= [];
+  const idx = store.pendingServices.findIndex((item) => item.id === id);
+  if (idx < 0) return json({ ok: false, error: 'pending service not found' }, 404);
+  const service = {
+    ...store.pendingServices[idx],
+    status: 'approved',
+    approvedAt: nowIso(),
+    approvedBy: body.approvedBy || null,
+    updatedAt: nowIso(),
+  };
+  upsertService(store, service);
+  store.pendingServices.splice(idx, 1);
+  await saveStore(env, store);
+  return json({ ok: true, service });
+}
+
+async function handleRejectService(request, env, store, url) {
+  const id = String(url.searchParams.get('id') || '').trim();
+  const body = await readJson(request);
+  store.pendingServices ||= [];
+  const service = store.pendingServices.find((item) => item.id === id);
+  if (!service) return json({ ok: false, error: 'pending service not found' }, 404);
+  service.status = 'rejected';
+  service.rejectedAt = nowIso();
+  service.rejectReason = String(body.reason || body.note || '').trim();
+  service.updatedAt = nowIso();
+  await saveStore(env, store);
+  return json({ ok: true, service });
+}
+
 function assignmentsFor(store, email) {
   const person = findPerson(store, { email, identifier: email });
   if (!person) return [];
@@ -893,6 +975,75 @@ function setlistFor(store, serviceId) {
     hasLyrics: Boolean(song.lyrics),
     hasChordChart: Boolean(song.chordChart || song.chordSheet),
   }));
+}
+
+function parseLiveSections(song = {}, body = {}) {
+  if (Array.isArray(body.sections)) return body.sections;
+  if (Array.isArray(song.sections)) return song.sections;
+  const raw = body.lyrics || song.lyrics || '';
+  if (!raw) return [];
+  const sections = [];
+  let current = null;
+  for (const line of String(raw).split('\n')) {
+    const match = line.match(/^\[(.+?)\]$/);
+    if (match) {
+      if (current) sections.push(current);
+      current = { label: match[1], text: '' };
+    } else {
+      if (!current) current = { label: '', text: '' };
+      current.text = current.text ? `${current.text}\n${line}` : line;
+    }
+  }
+  if (current) sections.push(current);
+  return sections.filter((section) => section.label || String(section.text || '').trim());
+}
+
+function liveStatusPayload(store, body = {}) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+  const explicit = (...keys) => {
+    for (const key of keys) {
+      if (has(key)) return body[key];
+    }
+    return undefined;
+  };
+  const explicitServiceId = explicit('serviceId', 'service_id');
+  const explicitSongId = explicit('songId', 'song_id', 'id');
+  const serviceId = String(explicitServiceId ?? '').trim();
+  const songId = String(explicitSongId ?? '').trim();
+  const service = serviceId ? serviceMapFromStore(store)[serviceId] || null : null;
+  const setlist = serviceId ? setlistFor(store, serviceId) : [];
+  const song = songId
+    ? setlist.find((item) => String(item.id) === songId) || null
+    : (setlist[Number(body.songIndex || body.index || 0)] || null);
+  const previous = store.liveStatus || {};
+  const title = explicit('title', 'songTitle') ?? song?.title ?? previous.title ?? previous.songTitle ?? 'Service';
+  const artist = explicit('artist') ?? song?.artist ?? previous.artist ?? '';
+  return {
+    ok: true,
+    isLive: has('isLive') ? Boolean(body.isLive) : Boolean(previous.isLive),
+    serviceId: explicitServiceId !== undefined ? serviceId : (previous.serviceId || ''),
+    serviceName: explicit('serviceName') ?? service?.name ?? service?.title ?? previous.serviceName ?? '',
+    songId: explicitSongId !== undefined ? songId : (song?.id || previous.songId || ''),
+    songIndex: Number.isFinite(Number(body.songIndex || body.index))
+      ? Number(body.songIndex || body.index)
+      : Number(previous.songIndex || 0),
+    title,
+    songTitle: title,
+    artist,
+    key: explicit('key') ?? song?.key ?? previous.key ?? '',
+    bpm: explicit('bpm', 'tempo') ?? song?.tempo ?? previous.bpm ?? '',
+    tempo: explicit('tempo', 'bpm') ?? song?.tempo ?? previous.tempo ?? '',
+    youtubeUrl: explicit('youtubeUrl', 'youtube_url') ?? song?.mediaUrl ?? song?.audioUrl ?? previous.youtubeUrl ?? '',
+    sections: parseLiveSections(song || {}, body),
+    updatedAt: nowIso(),
+  };
+}
+
+async function handleLiveStatus(request, env, store) {
+  const body = await readJson(request);
+  store.liveStatus = liveStatusPayload(store, body);
+  await saveStore(env, store);
+  return json(store.liveStatus);
 }
 
 function pickFirstNonEmpty(...values) {
@@ -2306,6 +2457,7 @@ async function handlePost(request, env, store, path, url) {
     return json({ ok: false, error: 'Auth route not found.' }, 404);
   }
 
+  if (path === '/sync/live-status') return handleLiveStatus(request, env, store);
   if (path === '/sync/publish') return handlePublish(request, env, store);
   if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
     return handleDesktopHeartbeat(request, env, store);
@@ -2336,6 +2488,9 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/setlist/submit') return handleSubmitSetlist(request, env, store);
   if (path === '/sync/setlist/approve') return handleApproveSetlist(request, env, store, url);
   if (path === '/sync/setlist/reject') return handleRejectSetlist(request, env, store, url);
+  if (path === '/sync/services/propose') return handleProposeService(request, env, store);
+  if (path === '/sync/services/approve') return handleApproveService(request, env, store, url);
+  if (path === '/sync/services/reject') return handleRejectService(request, env, store, url);
   if (path === '/sync/grant' || path === '/sync/setlist/creator') {
     const body = await readJson(request);
     const email = normalizeIdentifier(body.email);
@@ -2640,6 +2795,16 @@ async function handleGet(env, store, path, url) {
   if (path === '/sync/cinestage/desktops' || path === '/sync/desktop/workers') {
     return json(Object.values(store.desktopWorkers || {}));
   }
+  if (path === '/sync/live-status') {
+    return json(store.liveStatus || {
+      ok: true,
+      isLive: false,
+      title: '',
+      songTitle: '',
+      sections: [],
+      updatedAt: null,
+    });
+  }
   if (path === '/sync/stem-jobs') {
     return json(visibleStemJobs(store, url).map(stemJobPublicPayload));
   }
@@ -2668,6 +2833,13 @@ async function handleGet(env, store, path, url) {
     const status = String(url.searchParams.get('status') || 'pending').trim();
     return json((store.pendingSetlists || []).filter((entry) => (
       status === 'all' ? true : entry.status === status
+    )));
+  }
+  if (path === '/sync/services') return json(store.services || []);
+  if (path === '/sync/services/pending') {
+    const status = String(url.searchParams.get('status') || 'all').trim();
+    return json((store.pendingServices || []).filter((service) => (
+      status === 'all' ? true : service.status === status
     )));
   }
   if (path === '/sync/library/pending-songs') {

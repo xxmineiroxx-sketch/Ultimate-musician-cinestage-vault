@@ -139,10 +139,11 @@ function SongTypeBadge({ type }) {
 export default function SetlistRunnerScreen() {
   const location  = useLocation();
   const navigate  = useNavigate();
-  const { profile } = useAuth() || {};
+  const { user, profile } = useAuth() || {};
 
   const [songs, setSongs]           = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [activeServiceId, setActiveServiceId] = useState(location.state?.serviceId || '');
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState('');
 
@@ -185,18 +186,52 @@ export default function SetlistRunnerScreen() {
         let serviceId = location.state?.serviceId;
         if (!serviceId) {
           let cached = await store.getAssignments();
-          const list = Array.isArray(cached) ? cached : (cached?.assignments || []);
-          // Prefer first upcoming accepted service
+          let list = Array.isArray(cached) ? cached : (cached?.assignments || []);
+          if (!list.length) {
+            const email = profile?.email || user?.email || user?.identifier || '';
+            const name = profile?.name || user?.name || '';
+            if (email) {
+              const params = new URLSearchParams({ email });
+              if (name) params.set('name', name);
+              const assignmentsRes = await fetch(`${SYNC_URL}/sync/assignments?${params.toString()}`, {
+                headers: syncHeaders(),
+              });
+              if (assignmentsRes.ok) {
+                const assignmentsData = await assignmentsRes.json();
+                list = Array.isArray(assignmentsData) ? assignmentsData : (assignmentsData?.assignments || []);
+                if (list.length) await store.setAssignments(list);
+              }
+            }
+          }
+          if (!list.length) {
+            const servicesRes = await fetch(`${SYNC_URL}/sync/services`, { headers: syncHeaders() });
+            if (servicesRes.ok) {
+              const servicesData = await servicesRes.json();
+              const services = Array.isArray(servicesData) ? servicesData : (servicesData?.services || []);
+              list = services.map((service) => ({
+                ...service,
+                service_id: service.id,
+                service_name: service.name || service.title || 'Service',
+                service_date: service.date || service.serviceDate || '',
+                service_time: service.time || service.serviceTime || '',
+                status: service.status || 'accepted',
+              }));
+              if (list.length) await store.setAssignments(list);
+            }
+          }
+          // Prefer first upcoming service. The Worker currently marks assignment
+          // rows as pending until the musician responds, but they are still valid
+          // choices for rehearsal and runner access.
           const now = Date.now();
           const accepted = list.filter(a => {
             const status = (a.status || '').toLowerCase();
-            const accepted = !status || status === 'accepted' || status === 'confirmed';
-            const date = a.serviceDate || a.date;
+            const accepted = !status || status === 'accepted' || status === 'confirmed' || status === 'pending';
+            const date = a.serviceDate || a.service_date || a.date;
             const upcoming = !date || new Date(date).getTime() >= now - 86400000;
             return accepted && upcoming;
           });
           const first = accepted[0] || list[0];
-          serviceId = first?.serviceId || first?.id || first?.service_id;
+          serviceId = first?.serviceId || first?.service_id || first?.id;
         }
 
         if (!serviceId) {
@@ -204,13 +239,14 @@ export default function SetlistRunnerScreen() {
           setLoading(false);
           return;
         }
+        setActiveServiceId(serviceId);
 
         const res = await fetch(`${SYNC_URL}/sync/setlist?serviceId=${encodeURIComponent(serviceId)}`, {
           headers: syncHeaders(),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const list = data.songs || data.setlist || [];
+        const list = Array.isArray(data) ? data : (data.songs || data.setlist || []);
         if (!list.length) {
           setError('This setlist has no songs.');
         } else {
@@ -263,6 +299,29 @@ export default function SetlistRunnerScreen() {
     if (currentIndex < songs.length - 1) goTo(currentIndex + 1);
     else if (repeat) goTo(0);
   }, [currentIndex, goTo, repeat, songs.length]);
+
+  // Publish current runner state so Live Performance mirrors the active song.
+  useEffect(() => {
+    if (!currentSong) return;
+    const body = {
+      isLive: isPlaying,
+      serviceId: activeServiceId,
+      songId: currentSong.id || '',
+      songIndex: currentIndex,
+      title: currentSong.title || currentSong.songTitle || 'Untitled',
+      artist: currentSong.artist || currentSong.artistName || '',
+      key: displayKey || baseKey || '',
+      bpm: currentSong.bpm || currentSong.tempo || '',
+      tempo: currentSong.tempo || currentSong.bpm || '',
+      youtubeUrl: getSongYouTubeUrl(currentSong) || '',
+      lyrics: rawLyrics,
+    };
+    fetch(`${SYNC_URL}/sync/live-status`, {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify(body),
+    }).catch(() => {});
+  }, [activeServiceId, baseKey, currentIndex, currentSong, displayKey, isPlaying, rawLyrics]);
 
   // Auto-advance (continuous mode) — advance when isPlaying and user is at last section
   useEffect(() => {
@@ -408,12 +467,25 @@ export default function SetlistRunnerScreen() {
           Back
         </button>
 
-        <div className="flex-1 text-slate-300 text-sm font-semibold text-center">
-          Song <span className="text-white">{currentIndex + 1}</span>
-          <span className="text-slate-500"> of {songs.length}</span>
-        </div>
+          <div className="flex-1 text-slate-300 text-sm font-semibold text-center">
+            Song <span className="text-white">{currentIndex + 1}</span>
+            <span className="text-slate-500"> of {songs.length}</span>
+          </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => setIsPlaying(v => !v)}
+            title={isPlaying ? 'End live broadcast' : 'Start live broadcast'}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+              isPlaying
+                ? 'bg-red-700/80 text-white'
+                : 'bg-emerald-700/70 text-emerald-100 hover:bg-emerald-600/80'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${isPlaying ? 'bg-white animate-pulse' : 'bg-emerald-300'}`} />
+            {isPlaying ? 'Live On' : 'Go Live'}
+          </button>
+
           {/* Media mode toggle */}
           <button
             onClick={() => setMediaModeEnabled(v => !v)}

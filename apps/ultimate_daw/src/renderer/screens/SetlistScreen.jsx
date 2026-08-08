@@ -376,7 +376,7 @@ function SongCard({ song, index, navigate, selectedServiceId, isLeader, isInstru
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function SetlistScreen() {
   const navigate = useNavigate();
-  const { profile } = useAuth() || {};
+  const { user, profile } = useAuth() || {};
   const { registerScreenContext } = useBrain();
 
   const userRole = (
@@ -408,12 +408,35 @@ export default function SetlistScreen() {
       setAssLoading(true);
       try {
         let cached = await store.getAssignments();
-        if (!cached) {
-          const res = await fetch(`${SYNC_URL}/sync/assignments`, { headers: syncHeaders() });
-          if (res.ok) {
-            cached = await res.json();
-            await store.setAssignments(cached);
+        if (!Array.isArray(cached) || cached.length === 0) {
+          const email = profile?.email || user?.email || user?.identifier || '';
+          const name = profile?.name || user?.name || '';
+          const params = new URLSearchParams();
+          if (email) params.set('email', email);
+          if (name) params.set('name', name);
+          if (params.toString()) {
+            const res = await fetch(`${SYNC_URL}/sync/assignments?${params.toString()}`, { headers: syncHeaders() });
+            if (res.ok) {
+              const remote = await res.json();
+              cached = Array.isArray(remote) ? remote : (remote?.assignments || []);
+            }
           }
+          if (!Array.isArray(cached) || cached.length === 0) {
+            const servicesRes = await fetch(`${SYNC_URL}/sync/services`, { headers: syncHeaders() });
+            if (servicesRes.ok) {
+              const remote = await servicesRes.json();
+              const services = Array.isArray(remote) ? remote : (remote?.services || []);
+              cached = services.map((service) => ({
+                ...service,
+                service_id: service.id,
+                service_name: service.name || service.title || 'Service',
+                service_date: service.date || service.serviceDate || '',
+                service_time: service.time || service.serviceTime || '',
+                status: service.status || 'accepted',
+              }));
+            }
+          }
+          await store.setAssignments(cached);
         }
         const list = Array.isArray(cached) ? cached : (cached?.assignments || []);
 
@@ -421,21 +444,21 @@ export default function SetlistScreen() {
         const upcoming = list
           .filter(a => {
             const status = (a.status || '').toLowerCase();
-            const isAccepted = !status || status === 'accepted' || status === 'confirmed';
-            const date = a.serviceDate || a.date;
+            const isAccepted = !status || status === 'accepted' || status === 'confirmed' || status === 'pending';
+            const date = a.serviceDate || a.service_date || a.date;
             const isUpcoming = !date || new Date(date).getTime() >= now - 86400000;
             return isAccepted && isUpcoming;
           })
           .sort((a, b) => {
-            const da = new Date(a.serviceDate || a.date || 0).getTime();
-            const db = new Date(b.serviceDate || b.date || 0).getTime();
+            const da = new Date(a.serviceDate || a.service_date || a.date || 0).getTime();
+            const db = new Date(b.serviceDate || b.service_date || b.date || 0).getTime();
             return da - db;
           });
 
         setAssignments(list);
         const firstId = (upcoming[0] || list[0])?.serviceId ||
-                        (upcoming[0] || list[0])?.id ||
-                        (upcoming[0] || list[0])?.service_id;
+                        (upcoming[0] || list[0])?.service_id ||
+                        (upcoming[0] || list[0])?.id;
         if (firstId) setSelectedServiceId(String(firstId));
       } catch (_) {
         setError('Could not load assignments.');
@@ -564,10 +587,10 @@ export default function SetlistScreen() {
                   <option value="">No services available</option>
                 )}
                 {assignments.map(a => {
-                  const id    = a.serviceId || a.id || a.service_id;
+                  const id    = a.serviceId || a.service_id || a.id;
                   const label = a.serviceName || a.serviceTitle || a.title || `Service ${id}`;
-                  const date  = (a.serviceDate || a.date)
-                    ? new Date(a.serviceDate || a.date).toLocaleDateString()
+                  const date  = (a.serviceDate || a.service_date || a.date)
+                    ? new Date(a.serviceDate || a.service_date || a.date).toLocaleDateString()
                     : '';
                   return (
                     <option key={id} value={String(id)}>

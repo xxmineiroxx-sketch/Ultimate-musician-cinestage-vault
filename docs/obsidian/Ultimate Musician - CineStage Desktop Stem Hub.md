@@ -48,6 +48,14 @@ Priority:
 
 Rule: hard drives store media, local index stores searchable catalog data, Cloudflare coordinates jobs and short-lived delivery.
 
+Desktop live/setlist repair, August 8, 2026:
+
+- Desktop sync now points to `ultimate-playback-sync.studio-cinestage.workers.dev`.
+- `/sync/live-status` is now a real Worker route for Live Performance.
+- Setlist Runner publishes current song state to Live Performance.
+- Setlist and Setlist Runner handle Worker setlist arrays, pending assignment rows, `service_id`, and service discovery fallback.
+- Worker exposes service list/proposal routes needed by Admin and Leader dashboard service workflows.
+
 Local recovery note:
 
 - Recovered VS assets live at `/Users/studio/Downloads/VS`.

@@ -1,4 +1,4 @@
-export const SYNC_URL = 'https://ultimatelabs.pages.dev';
+export const SYNC_URL = 'https://ultimate-playback-sync.studio-cinestage.workers.dev';
 export const CINESTAGE_URL = 'https://cinestage.ultimatelabs.co';
 export const CINESTAGE_WS_URL = CINESTAGE_URL.replace(/^https:/, 'wss:');
 export const SYNC_ORG_ID = 'zpneef0a5ov732c0';
