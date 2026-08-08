@@ -401,7 +401,9 @@ function findProjectFolders(files) {
     const stemTypes = new Set(audioFiles.map(detectStemType).filter(Boolean));
     const folderKey = normalizeText(path.basename(dir)).replace(/\s+/g, '');
     const looksLikeStemFolder = ['multitracks', 'stems', 'stem', 'imported', 'tracks'].includes(folderKey);
-    if (audioFiles.length >= 4 && (stemTypes.size >= 2 || looksLikeStemFolder)) {
+    const stemLikeFiles = audioFiles.filter((filePath) => detectStemType(filePath));
+    const stemLikeRatio = audioFiles.length ? stemLikeFiles.length / audioFiles.length : 0;
+    if (audioFiles.length >= 4 && (looksLikeStemFolder || (stemTypes.size >= 2 && stemLikeRatio >= 0.5))) {
       projectDirs.add(dir);
     }
   }

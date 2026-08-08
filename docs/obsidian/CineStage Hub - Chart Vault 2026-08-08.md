@@ -27,6 +27,7 @@ CineStage Hub should be able to use the account holder's local chart and lyrics 
 - Flat Cifras-style filenames such as `Song - Artist - Key.rtf` are parsed into song title, artist, and key.
 - PDF/base naming noise such as `Chord Chart`, `Base`, and `2 Column` is ignored when parsing chart filenames.
 - iCloud chart files are indexed by filename without forcing content reads, which avoids blocking the desktop scanner while macOS downloads/hydrates iCloud placeholders.
+- Normal album folders are no longer treated as stem projects unless the folder is explicitly stem-like or most files look like instrument stems.
 - PDF and DOCX are indexed by file path/name for now. Full content extraction should be added later with a document parser.
 - The Hub UI has a Chart Vault panel with local analysis and working-area creation.
 
