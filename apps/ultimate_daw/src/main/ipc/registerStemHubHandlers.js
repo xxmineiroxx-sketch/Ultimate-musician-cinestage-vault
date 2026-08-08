@@ -24,18 +24,48 @@ const CONFIG_KEY = 'cinestage_stem_hub_config';
 let workerProcess = null;
 let workerLastExit = null;
 
+function normalizeIdentifier(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function savedIdentity() {
+  const user = store.get('auth_user') || {};
+  const profile = store.get('user_profile') || {};
+  const email = normalizeIdentifier(
+    profile.email ||
+    user.email ||
+    user.identifier,
+  );
+  const accountId = String(
+    profile.accountId ||
+    profile.orgId ||
+    user.accountId ||
+    user.orgId ||
+    '',
+  ).trim();
+  const name = String(
+    profile.desktopName ||
+    profile.name ||
+    user.name ||
+    '',
+  ).trim();
+  return { email, accountId, name };
+}
+
 function defaultConfig() {
+  const identity = savedIdentity();
   return {
     syncUrl: 'https://ultimate-playback-sync.studio-cinestage.workers.dev',
-    accountEmail: '',
-    accountId: '',
-    desktopName: '',
+    accountEmail: identity.email,
+    accountId: identity.accountId,
+    desktopName: identity.name ? `${identity.name} Desktop` : '',
     workerMode: 'account_desktop',
     libraryRoots: [defaultHubDir()],
     indexPath: defaultIndexPath(),
     folderFormat: 'artist_album_song',
     autoOrganize: true,
     searchBeforeSeparate: true,
+    autoStartWorker: true,
     allowBackupWorker: false,
     allowYouTubeDownload: false,
     keepMasterStems: true,
@@ -44,7 +74,15 @@ function defaultConfig() {
 }
 
 function readConfig() {
-  return { ...defaultConfig(), ...(store.get(CONFIG_KEY) || {}) };
+  const identity = savedIdentity();
+  const saved = store.get(CONFIG_KEY) || {};
+  const merged = { ...defaultConfig(), ...saved };
+  return {
+    ...merged,
+    accountEmail: normalizeIdentifier(merged.accountEmail || identity.email),
+    accountId: String(merged.accountId || identity.accountId || '').trim(),
+    desktopName: String(merged.desktopName || (identity.name ? `${identity.name} Desktop` : '')).trim(),
+  };
 }
 
 function writeConfig(nextConfig) {
@@ -66,6 +104,7 @@ function workerEnvFromConfig(config) {
     UM_STEM_ALLOW_YOUTUBE_DOWNLOAD: String(Boolean(config.allowYouTubeDownload)),
     UM_STEM_SEARCH_LIBRARY: String(config.searchBeforeSeparate !== false),
     UM_STEM_WORKER_MODE: config.workerMode,
+    UM_STEM_ALLOW_BACKUP_WORKER: String(Boolean(config.allowBackupWorker)),
   };
 }
 
@@ -75,6 +114,34 @@ function workerStatus() {
     pid: workerProcess?.pid || null,
     lastExit: workerLastExit,
   };
+}
+
+function startStemHubWorker() {
+  if (workerStatus().running) return workerStatus();
+  const config = readConfig();
+  const workerPath = path.join(__dirname, '../workers/stemJobWorker.js');
+  workerProcess = fork(workerPath, [], {
+    env: workerEnvFromConfig(config),
+    silent: true,
+  });
+  workerLastExit = null;
+  workerProcess.stdout?.on('data', (chunk) => {
+    process.stdout.write(`[stem-hub-worker] ${chunk}`);
+  });
+  workerProcess.stderr?.on('data', (chunk) => {
+    process.stderr.write(`[stem-hub-worker] ${chunk}`);
+  });
+  workerProcess.on('exit', (code, signal) => {
+    workerLastExit = { code, signal, at: new Date().toISOString() };
+    workerProcess = null;
+  });
+  return workerStatus();
+}
+
+function stopStemHubWorker() {
+  if (!workerStatus().running) return workerStatus();
+  workerProcess.kill('SIGTERM');
+  return workerStatus();
 }
 
 function registerStemHubHandlers({ ipcMain, dialog }) {
@@ -135,33 +202,9 @@ function registerStemHubHandlers({ ipcMain, dialog }) {
 
   ipcMain.handle('stemHub:worker-status', () => workerStatus());
 
-  ipcMain.handle('stemHub:start-worker', () => {
-    if (workerStatus().running) return workerStatus();
-    const config = readConfig();
-    const workerPath = path.join(__dirname, '../workers/stemJobWorker.js');
-    workerProcess = fork(workerPath, [], {
-      env: workerEnvFromConfig(config),
-      silent: true,
-    });
-    workerLastExit = null;
-    workerProcess.stdout?.on('data', (chunk) => {
-      process.stdout.write(`[stem-hub-worker] ${chunk}`);
-    });
-    workerProcess.stderr?.on('data', (chunk) => {
-      process.stderr.write(`[stem-hub-worker] ${chunk}`);
-    });
-    workerProcess.on('exit', (code, signal) => {
-      workerLastExit = { code, signal, at: new Date().toISOString() };
-      workerProcess = null;
-    });
-    return workerStatus();
-  });
+  ipcMain.handle('stemHub:start-worker', () => startStemHubWorker());
 
-  ipcMain.handle('stemHub:stop-worker', () => {
-    if (!workerStatus().running) return workerStatus();
-    workerProcess.kill('SIGTERM');
-    return workerStatus();
-  });
+  ipcMain.handle('stemHub:stop-worker', () => stopStemHubWorker());
 }
 
 module.exports = {
@@ -169,5 +212,7 @@ module.exports = {
   defaultConfig,
   readConfig,
   registerStemHubHandlers,
+  startStemHubWorker,
+  stopStemHubWorker,
   writeConfig,
 };

@@ -131,3 +131,12 @@ August 8, 2026 desktop audit fixes:
 - Assignment service resolution now prefers `service_id` before assignment `id`, avoiding `service_person` ids being used as service ids.
 - Pending assignment rows are treated as valid rehearsal/run access until the musician responds.
 - Worker now exposes `/sync/services` plus service proposal approve/reject routes used by the desktop Admin and Leader dashboards.
+
+August 8, 2026 app-to-desktop linkage fixes:
+
+- Desktop Hub worker auto-starts when `apps/ultimate_daw` launches unless `autoStartWorker` is disabled in Hub config.
+- Desktop heartbeat derives account email/account id from the signed-in desktop user/profile when Hub fields are empty.
+- Desktop heartbeat now reports worker mode and backup-worker permission to Cloudflare.
+- Cloudflare stem routing now chooses the exact account desktop first, then an online backup/library worker, then Cloudflare fallback.
+- Ultimate Playback and Ultimate Musician can use `/sync/cinestage/desktops`, `/sync/service-readiness`, and `/sync/stem-jobs` to show whether stems are routed to desktop or fallback.
+- Smoke verification: a stem job from `xxmineiroxx@gmail.com` routed to online `desktop_MacBook-Pro` with `processor: desktop`, then was rejected as cleanup.

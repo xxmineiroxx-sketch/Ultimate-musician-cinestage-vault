@@ -56,6 +56,13 @@ Desktop live/setlist repair, August 8, 2026:
 - Setlist and Setlist Runner handle Worker setlist arrays, pending assignment rows, `service_id`, and service discovery fallback.
 - Worker exposes service list/proposal routes needed by Admin and Leader dashboard service workflows.
 
+App-to-desktop linkage, August 8, 2026:
+
+- Desktop Hub auto-starts its background stem worker when the desktop app launches.
+- Heartbeats now include account identity, worker mode, and backup-worker permission.
+- Cloudflare routing chooses exact account desktop first, then backup/library workers, then fallback.
+- Verified a Playback-style stem job from `xxmineiroxx@gmail.com` selected `desktop_MacBook-Pro` instead of Cloudflare fallback.
+
 Local recovery note:
 
 - Recovered VS assets live at `/Users/studio/Downloads/VS`.

@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.2-live-status';
+const WORKER_VERSION = '2.4.3-desktop-routing';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1390,17 +1390,27 @@ function activeDesktopWorkerFor(store, account = {}) {
   const accountId = String(account.id || account.accountId || '').trim();
   const workers = Object.values(store.desktopWorkers || {});
   const cutoff = Date.now() - (5 * 60 * 1000);
-  return workers.find((worker) => {
+  const capableOnline = workers.filter((worker) => {
     const updated = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
     if (!updated || updated < cutoff) return false;
     if (worker.capabilities?.stems === false) return false;
-    if (!accountEmail && !accountId) return worker.status === 'online';
+    return worker.status === 'online';
+  });
+
+  if (!accountEmail && !accountId) return capableOnline[0] || null;
+
+  const exact = capableOnline.find((worker) => (
+    (accountEmail && normalizeIdentifier(worker.accountEmail) === accountEmail) ||
+    (accountId && String(worker.accountId || '').trim() === accountId)
+  ));
+  if (exact) return exact;
+
+  return capableOnline.find((worker) => {
+    const mode = normalizeRole(worker.workerMode || worker.capabilities?.workerMode);
     return (
-      worker.status === 'online' &&
-      (
-        (accountEmail && normalizeIdentifier(worker.accountEmail) === accountEmail) ||
-        (accountId && String(worker.accountId || '').trim() === accountId)
-      )
+      ['backup_laptop', 'library_server', 'shared_processor'].includes(mode) ||
+      worker.allowBackupWorker === true ||
+      worker.capabilities?.allowBackupWorker === true
     );
   }) || null;
 }
@@ -1635,7 +1645,11 @@ async function handleDesktopHeartbeat(request, env, store) {
       youtubeDownload: body.capabilities?.youtubeDownload !== false,
       waveform: body.capabilities?.waveform !== false,
       roleStemMap: body.capabilities?.roleStemMap !== false,
+      workerMode: String(body.capabilities?.workerMode || body.workerMode || '').trim(),
+      allowBackupWorker: body.capabilities?.allowBackupWorker === true || body.allowBackupWorker === true,
     },
+    workerMode: String(body.workerMode || body.capabilities?.workerMode || '').trim(),
+    allowBackupWorker: body.allowBackupWorker === true || body.capabilities?.allowBackupWorker === true,
     queueDepth: Math.max(0, Number(body.queueDepth || 0) || 0),
     activeJobId: String(body.activeJobId || '').trim(),
     storagePath: String(body.storagePath || body.cacheDir || '').trim(),

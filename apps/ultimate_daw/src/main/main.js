@@ -4,7 +4,12 @@ const { createAudioEngine } = require('../backend/audio');
 const { registerAudioHandlers } = require('./ipc/registerAudioHandlers');
 const { registerStoreHandlers } = require('./ipc/registerStoreHandlers');
 const { registerStemHandlers } = require('./ipc/registerStemHandlers');
-const { registerStemHubHandlers } = require('./ipc/registerStemHubHandlers');
+const {
+  readConfig: readStemHubConfig,
+  registerStemHubHandlers,
+  startStemHubWorker,
+  stopStemHubWorker,
+} = require('./ipc/registerStemHubHandlers');
 const { registerFileHandlers } = require('./ipc/registerFileHandlers');
 
 nativeTheme.themeSource = 'dark';
@@ -87,6 +92,9 @@ app.whenReady().then(() => {
   registerFileHandlers({ ipcMain, dialog });
 
   createMainWindow();
+  if (readStemHubConfig().autoStartWorker !== false) {
+    startStemHubWorker();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -99,4 +107,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (audioEngine) audioEngine.shutdown();
+  stopStemHubWorker();
 });

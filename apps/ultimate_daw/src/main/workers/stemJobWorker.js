@@ -249,6 +249,7 @@ class DesktopStemJobWorker {
     this.indexPath = path.resolve(options.indexPath || process.env.UM_STEM_INDEX_PATH || defaultIndexPath());
     this.searchLibrary = options.searchLibrary ?? process.env.UM_STEM_SEARCH_LIBRARY !== 'false';
     this.workerMode = String(options.workerMode || process.env.UM_STEM_WORKER_MODE || 'account_desktop').trim();
+    this.allowBackupWorker = options.allowBackupWorker ?? process.env.UM_STEM_ALLOW_BACKUP_WORKER === 'true';
     this.model = String(options.model || process.env.UM_STEM_MODEL || DEFAULT_MODEL).trim();
     this.pollIntervalMs = Number(options.pollIntervalMs || process.env.UM_STEM_POLL_INTERVAL_MS || DEFAULT_POLL_INTERVAL_MS);
     this.heartbeatIntervalMs = Number(options.heartbeatIntervalMs || process.env.UM_STEM_HEARTBEAT_INTERVAL_MS || DEFAULT_HEARTBEAT_INTERVAL_MS);
@@ -287,6 +288,8 @@ class DesktopStemJobWorker {
         accountId: this.accountId,
         status,
         appVersion: 'ultimate_daw_worker_v2',
+        workerMode: this.workerMode,
+        allowBackupWorker: Boolean(this.allowBackupWorker),
         activeJobId: this.activeJobId,
         queueDepth: this.lastQueueDepth,
         cacheDir: this.cacheDir,
@@ -301,6 +304,7 @@ class DesktopStemJobWorker {
           localStemLibrary: Boolean(this.searchLibrary),
           organizeStemFolders: true,
           workerMode: this.workerMode,
+          allowBackupWorker: Boolean(this.allowBackupWorker),
           youtubeDownload: Boolean(this.allowYouTubeDownload),
           waveform: false,
           roleStemMap: true,

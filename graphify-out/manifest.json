@@ -1464,8 +1464,8 @@
     "hash": "53f22fc7cd22f11bd7cb9c03ea1c7b70"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/cloudflare/ultimate-playback-sync/worker.js": {
-    "mtime": 1786220247.732648,
-    "hash": "2dc2dc292cca3f5789ac226a4d87e107"
+    "mtime": 1786221008.5697253,
+    "hash": "0a4754a3dee3a410c3d19e68e047852d"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/scripts/setup_xcode_targets.rb": {
     "mtime": 1786209566.1403875,
@@ -2016,8 +2016,8 @@
     "hash": "b0f96579e3089f2b5b729b0441275f6a"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/main.js": {
-    "mtime": 1786213771.661765,
-    "hash": "5c476411b013253ac24d37bd23e5f239"
+    "mtime": 1786220783.4917336,
+    "hash": "1e63c82fe6ee76a8f567612397f53e08"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/stemHub/libraryOrganizer.js": {
     "mtime": 1786216582.2338502,
@@ -2028,16 +2028,16 @@
     "hash": "05b4befb9f19874c3c9b164d6a1a29f2"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/workers/stemJobWorker.js": {
-    "mtime": 1786212240.1445937,
-    "hash": "8b92595597858d4eaa1e458cd3f3878f"
+    "mtime": 1786220865.6038556,
+    "hash": "935d9bf129ae99e117fa165ae8c79b56"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStoreHandlers.js": {
     "mtime": 1786209565.3618119,
     "hash": "fce3dafd858b633c5e4a448b3bdb3ca0"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStemHubHandlers.js": {
-    "mtime": 1786211930.2682428,
-    "hash": "71403a4246a41cebb65bc6a5be9086d5"
+    "mtime": 1786220865.5099008,
+    "hash": "2ed555c474076458f75e08537c650a7b"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStemHandlers.js": {
     "mtime": 1786209565.361761,
@@ -2328,8 +2328,8 @@
     "hash": "f9e4209fcfb320fcf570e1c4a569db2c"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/cinestage-desktop-stem-hub.md": {
-    "mtime": 1786220431.5977638,
-    "hash": "771def0d666902889b8c37c4ae67c61f"
+    "mtime": 1786221008.6589622,
+    "hash": "638e78c9673428c7522a71850953f135"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/apple-notes-idea-inventory-2026-08-01.md": {
     "mtime": 1786209566.1499276,
@@ -2340,8 +2340,8 @@
     "hash": "f9e4209fcfb320fcf570e1c4a569db2c"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - CineStage Desktop Stem Hub.md": {
-    "mtime": 1786220431.7026882,
-    "hash": "c735315f66733241b394ceba2c001a25"
+    "mtime": 1786221008.7458503,
+    "hash": "c4d69b80ae2a668156071c0b44a24e56"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - Full iCloud Inventory.md": {
     "mtime": 1786209566.151033,
