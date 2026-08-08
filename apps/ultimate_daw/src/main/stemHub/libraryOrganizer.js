@@ -131,6 +131,7 @@ function readJson(filePath) {
 function readTextChart(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (!TEXT_CHART_EXTENSIONS.has(ext)) return '';
+  if (isIcloudDocumentPath(filePath)) return '';
   try {
     const stat = fs.statSync(filePath);
     if (stat.size > 1024 * 1024) return '';
@@ -141,6 +142,10 @@ function readTextChart(filePath) {
   } catch {
     return '';
   }
+}
+
+function isIcloudDocumentPath(filePath) {
+  return String(filePath || '').includes(`${path.sep}Library${path.sep}Mobile Documents${path.sep}`);
 }
 
 function rtfToText(value) {
