@@ -225,6 +225,7 @@ export default function AdminDashboardScreen() {
   const [pendingSongs, setPendingSongs] = useState([]);
   const [plans, setPlans] = useState({});
   const [stats, setStats] = useState({});
+  const [readiness, setReadiness] = useState(null);
 
   // Team tab state
   const [memberSearch, setMemberSearch] = useState('');
@@ -271,12 +272,13 @@ export default function AdminDashboardScreen() {
     setLoading(true);
     setError('');
     try {
-      const [lib, teamRes, statsRes, pSvcs, pSongs] = await Promise.all([
+      const [lib, teamRes, statsRes, pSvcs, pSongs, readinessRes] = await Promise.all([
         fetchJson(`${SYNC_URL}/sync/library-pull`),
         fetchJson(`${SYNC_URL}/sync/admin/team-members`).catch(() => null),
         fetchJson(`${SYNC_URL}/sync/admin/stats`).catch(() => ({})),
         fetchJson(`${SYNC_URL}/sync/services/pending`).catch(() => []),
         fetchJson(`${SYNC_URL}/sync/library/pending-songs`).catch(() => []),
+        fetchJson(`${SYNC_URL}/sync/service-readiness`).catch(() => null),
       ]);
 
       // Members: prefer dedicated endpoint, fall back to library people
@@ -289,6 +291,7 @@ export default function AdminDashboardScreen() {
       setSongs(Array.isArray(lib.songs) ? lib.songs : Object.values(lib.songs || {}));
       setPlans(lib.plans || {});
       setStats(statsRes || {});
+      setReadiness(readinessRes?.ok ? readinessRes : null);
       setPendingServices(Array.isArray(pSvcs) ? pSvcs.filter(s => s.status === 'pending_approval' || s.status === 'pending') : []);
       setPendingSongs(Array.isArray(pSongs) ? pSongs.filter(s => s.status === 'pending' || !s.status) : []);
     } catch (e) {
@@ -897,6 +900,15 @@ export default function AdminDashboardScreen() {
     const allAssignments = Object.values(plans).flatMap(p => p.team || []);
     const accepted = allAssignments.filter(a => a.status === 'accepted' || a.status === 'confirmed').length;
     const acceptanceRate = allAssignments.length > 0 ? Math.round((accepted / allAssignments.length) * 100) : 0;
+    const readinessServices = Array.isArray(readiness?.services) ? readiness.services : [];
+    const trackingTotals = readinessServices.reduce((acc, service) => {
+      const counts = service.counts || service.assignmentTracking?.counts || {};
+      acc.accepted += Number(counts.accepted || 0);
+      acc.viewed += Number(counts.setlistViewed || 0);
+      acc.listened += Number(counts.setlistListened || 0);
+      acc.assigned += Number(counts.team || counts.assigned || 0);
+      return acc;
+    }, { accepted: 0, viewed: 0, listened: 0, assigned: 0 });
 
     // Most practiced songs
     const practisedSongs = stats.mostPracticed || [];
@@ -909,11 +921,43 @@ export default function AdminDashboardScreen() {
         <div className="grid grid-cols-4 gap-4">
           <StatCard label="Total Members" value={totalMembers} icon="👥" color="bg-indigo-500/10" />
           <StatCard label="Total Services" value={services.length} icon="📅" color="bg-emerald-500/10" />
+          <StatCard label="Setlists Viewed" value={`${trackingTotals.viewed}/${trackingTotals.assigned}`} icon="👁" color="bg-cyan-500/10" />
+          <StatCard label="Setlists Listened" value={`${trackingTotals.listened}/${trackingTotals.assigned}`} icon="🎧" color="bg-purple-500/10" />
+        </div>
+
+        <div className="grid grid-cols-4 gap-4">
           <StatCard label="Upcoming" value={upcomingCount} icon="🗓" color="bg-cyan-500/10" />
           <StatCard label="Acceptance Rate" value={`${acceptanceRate}%`} icon="✓" color="bg-amber-500/10" />
+          <StatCard label="Accepted" value={`${trackingTotals.accepted}/${trackingTotals.assigned}`} icon="✅" color="bg-emerald-500/10" />
+          <StatCard label="Needs Follow Up" value={Math.max(0, trackingTotals.assigned - trackingTotals.listened)} icon="📣" color="bg-red-500/10" />
         </div>
 
         <div className="grid grid-cols-2 gap-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 col-span-2">
+            <h3 className="text-slate-300 font-semibold text-sm mb-4">Service Assignment Tracking</h3>
+            {readinessServices.length === 0 ? (
+              <p className="text-slate-500 text-sm">No service tracking data yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {readinessServices.slice(0, 8).map(service => {
+                  const counts = service.counts || {};
+                  const team = Number(counts.team || service.assignmentTracking?.counts?.assigned || 0);
+                  return (
+                    <div key={service.serviceId} className="bg-slate-950/60 border border-slate-800 rounded-lg px-4 py-3 flex items-center gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold truncate">{service.serviceName || 'Service'}</p>
+                        <p className="text-slate-500 text-xs">{service.serviceDate || 'No date'}</p>
+                      </div>
+                      <span className="text-xs text-emerald-400 font-semibold">Accepted {counts.accepted || 0}/{team}</span>
+                      <span className="text-xs text-cyan-400 font-semibold">Viewed {counts.setlistViewed || 0}/{team}</span>
+                      <span className="text-xs text-purple-400 font-semibold">Listened {counts.setlistListened || 0}/{team}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Practice sessions bar chart */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
             <h3 className="text-slate-300 font-semibold text-sm mb-4">Practice Sessions per Week</h3>

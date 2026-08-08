@@ -674,7 +674,22 @@ function resolveTeamResponseMeta(assignment, person, responseMap) {
   };
 }
 
-function TeamRow({ assignment, isBlocked, onRemove, respStatus, declineReason, servedCount, lastServed }) {
+function findAssignmentTracking(assignment, person, trackingMap) {
+  const keys = [
+    assignment?.email,
+    person?.email,
+    assignment?.personId,
+    person?.id,
+    assignment?.id,
+    assignment?.name,
+  ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+  for (const key of keys) {
+    if (trackingMap[key]) return trackingMap[key];
+  }
+  return null;
+}
+
+function TeamRow({ assignment, isBlocked, onRemove, respStatus, declineReason, servedCount, lastServed, tracking }) {
   const rs = RESP_STYLE[respStatus] || RESP_STYLE.pending;
   return (
     <View style={[styles.teamRow, isBlocked && styles.teamRowBlocked]}>
@@ -699,6 +714,16 @@ function TeamRow({ assignment, isBlocked, onRemove, respStatus, declineReason, s
           </View>
           {lastServed ? (
             <Text style={{ color: '#475569', fontSize: 10 }}>Last: {lastServed}</Text>
+          ) : null}
+          {tracking?.setlistViewed ? (
+            <View style={{ backgroundColor: '#082F49', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 }}>
+              <Text style={{ color: '#38BDF8', fontSize: 10, fontWeight: '700' }}>Viewed</Text>
+            </View>
+          ) : null}
+          {tracking?.setlistListened ? (
+            <View style={{ backgroundColor: '#2E1065', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 }}>
+              <Text style={{ color: '#C084FC', fontSize: 10, fontWeight: '700' }}>Listened</Text>
+            </View>
           ) : null}
           {declineReason ? (
             <Text style={{ color: '#6B7280', fontSize: 10, fontStyle: 'italic' }} numberOfLines={1}>
@@ -846,6 +871,7 @@ export default function ServicePlanScreen({ route, navigation }) {
   const [people, setPeople] = useState([]);
   const [library, setLibrary] = useState([]);
   const [assignmentResponses, setAssignmentResponses] = useState({}); // email → { status, declineReason }
+  const [assignmentTracking, setAssignmentTracking] = useState({}); // identity → viewed/listened readiness
   const [blockedEntries, setBlockedEntries] = useState([]);
   const [tab, setTab] = useState("setlist");
 
@@ -1037,6 +1063,25 @@ export default function ServicePlanScreen({ route, navigation }) {
             });
           }
           setAssignmentResponses(rMap);
+        }
+      } catch {
+        /* ignore — offline */
+      }
+
+      try {
+        const trackRes = await fetch(`${SYNC_URL}/sync/assignment/tracking?serviceId=${id}`, { headers: syncHeaders() });
+        if (trackRes.ok) {
+          const trackData = await trackRes.json();
+          const tMap = {};
+          (Array.isArray(trackData?.members) ? trackData.members : []).forEach((member) => {
+            const keys = [member.email, member.personId, member.id, member.name]
+              .map((value) => String(value || '').trim().toLowerCase())
+              .filter(Boolean);
+            keys.forEach((key) => {
+              tMap[key] = member;
+            });
+          });
+          setAssignmentTracking(tMap);
         }
       } catch {
         /* ignore — offline */
@@ -2784,12 +2829,17 @@ export default function ServicePlanScreen({ route, navigation }) {
                 <Text style={styles.roleGroupLabel}>{formatRoleLabel(role)}</Text>
                 {teamByRole[role].map((a) => {
                   const person = findAssignedPerson(people, a);
-                  const resp = resolveTeamResponseMeta(
-                    a,
-                    person,
-                    assignmentResponses,
-                  );
-                  const isBlocked = findBlockingEntryForPerson(
+	                  const resp = resolveTeamResponseMeta(
+	                    a,
+	                    person,
+	                    assignmentResponses,
+	                  );
+	                  const tracking = findAssignmentTracking(
+	                    a,
+	                    person,
+	                    assignmentTracking,
+	                  );
+	                  const isBlocked = findBlockingEntryForPerson(
                     person || a,
                     blockedEntries,
                   );
@@ -2802,10 +2852,11 @@ export default function ServicePlanScreen({ route, navigation }) {
                     isBlocked={Boolean(isBlocked)}
                     onRemove={() => handleRemoveAssignment(a.id)}
                     respStatus={resp.status}
-                    declineReason={resp.declineReason}
-                    servedCount={roleCount}
-                    lastServed={pStats.lastServed || ''}
-                  />
+	                    declineReason={resp.declineReason}
+	                    servedCount={roleCount}
+	                    lastServed={pStats.lastServed || ''}
+	                    tracking={tracking}
+	                  />
                   );
                 })}
               </View>

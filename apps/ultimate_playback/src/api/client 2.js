@@ -111,6 +111,9 @@ export const getServices = () => get('/sync/services');
 export const getAssignments = (email, name) =>
   get('/sync/assignments', { query: { email, ...(name && { name }) } });
 export const respondToAssignment = (body) => post('/sync/assignment/respond', body);
+export const recordAssignmentEvent = (body) => post('/sync/assignments/event', body);
+export const getAssignmentTracking = (serviceId) =>
+  get('/sync/assignment/tracking', { query: { serviceId } });
 export const getMessages = (email) => get('/sync/messages', { query: { email } });
 export const getMessageReplies = (email) =>
   get('/sync/messages/replies', { query: { email } });

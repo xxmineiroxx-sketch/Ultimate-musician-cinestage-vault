@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.8-desktop-login-verification';
+const WORKER_VERSION = '2.4.9-assignment-tracking';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -42,6 +42,7 @@ function defaultStore() {
     pendingSetlists: [],
     blockouts: [],
     assignmentResponses: {},
+    assignmentEvents: {},
     assignmentHistory: [],
     songLibrary: {},
     sourceUploads: {},
@@ -432,6 +433,108 @@ function assignmentStatsFor(store, { month = '', personId = '', email = '' } = {
   }
 
   return { month: targetMonth, entries, byPerson };
+}
+
+function assignmentIdentityKey(value = {}) {
+  return normalizeIdentifier(value.email || value.identifier || value.personId || value.name || '');
+}
+
+function assignmentResponseMapFor(store, serviceId = '') {
+  const id = String(serviceId || '').trim();
+  const scoped = id ? store.assignmentResponses?.[id] : null;
+  return scoped && typeof scoped === 'object' ? scoped : {};
+}
+
+function assignmentEventMapFor(store, serviceId = '') {
+  const id = String(serviceId || '').trim();
+  const scoped = id ? store.assignmentEvents?.[id] : null;
+  return scoped && typeof scoped === 'object' ? scoped : {};
+}
+
+function findAssignmentResponseForMember(responseMap = {}, member = {}) {
+  const candidates = [member.email, member.personId, member.id, member.name]
+    .map((value) => normalizeIdentifier(value))
+    .filter(Boolean);
+  for (const key of candidates) {
+    if (responseMap[key]) return responseMap[key];
+  }
+  return null;
+}
+
+function findAssignmentEventsForMember(eventMap = {}, member = {}) {
+  const candidates = [member.email, member.personId, member.id, member.name]
+    .map((value) => normalizeIdentifier(value))
+    .filter(Boolean);
+  for (const key of candidates) {
+    if (eventMap[key]) return eventMap[key];
+  }
+  return null;
+}
+
+function assignmentTrackingFor(store, { serviceId = '' } = {}) {
+  const id = String(serviceId || '').trim();
+  const plan = store.plans?.[id] || {};
+  const team = Array.isArray(plan.team) ? plan.team : [];
+  const responseMap = assignmentResponseMapFor(store, id);
+  const eventMap = assignmentEventMapFor(store, id);
+
+  const members = team.map((member) => {
+    const person = findPerson(store, {
+      id: member.personId,
+      email: member.email,
+      identifier: member.email,
+    }) || {};
+    const merged = {
+      ...member,
+      personId: member.personId || person.id || '',
+      email: normalizeIdentifier(member.email || person.email),
+      name: member.name || person.name || '',
+    };
+    const response = findAssignmentResponseForMember(responseMap, merged);
+    const events = findAssignmentEventsForMember(eventMap, merged) || {};
+    const status = normalizeRole(response?.status || response?.response || merged.status || 'pending') || 'pending';
+    const viewedAt = events.setlistViewedAt || '';
+    const listenedAt = events.setlistListenedAt || '';
+    return {
+      personId: merged.personId,
+      email: merged.email,
+      name: merged.name,
+      role: merged.role || '',
+      status,
+      declineReason: response?.declineReason || response?.reason || '',
+      respondedAt: response?.respondedAt || response?.updatedAt || '',
+      setlistViewed: Boolean(viewedAt),
+      setlistViewedAt: viewedAt,
+      setlistListened: Boolean(listenedAt),
+      setlistListenedAt: listenedAt,
+      lastSetlistEventAt: events.lastEventAt || listenedAt || viewedAt || '',
+      listenSeconds: Number(events.listenSeconds || 0),
+      listenCount: Number(events.listenCount || 0),
+      viewCount: Number(events.viewCount || 0),
+    };
+  });
+
+  const accepted = members.filter((member) => ['accepted', 'confirmed', 'registered'].includes(member.status)).length;
+  const declined = members.filter((member) => member.status === 'declined').length;
+  const viewed = members.filter((member) => member.setlistViewed).length;
+  const listened = members.filter((member) => member.setlistListened).length;
+
+  return {
+    ok: true,
+    serviceId: id,
+    counts: {
+      assigned: members.length,
+      accepted,
+      declined,
+      pending: Math.max(0, members.length - accepted - declined),
+      setlistViewed: viewed,
+      setlistNotViewed: Math.max(0, members.length - viewed),
+      setlistListened: listened,
+      setlistNotListened: Math.max(0, members.length - listened),
+    },
+    members,
+    generatedAt: nowIso(),
+  };
 }
 
 function teamMessageRecipients(team = []) {
@@ -1023,6 +1126,18 @@ function assignmentsFor(store, email) {
     const plan = store.plans?.[service.id] || {};
     const matches = (plan.team || []).filter((member) => member.personId === person.id);
     if (matches.length === 0) continue;
+    const responseMap = assignmentResponseMapFor(store, service.id);
+    const eventMap = assignmentEventMapFor(store, service.id);
+    const response = findAssignmentResponseForMember(responseMap, {
+      personId: person.id,
+      email: person.email || email,
+      name: person.name,
+    });
+    const events = findAssignmentEventsForMember(eventMap, {
+      personId: person.id,
+      email: person.email || email,
+      name: person.name,
+    }) || {};
 
     assignments.push({
       id: `${service.id}_${person.id}`,
@@ -1034,7 +1149,12 @@ function assignmentsFor(store, email) {
       role: matches[0].role,
       roles: matches.map((member) => member.role),
       notes: plan.notes || '',
-      status: 'pending',
+      status: response?.status || response?.response || matches[0].status || 'pending',
+      respondedAt: response?.respondedAt || '',
+      setlistViewed: Boolean(events.setlistViewedAt),
+      setlistViewedAt: events.setlistViewedAt || '',
+      setlistListened: Boolean(events.setlistListenedAt),
+      setlistListenedAt: events.setlistListenedAt || '',
       readiness: {
         stems_downloaded: false,
         parts_reviewed: false,
@@ -1138,6 +1258,110 @@ async function handleLiveStatus(request, env, store) {
   store.liveStatus = liveStatusPayload(store, body);
   await saveStore(env, store);
   return json(store.liveStatus);
+}
+
+async function handleAssignmentResponse(request, env, store) {
+  const body = await readJson(request);
+  const serviceId = String(body.serviceId || body.service_id || '').trim();
+  const email = normalizeIdentifier(body.email || body.identifier);
+  const personId = String(body.personId || '').trim();
+  const name = String(body.name || '').trim();
+  const role = String(body.role || '').trim();
+  const status = normalizeRole(body.status || body.decision || body.response || '');
+
+  if (!serviceId) return json({ ok: false, error: 'serviceId is required' }, 400);
+  if (!email && !personId && !name) return json({ ok: false, error: 'email, personId, or name is required' }, 400);
+  if (!['accepted', 'declined', 'pending'].includes(status)) {
+    return json({ ok: false, error: 'status must be accepted, declined, or pending' }, 400);
+  }
+
+  const key = assignmentIdentityKey({ email, personId, name });
+  store.assignmentResponses ||= {};
+  store.assignmentResponses[serviceId] ||= {};
+  const respondedAt = nowIso();
+  const response = {
+    email,
+    personId,
+    name,
+    role,
+    status,
+    response: status,
+    declineReason: String(body.reason || body.declineReason || '').trim(),
+    respondedAt,
+    updatedAt: respondedAt,
+  };
+  store.assignmentResponses[serviceId][key] = response;
+  if (email) store.assignmentResponses[serviceId][email] = response;
+  if (personId) store.assignmentResponses[serviceId][personId] = response;
+
+  const plan = store.plans?.[serviceId];
+  if (plan && Array.isArray(plan.team)) {
+    plan.team = plan.team.map((member) => {
+      const memberEmail = normalizeIdentifier(member.email);
+      const memberPersonId = String(member.personId || '').trim();
+      const memberName = normalizeIdentifier(member.name);
+      const roleMatches = !role || normalizeRole(member.role) === normalizeRole(role);
+      const identityMatches =
+        (email && memberEmail === email) ||
+        (personId && memberPersonId === personId) ||
+        (name && memberName === normalizeIdentifier(name));
+      if (!identityMatches || !roleMatches) return member;
+      return {
+        ...member,
+        status,
+        response: status,
+        declineReason: response.declineReason,
+        respondedAt,
+      };
+    });
+    plan.updatedAt = respondedAt;
+  }
+
+  await saveStore(env, store);
+  return json({ ok: true, response });
+}
+
+async function handleAssignmentEvent(request, env, store) {
+  const body = await readJson(request);
+  const serviceId = String(body.serviceId || body.service_id || '').trim();
+  const email = normalizeIdentifier(body.email || body.identifier);
+  const personId = String(body.personId || '').trim();
+  const name = String(body.name || '').trim();
+  const role = String(body.role || '').trim();
+  const type = normalizeRole(body.type || body.event || body.action || '');
+
+  if (!serviceId) return json({ ok: false, error: 'serviceId is required' }, 400);
+  if (!email && !personId && !name) return json({ ok: false, error: 'email, personId, or name is required' }, 400);
+  if (!['setlist_viewed', 'setlist_opened', 'setlist_listened', 'listened'].includes(type)) {
+    return json({ ok: false, error: 'unsupported assignment event type' }, 400);
+  }
+
+  const key = assignmentIdentityKey({ email, personId, name });
+  store.assignmentEvents ||= {};
+  store.assignmentEvents[serviceId] ||= {};
+  const previous = store.assignmentEvents[serviceId][key] || {};
+  const eventAt = nowIso();
+  const isListened = type === 'setlist_listened' || type === 'listened';
+  const listenSeconds = Math.max(0, Number(body.listenSeconds || body.durationSec || body.seconds || 0) || 0);
+  const next = {
+    ...previous,
+    email: email || previous.email || '',
+    personId: personId || previous.personId || '',
+    name: name || previous.name || '',
+    role: role || previous.role || '',
+    lastEventAt: eventAt,
+    viewCount: Number(previous.viewCount || 0) + 1,
+    setlistViewedAt: previous.setlistViewedAt || eventAt,
+    listenCount: Number(previous.listenCount || 0) + (isListened ? 1 : 0),
+    listenSeconds: Number(previous.listenSeconds || 0) + listenSeconds,
+    setlistListenedAt: isListened ? eventAt : (previous.setlistListenedAt || ''),
+  };
+  store.assignmentEvents[serviceId][key] = next;
+  if (email) store.assignmentEvents[serviceId][email] = next;
+  if (personId) store.assignmentEvents[serviceId][personId] = next;
+
+  await saveStore(env, store);
+  return json({ ok: true, event: next, tracking: assignmentTrackingFor(store, { serviceId }) });
 }
 
 function pickFirstNonEmpty(...values) {
@@ -2344,6 +2568,8 @@ function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
     const proposals = collectionItems(store.proposals).filter((proposal) => (
       !proposal.serviceId || proposal.serviceId === id
     ));
+    const responseMap = assignmentResponseMapFor(store, id);
+    const eventMap = assignmentEventMapFor(store, id);
     const pendingProposals = proposals.filter((proposal) => proposal.status === 'pending');
     const stemJobs = collectionItems(store.stemJobs)
       .filter((job) => job.serviceId === id)
@@ -2366,7 +2592,9 @@ function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
         email: member.email,
         identifier: member.email,
       }) || {};
-      const status = member.status || member.response || 'pending';
+      const response = findAssignmentResponseForMember(responseMap, member);
+      const events = findAssignmentEventsForMember(eventMap, member) || {};
+      const status = response?.status || response?.response || member.status || member.response || 'pending';
       const load = assignmentStats.find((entry) => (
         (member.personId && entry.personId === member.personId) ||
         (member.email && normalizeIdentifier(entry.email) === normalizeIdentifier(member.email))
@@ -2377,6 +2605,11 @@ function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
         name: member.name || person.name || '',
         role: member.role || '',
         status,
+        setlistViewed: Boolean(events.setlistViewedAt),
+        setlistViewedAt: events.setlistViewedAt || '',
+        setlistListened: Boolean(events.setlistListenedAt),
+        setlistListenedAt: events.setlistListenedAt || '',
+        listenSeconds: Number(events.listenSeconds || 0),
         monthlyAssignments: load?.total || 0,
         byRole: load?.byRole || {},
       };
@@ -2386,6 +2619,8 @@ function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
     )).length;
     const declinedCount = assignmentRows.filter((member) => normalizeRole(member.status) === 'declined').length;
     const pendingCount = Math.max(0, assignmentRows.length - acceptedCount - declinedCount);
+    const viewedCount = assignmentRows.filter((member) => member.setlistViewed).length;
+    const listenedCount = assignmentRows.filter((member) => member.setlistListened).length;
     const statusChecks = {
       setlistSubmitted: Boolean(pendingSetlist) || plan.status === 'pending_approval' || plan.status === 'published',
       setlistApproved: plan.status === 'published' || service.status === 'published',
@@ -2436,12 +2671,17 @@ function serviceReadinessFor(store, { serviceId = '', month = '' } = {}) {
         accepted: acceptedCount,
         pendingAssignments: pendingCount,
         declinedAssignments: declinedCount,
+        setlistViewed: viewedCount,
+        setlistNotViewed: Math.max(0, assignmentRows.length - viewedCount),
+        setlistListened: listenedCount,
+        setlistNotListened: Math.max(0, assignmentRows.length - listenedCount),
         missingCharts: missingCharts.length,
         pendingProposals: pendingProposals.length,
         stemJobs: stemJobs.length,
         readyStemJobs: stemJobs.filter((job) => job.readyForPlayback).length,
         missingStems: missingStemSongs.length,
       },
+      assignmentTracking: assignmentTrackingFor(store, { serviceId: id }),
       statusChecks,
       blocking,
       team: assignmentRows,
@@ -2771,6 +3011,12 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/services/propose') return handleProposeService(request, env, store);
   if (path === '/sync/services/approve') return handleApproveService(request, env, store, url);
   if (path === '/sync/services/reject') return handleRejectService(request, env, store, url);
+  if (path === '/sync/assignment/respond' || path === '/sync/assignments/respond') {
+    return handleAssignmentResponse(request, env, store);
+  }
+  if (path === '/sync/assignment/event' || path === '/sync/assignments/event') {
+    return handleAssignmentEvent(request, env, store);
+  }
   if (path === '/sync/grant' || path === '/sync/role/grant' || path === '/sync/setlist/creator') {
     const body = await readJson(request);
     const email = normalizeIdentifier(body.email);
@@ -3160,6 +3406,14 @@ async function handleGet(request, env, store, path, url) {
   }
   if (path === '/sync/assignments') {
     return json(assignmentsFor(store, url.searchParams.get('email') || ''));
+  }
+  if (path === '/sync/assignment/responses') {
+    return json(assignmentResponseMapFor(store, url.searchParams.get('serviceId') || ''));
+  }
+  if (path === '/sync/assignment/tracking' || path === '/sync/assignments/tracking') {
+    return json(assignmentTrackingFor(store, {
+      serviceId: url.searchParams.get('serviceId') || '',
+    }));
   }
   if (path === '/sync/service-bundle') {
     const bundle = serviceBundleFor(store, {

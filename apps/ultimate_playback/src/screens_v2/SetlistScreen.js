@@ -533,6 +533,8 @@ export default function SetlistScreen({ navigation, route }) {
   const [preflight, setPreflight] = useState(null);
   const worshipFreelyTapCount = React.useRef(0);
   const worshipFreelyTapTimer = React.useRef(null);
+  const reportedSetlistViews = useRef(new Set());
+  const reportedSetlistListens = useRef(new Set());
 
   // ── "We're Live" banner ───────────────────────────────────────────────────
   const [liveBannerVisible, setLiveBannerVisible] = useState(false);
@@ -591,6 +593,38 @@ export default function SetlistScreen({ navigation, route }) {
     const unsubscribe = navigation.addListener('focus', loadData);
     return unsubscribe;
   }, [navigation]);
+
+  const postAssignmentEvent = useCallback(async (type, extra = {}) => {
+    const serviceId = selectedAssignment?.service_id || route?.params?.serviceId || '';
+    if (!serviceId || !profile?.email) return;
+    try {
+      await fetch(`${SYNC_URL}/sync/assignments/event`, {
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({
+          type,
+          serviceId,
+          email: profile.email,
+          personId: profile.id || profile.personId || '',
+          name: [profile.name, profile.lastName].filter(Boolean).join(' ').trim() || profile.name || profile.email,
+          role: selectedAssignment?.role || '',
+          source: 'ultimate_playback_setlist',
+          ...extra,
+        }),
+      });
+    } catch (_) {
+      // Tracking should never block rehearsal access.
+    }
+  }, [profile, route?.params?.serviceId, selectedAssignment]);
+
+  useEffect(() => {
+    const serviceId = selectedAssignment?.service_id || route?.params?.serviceId || '';
+    if (!serviceId || !profile?.email || setlist.length === 0) return;
+    const key = `${serviceId}:${profile.email}:viewed`;
+    if (reportedSetlistViews.current.has(key)) return;
+    reportedSetlistViews.current.add(key);
+    postAssignmentEvent('setlist_viewed', { songCount: setlist.length });
+  }, [postAssignmentEvent, profile?.email, route?.params?.serviceId, selectedAssignment?.service_id, setlist.length]);
 
   const fetchSetlist = useCallback(async (serviceId) => {
     if (!serviceId) return;
@@ -1863,12 +1897,18 @@ export default function SetlistScreen({ navigation, route }) {
       {!loading && !error && setlist.length > 0 && (
         <TouchableOpacity
           style={styles.playButton}
-          onPress={() =>
+          onPress={() => {
+            const serviceId = selectedAssignment?.service_id || route?.params?.serviceId || '';
+            const key = `${serviceId}:${profile?.email || ''}:listened`;
+            if (serviceId && !reportedSetlistListens.current.has(key)) {
+              reportedSetlistListens.current.add(key);
+              postAssignmentEvent('setlist_listened', { songCount: setlist.length });
+            }
             navigation.navigate('PersonalPractice', {
               serviceId: selectedAssignment?.service_id,
               userRole: selectedAssignment?.role,
-            })
-          }
+            });
+          }}
         >
           <Text style={styles.playButtonText}>🎧  Practice Session</Text>
         </TouchableOpacity>

@@ -1897,6 +1897,8 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
               accepted: team.filter((member) => normalizeAssignmentStatus(member.status) === 'accepted').length,
               pendingAssignments: team.filter((member) => normalizeAssignmentStatus(member.status) === 'pending').length,
               declinedAssignments: team.filter((member) => normalizeAssignmentStatus(member.status) === 'declined').length,
+              setlistViewed: team.filter((member) => member.setlistViewed).length,
+              setlistListened: team.filter((member) => member.setlistListened).length,
               missingCharts: songs.filter((song) => !song.lyrics && !song.chordChart && !song.chordSheet).length,
               pendingProposals: proposals.filter((proposal) => proposal.status === 'pending' && (!proposal.serviceId || proposal.serviceId === svc.id)).length,
               missingStems: songs.length,
@@ -2015,6 +2017,14 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                   </Text>
                   <Text style={s.readinessCellLabel}>Pend/Decl</Text>
                 </View>
+                <View style={s.readinessCell}>
+                  <Text style={s.readinessCellValue}>{counts.setlistViewed || 0}</Text>
+                  <Text style={s.readinessCellLabel}>Viewed</Text>
+                </View>
+                <View style={s.readinessCell}>
+                  <Text style={s.readinessCellValue}>{counts.setlistListened || 0}</Text>
+                  <Text style={s.readinessCellLabel}>Listened</Text>
+                </View>
               </View>
 
               <View style={s.readinessStatusRow}>
@@ -2031,6 +2041,16 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                 <View style={[s.readinessChip, (counts.missingStems || 0) === 0 && s.readinessChipOk]}>
                   <Text style={[s.readinessChipText, (counts.missingStems || 0) === 0 && s.readinessChipTextOk]}>
                     Stems {counts.missingStems || 0}
+                  </Text>
+                </View>
+                <View style={[s.readinessChip, (counts.setlistNotViewed || 0) === 0 && s.readinessChipOk]}>
+                  <Text style={[s.readinessChipText, (counts.setlistNotViewed || 0) === 0 && s.readinessChipTextOk]}>
+                    Not viewed {counts.setlistNotViewed || 0}
+                  </Text>
+                </View>
+                <View style={[s.readinessChip, (counts.setlistNotListened || 0) === 0 && s.readinessChipOk]}>
+                  <Text style={[s.readinessChipText, (counts.setlistNotListened || 0) === 0 && s.readinessChipTextOk]}>
+                    Not listened {counts.setlistNotListened || 0}
                   </Text>
                 </View>
               </View>
