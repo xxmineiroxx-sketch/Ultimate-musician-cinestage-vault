@@ -92,18 +92,18 @@ function detectStemType(filePath) {
   const name = normalizeText(path.basename(filePath, path.extname(filePath))).replace(/\s+/g, '_');
   const tests = [
     ['lead_vocal', /lead[_-]?vocal|main[_-]?vocal/],
-    ['bgv', /bgv|background[_-]?vocal|backing[_-]?vocal|choir/],
-    ['vocals', /vocal|voice/],
-    ['electric_guitar', /electric|egtr|e[_-]?gtr|lead[_-]?guitar/],
-    ['acoustic_guitar', /acoustic|agtr|a[_-]?gtr/],
-    ['guitar', /guitar|gtr/],
-    ['keys', /keys|keyboard|synth|pad|organ/],
+    ['bgv', /bgv|background[_-]?vocal|backing[_-]?vocal|backing|choir|soprano|contralto|tenor|vozes/],
+    ['vocals', /vocal|voice|voz|guia[_-]?voz/],
+    ['electric_guitar', /electric|egtr|e[_-]?gtr|eg[0-9]?|gtr|lead[_-]?guitar/],
+    ['acoustic_guitar', /acoustic|agtr|a[_-]?gtr|acg|ag|violao|viola_o|viol/],
+    ['guitar', /guitar|gtr|guitarra/],
+    ['keys', /keys|keyboard|teclas|synth|pad|organ|piano[_-]?nord|strings|cordas|cordass|bells|arpejador|pluck/],
     ['piano', /piano/],
-    ['drums', /drum|kick|snare|toms|overhead/],
+    ['drums', /drum|kick|snare|toms|overhead|perc|percussao|percuss_o/],
     ['bass', /bass/],
-    ['click', /click|metronome/],
-    ['guide', /guide|cue|talkback/],
-    ['other', /other|misc/],
+    ['click', /click|metronome|bit[_-]?[0-9]?/],
+    ['guide', /guide|guia|cue|talkback/],
+    ['other', /other|misc|loop|fx/],
   ];
   return tests.find(([, pattern]) => pattern.test(name))?.[0] || '';
 }

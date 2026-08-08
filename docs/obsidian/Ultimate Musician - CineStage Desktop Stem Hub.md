@@ -9,6 +9,7 @@ Implemented in `apps/ultimate_daw`:
 - Account desktop, backup laptop, and library server modes.
 - External drive/shared folder stem library scanning.
 - Flat Ableton-style `MultiTracks`, `Imported`, and `stems` folders are grouped as one song/project.
+- VS/multitrack naming is recognized for guide, vocal, guitar, keys, click, and BPM/key signals.
 - Artist/Album/Song folder organizer.
 - Local index for song/stem/chart/metadata lookup.
 - Search-before-separate behavior in the background stem worker.
@@ -46,3 +47,10 @@ Priority:
 5. Future cloud fallback.
 
 Rule: hard drives store media, local index stores searchable catalog data, Cloudflare coordinates jobs and short-lived delivery.
+
+Local recovery note:
+
+- Recovered VS assets live at `/Users/studio/Downloads/VS`.
+- Use `/Users/studio/Downloads/VS` as a Hub root instead of scanning all of `/Users/studio/Downloads` to avoid duplicate records and non-music files.
+- Latest local scan: `282` files, `9` song projects, `82` stem types.
+- Useful projects: `Eu Me Rendo Renaser`, `MT - Te louvarei`, `MULTITRACKS - UM NOVO DIA _151BPM`, `Sara Oliveira - Caia Fogo - Bb - Bpm136`, `Sued Silva - O Nome Dele Jesus`, and `Julliany Souza - Quem e Esse - F# - Bpm124`.

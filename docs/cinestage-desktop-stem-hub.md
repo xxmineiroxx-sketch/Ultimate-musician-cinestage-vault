@@ -52,6 +52,7 @@ Implemented in `apps/ultimate_daw`:
 - External/shared library root selection.
 - Local scan/index of stems, charts, and metadata.
 - Flat Ableton-style folders such as `MultiTracks`, `Imported`, and `stems` are grouped as one song/project instead of one song per WAV file.
+- Recovered VS/multitrack folder names such as `GUIA`, `VOZ`, `SOPRANO`, `CONTRALTO`, `TENOR`, `VIOLAO`, `ACG`, `EG`, `GTR`, `CORDAS`, `CLICK136`, and `Bpm136` are recognized as guide, vocal, guitar, keys, click, and metadata signals.
 - Folder preview and folder creation.
 - Library match testing.
 - Start/stop for the background stem worker.
@@ -91,6 +92,23 @@ The first matching layer uses:
 - key/BPM metadata availability
 
 Future upgrades should add audio fingerprinting, stronger duplicate detection, and automatic metadata analysis for key, BPM, sections, waveform, chords, and lyrics.
+
+## Local VS Recovery
+
+On this machine, recovered VS assets were moved from Trash into:
+
+```text
+/Users/studio/Downloads/VS
+```
+
+The active local Hub roots should prefer this specific folder instead of the parent `Downloads` folder. Scanning both `Downloads` and `Downloads/VS` creates duplicate records because the parent folder contains the child folder.
+
+Last local scan after VS recovery:
+
+- `282` files scanned.
+- `9` song projects indexed.
+- `82` stem types found.
+- High-value projects include `Eu Me Rendo Renaser`, `MT - Te louvarei`, `MULTITRACKS - UM NOVO DIA _151BPM`, `Sara Oliveira - Caia Fogo - Bb - Bpm136`, `Sued Silva - O Nome Dele Jesus`, and `Julliany Souza - Quem e Esse - F# - Bpm124`.
 
 ## Product Rules
 
