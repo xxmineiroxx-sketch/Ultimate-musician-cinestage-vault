@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 import { store } from './services/store';
 import {
   DESKTOP_ACCESS_DENIED_MESSAGE,
+  isDesktopAccessRole,
+  isExplicitDesktopAccessDenial,
   resolveDesktopAccess,
 } from './services/desktopAccess';
 
@@ -44,36 +46,55 @@ function AuthProvider({ children }) {
   const [profile, setProfileState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [accessDeniedReason, setAccessDeniedReason] = useState('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   const revokeDesktopSession = useCallback(async (reason = DESKTOP_ACCESS_DENIED_MESSAGE) => {
-    await store.clearAll();
+    await Promise.all([
+      store.delete('auth_user'),
+      store.delete('user_profile'),
+    ]);
+    if (!mountedRef.current) return;
     setUserState(null);
     setProfileState(null);
     setAccessDeniedReason(reason);
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     async function hydrate() {
       try {
         const savedUser = await store.getUser();
         const savedProfile = await store.getProfile();
+        if (cancelled || !mountedRef.current) return;
         if (savedUser) {
           const access = await resolveDesktopAccess({ ...savedUser, profile: savedProfile });
-          if (!access.ok) {
+          if (cancelled || !mountedRef.current) return;
+          if (isExplicitDesktopAccessDenial(access)) {
             await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
             return;
           }
-          setUserState({ ...savedUser, desktopRole: access.role });
+          const localRole = access.role || savedUser.desktopRole || savedUser.grantedRole || savedUser.role;
+          if (!access.ok && !isDesktopAccessRole(localRole)) {
+            await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
+            return;
+          }
+          setUserState({ ...savedUser, desktopRole: localRole });
         }
         if (savedProfile) setProfileState(savedProfile);
       } catch (err) {
         console.error('[Auth] Hydration error:', err);
-        await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
       } finally {
-        setLoading(false);
+        if (!cancelled && mountedRef.current) setLoading(false);
       }
     }
     hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, [revokeDesktopSession]);
 
   useEffect(() => {
@@ -81,7 +102,7 @@ function AuthProvider({ children }) {
     let cancelled = false;
     const checkAccess = async () => {
       const access = await resolveDesktopAccess({ ...user, profile }).catch(() => ({ ok: false }));
-      if (!cancelled && !access.ok) {
+      if (!cancelled && mountedRef.current && isExplicitDesktopAccessDenial(access)) {
         await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
       }
     };

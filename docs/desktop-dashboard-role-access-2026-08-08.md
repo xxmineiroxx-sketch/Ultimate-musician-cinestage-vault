@@ -18,6 +18,7 @@ Music Director, Lead Singer, setlist creators, musicians, vocals, and volunteers
 - Saved desktop sessions re-check the live role grant on app startup.
 - Active desktop sessions re-check the live grant every 60 seconds.
 - If the role is removed, the desktop session is cleared and the user is returned to sign in.
+- Temporary sync/API failures do not clear the desktop session. The renderer only revokes access on an explicit server denial or a locally stored non-leadership role, which prevents startup crashes while preserving the access rule.
 
 ## Backend Rule
 

@@ -29,6 +29,19 @@ export function isDesktopAccessRole(role) {
   return DESKTOP_ACCESS_ROLES.has(normalizeGrantRole(role));
 }
 
+export function isExplicitDesktopAccessDenial(access = {}) {
+  if (access.ok) return false;
+  if (access.payload && Object.prototype.hasOwnProperty.call(access.payload, 'canAccessDesktop')) {
+    return access.payload.canAccessDesktop === false;
+  }
+  return [
+    'desktop_access_denied',
+    'role_not_allowed',
+    'not_allowed_desktop_role',
+    'removed_desktop_access',
+  ].includes(access.reason);
+}
+
 function authIdentifier(user = {}) {
   return String(user.email || user.identifier || user.phone || '').trim().toLowerCase();
 }
