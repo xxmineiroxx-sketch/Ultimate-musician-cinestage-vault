@@ -138,5 +138,7 @@ August 8, 2026 app-to-desktop linkage fixes:
 - Desktop heartbeat derives account email/account id from the signed-in desktop user/profile when Hub fields are empty.
 - Desktop heartbeat now reports worker mode and backup-worker permission to Cloudflare.
 - Cloudflare stem routing now chooses the exact account desktop first, then an online backup/library worker, then Cloudflare fallback.
-- Ultimate Playback and Ultimate Musician can use `/sync/cinestage/desktops`, `/sync/service-readiness`, and `/sync/stem-jobs` to show whether stems are routed to desktop or fallback.
+- CineStage Brain is the authority for ecosystem coordination. Ultimate Playback and Ultimate Musician now use `/sync/cinestage/brain` for the canonical source-of-truth snapshot, including stem route, desktop presence, service readiness authority flags, setlist approval authority, and team notification authority.
+- `/sync/cinestage/desktops` remains available as a diagnostic desktop heartbeat list, but app UX should prefer `/sync/cinestage/brain`.
+- Worker version `2.4.4-brain-authority` adds the Brain authority snapshot while preserving `/sync/service-readiness` and `/sync/stem-jobs`.
 - Smoke verification: a stem job from `xxmineiroxx@gmail.com` routed to online `desktop_MacBook-Pro` with `processor: desktop`, then was rejected as cleanup.

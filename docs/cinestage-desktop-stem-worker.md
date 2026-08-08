@@ -38,10 +38,12 @@ flowchart TD
 
 ## Implemented Sync Surface
 
+- `GET /sync/cinestage/brain`
+  - Canonical CineStage Brain source-of-truth snapshot for apps. Includes selected stem route, selected desktop worker, desktop presence, Brain authority flags, queue counts, and online processor state.
 - `POST /sync/cinestage/desktop-heartbeat`
   - Desktop app announces it is online and capable of stem processing.
 - `GET /sync/cinestage/desktops`
-  - Lists known desktop workers so CineStage Cloud can show whether the desktop processor is online.
+  - Diagnostic list of known desktop workers. App UX should prefer `/sync/cinestage/brain` for route decisions.
 - `POST /sync/stem-jobs`
   - Creates a desktop-primary stem job from a YouTube/audio link. If a capable desktop is online, the job becomes `queued_for_desktop`; if no capable desktop is online and fallback is allowed, it becomes `cloudflare_fallback`.
 - `POST /sync/stem-job/claim?id=...`
@@ -85,7 +87,7 @@ flowchart TD
 
 ## CineStage Cloud Status UI
 
-Ultimate Playback now reads `/sync/cinestage/desktops` and shows the stem route in the CineStage Brain card and CineStage Cloud screen.
+Ultimate Playback and Ultimate Musician now read `/sync/cinestage/brain` and show the stem route selected by CineStage Brain. The desktop list remains available for diagnostics.
 
 - Green route: a stem-capable desktop heartbeat was seen in the last five minutes, so new stem jobs go to desktop processing.
 - Amber route: no capable desktop is online, so new stem jobs move to the fallback lane when fallback is allowed.

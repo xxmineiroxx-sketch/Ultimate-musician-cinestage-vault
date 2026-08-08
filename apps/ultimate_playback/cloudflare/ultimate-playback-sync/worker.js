@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.3-desktop-routing';
+const WORKER_VERSION = '2.4.4-brain-authority';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1415,6 +1415,70 @@ function activeDesktopWorkerFor(store, account = {}) {
   }) || null;
 }
 
+function buildBrainSnapshot(store = {}, account = {}) {
+  const workers = collectionItems(store.desktopWorkers);
+  const selectedDesktop = activeDesktopWorkerFor(store, account);
+  const now = Date.now();
+  const cutoff = now - (5 * 60 * 1000);
+  const onlineWorkers = workers.filter((worker) => {
+    const updated = Date.parse(worker.lastSeenAt || worker.updatedAt || '');
+    if (!updated || updated < cutoff) return false;
+    if (worker.capabilities?.stems === false) return false;
+    return worker.status === 'online';
+  });
+  const selectedRoute = selectedDesktop ? 'desktop' : 'cloudflare_fallback';
+
+  return {
+    ok: true,
+    sourceOfTruth: 'cinestage_brain',
+    service: 'ultimate-playback-sync',
+    version: WORKER_VERSION,
+    checkedAt: nowIso(),
+    account: {
+      email: normalizeIdentifier(account.email || account.accountEmail || account.ownerEmail || account.identifier),
+      accountId: String(account.id || account.accountId || '').trim(),
+    },
+    brain: {
+      id: 'cinestage_brain',
+      name: 'CineStage Brain',
+      status: 'online',
+      syncUrl: 'https://ultimate-playback-sync.studio-cinestage.workers.dev',
+      authority: {
+        presence: true,
+        stemRouting: true,
+        serviceReadiness: true,
+        setlistApproval: true,
+        teamNotifications: true,
+      },
+    },
+    stemProcessingRoute: {
+      preferred: 'desktop',
+      selected: selectedRoute,
+      desktopOnline: Boolean(selectedDesktop),
+      desktopWorkerId: selectedDesktop?.id || '',
+      fallbackEligible: true,
+      fallbackReason: selectedDesktop ? '' : 'no_capable_desktop_online',
+      routeLabel: selectedDesktop ? 'Desktop processing' : 'Cloudflare fallback',
+      statusLabel: selectedDesktop ? 'Desktop processor online' : 'Desktop offline',
+      detail: selectedDesktop
+        ? `${selectedDesktop.name || 'CineStage Desktop'} is ready for stems`
+        : 'CineStage Brain will use the next available fallback lane',
+      queueDepth: selectedDesktop?.queueDepth ?? null,
+      activeJobId: selectedDesktop?.activeJobId || '',
+      lastSeenAt: selectedDesktop?.lastSeenAt || selectedDesktop?.updatedAt || '',
+    },
+    desktop: selectedDesktop || null,
+    desktops: workers,
+    onlineDesktops: onlineWorkers,
+    counts: {
+      desktops: workers.length,
+      onlineDesktops: onlineWorkers.length,
+      queuedStemJobs: stemJobItems(store).filter((job) => job.status === 'queued_for_desktop').length,
+      activeStemJobs: stemJobItems(store).filter((job) => ['queued_for_desktop', 'processing'].includes(job.status)).length,
+    },
+  };
+}
+
 function serviceEndDateForStemJob(job = {}, store = {}) {
   const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
   const date = String(job.serviceDate || service?.date || '').trim();
@@ -2774,6 +2838,13 @@ async function handleGet(env, store, path, url) {
       plans: store.plans && typeof store.plans === 'object' ? Object.keys(store.plans).length : 0,
       source: 'cloudflare-worker',
     });
+  }
+
+  if (path === '/sync/cinestage/brain' || path === '/sync/brain') {
+    return json(buildBrainSnapshot(store, {
+      email: url.searchParams.get('email') || url.searchParams.get('accountEmail') || url.searchParams.get('ownerEmail') || '',
+      id: url.searchParams.get('accountId') || '',
+    }));
   }
 
   if (path === '/sync/people') return json(store.people);

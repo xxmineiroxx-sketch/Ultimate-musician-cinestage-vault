@@ -60,6 +60,9 @@ App-to-desktop linkage, August 8, 2026:
 
 - Desktop Hub auto-starts its background stem worker when the desktop app launches.
 - Heartbeats now include account identity, worker mode, and backup-worker permission.
+- CineStage Brain is now the main source for ecosystem status. Apps should read `/sync/cinestage/brain` for the canonical route/status snapshot instead of deriving the route directly from raw desktop heartbeats.
+- `/sync/cinestage/desktops` stays available for diagnostics and admin inspection.
+- Worker version `2.4.4-brain-authority` owns desktop-primary routing, backup-worker fallback, service readiness authority, setlist approval authority, and team notification authority flags.
 - Cloudflare routing chooses exact account desktop first, then backup/library workers, then fallback.
 - Verified a Playback-style stem job from `xxmineiroxx@gmail.com` selected `desktop_MacBook-Pro` instead of Cloudflare fallback.
 

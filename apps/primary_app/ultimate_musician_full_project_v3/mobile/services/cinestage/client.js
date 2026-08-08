@@ -121,14 +121,44 @@ export function summarizeDesktopWorkers(workers = []) {
   };
 }
 
-export async function getStemProcessingRoute() {
-  const res = await fetch(`${normalizeBaseUrl(SYNC_URL)}/sync/cinestage/desktops`, {
+export async function getBrainAuthority(account = {}) {
+  const params = new URLSearchParams();
+  const email = account?.email || account?.accountEmail || account?.ownerEmail || "";
+  const accountId = account?.accountId || account?.id || "";
+  if (email) params.set("accountEmail", email);
+  if (accountId) params.set("accountId", accountId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${normalizeBaseUrl(SYNC_URL)}/sync/cinestage/brain${suffix}`, {
     headers: syncHeaders(),
   });
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
     throw new Error(payload?.error || payload?.detail || `Sync ${res.status}`);
   }
+  return payload;
+}
+
+export async function getStemProcessingRoute(account = {}) {
+  const payload = await getBrainAuthority(account);
+  const route = payload?.stemProcessingRoute;
+  if (route) {
+    return {
+      workers: payload.desktops || [],
+      onlineWorkers: payload.onlineDesktops || [],
+      primary: payload.desktop || null,
+      desktopOnline: Boolean(route.desktopOnline),
+      route: route.selected || "cloudflare_fallback",
+      routeLabel: route.routeLabel || (route.selected === "desktop" ? "Desktop processing" : "Cloudflare fallback"),
+      statusLabel: route.statusLabel || (route.desktopOnline ? "Desktop processor online" : "Desktop offline"),
+      detail: route.detail || "",
+      queueDepth: route.queueDepth ?? null,
+      activeJobId: route.activeJobId || "",
+      lastSeenAt: route.lastSeenAt || "",
+      sourceOfTruth: payload.sourceOfTruth || "cinestage_brain",
+      brain: payload.brain || null,
+    };
+  }
+
   const workers = Array.isArray(payload)
     ? payload
     : Array.isArray(payload?.desktops)
@@ -136,7 +166,10 @@ export async function getStemProcessingRoute() {
       : Array.isArray(payload?.workers)
         ? payload.workers
         : [];
-  return summarizeDesktopWorkers(workers);
+  return {
+    ...summarizeDesktopWorkers(workers),
+    sourceOfTruth: "desktop_heartbeat_list",
+  };
 }
 
 function getBrainBaseCandidates() {

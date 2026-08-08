@@ -521,9 +521,42 @@ export class CineStageAPI {
     return [];
   }
 
-  static async getStemProcessingRoute() {
+  static async getBrainAuthority(account = {}) {
+    const params = new URLSearchParams();
+    const email = account?.email || account?.accountEmail || account?.ownerEmail || '';
+    const accountId = account?.accountId || account?.id || '';
+    if (email) params.set('accountEmail', email);
+    if (accountId) params.set('accountId', accountId);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.fetchSyncJson(`/sync/cinestage/brain${suffix}`);
+  }
+
+  static async getStemProcessingRoute(account = {}) {
+    const snapshot = await this.getBrainAuthority(account);
+    const route = snapshot?.stemProcessingRoute;
+    if (route) {
+      return {
+        workers: snapshot.desktops || [],
+        onlineWorkers: snapshot.onlineDesktops || [],
+        primary: snapshot.desktop || null,
+        desktopOnline: Boolean(route.desktopOnline),
+        route: route.selected || 'cloudflare_fallback',
+        routeLabel: route.routeLabel || (route.selected === 'desktop' ? 'Desktop processing' : 'Cloudflare fallback'),
+        statusLabel: route.statusLabel || (route.desktopOnline ? 'Desktop processor online' : 'Desktop offline'),
+        detail: route.detail || '',
+        queueDepth: route.queueDepth ?? null,
+        activeJobId: route.activeJobId || '',
+        lastSeenAt: route.lastSeenAt || '',
+        sourceOfTruth: snapshot.sourceOfTruth || 'cinestage_brain',
+        brain: snapshot.brain || null,
+      };
+    }
+
     const workers = await this.listDesktopWorkers();
-    return this.summarizeDesktopWorkers(workers);
+    return {
+      ...this.summarizeDesktopWorkers(workers),
+      sourceOfTruth: 'desktop_heartbeat_list',
+    };
   }
 
   static async updateDesktopStemJob(jobId, payload = {}) {
