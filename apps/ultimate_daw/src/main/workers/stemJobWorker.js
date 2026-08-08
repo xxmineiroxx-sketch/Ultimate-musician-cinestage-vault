@@ -535,8 +535,7 @@ class DesktopStemJobWorker {
           deliveryMode = 'cloudflare_r2';
         }
       } catch (uploadErr) {
-        const uploadOptional = !uploadErr.status || [404, 501].includes(uploadErr.status);
-        if (!uploadOptional) throw uploadErr;
+        console.warn(`[stem-worker] Cloud upload skipped for ${job.id}: ${uploadErr.message}`);
       }
       const manifest = {
         jobId: job.id,
