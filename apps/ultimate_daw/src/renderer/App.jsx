@@ -2,6 +2,10 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 import { store } from './services/store';
+import {
+  DESKTOP_ACCESS_DENIED_MESSAGE,
+  resolveDesktopAccess,
+} from './services/desktopAccess';
 
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -39,24 +43,57 @@ function AuthProvider({ children }) {
   const [user, setUserState] = useState(null);
   const [profile, setProfileState] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [accessDeniedReason, setAccessDeniedReason] = useState('');
+
+  const revokeDesktopSession = useCallback(async (reason = DESKTOP_ACCESS_DENIED_MESSAGE) => {
+    await store.clearAll();
+    setUserState(null);
+    setProfileState(null);
+    setAccessDeniedReason(reason);
+  }, []);
 
   useEffect(() => {
     async function hydrate() {
       try {
         const savedUser = await store.getUser();
         const savedProfile = await store.getProfile();
-        if (savedUser) setUserState(savedUser);
+        if (savedUser) {
+          const access = await resolveDesktopAccess({ ...savedUser, profile: savedProfile });
+          if (!access.ok) {
+            await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
+            return;
+          }
+          setUserState({ ...savedUser, desktopRole: access.role });
+        }
         if (savedProfile) setProfileState(savedProfile);
       } catch (err) {
         console.error('[Auth] Hydration error:', err);
+        await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
       } finally {
         setLoading(false);
       }
     }
     hydrate();
-  }, []);
+  }, [revokeDesktopSession]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    const checkAccess = async () => {
+      const access = await resolveDesktopAccess({ ...user, profile }).catch(() => ({ ok: false }));
+      if (!cancelled && !access.ok) {
+        await revokeDesktopSession(DESKTOP_ACCESS_DENIED_MESSAGE);
+      }
+    };
+    const interval = setInterval(checkAccess, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [profile, revokeDesktopSession, user]);
 
   const setUser = useCallback(async (u) => {
+    setAccessDeniedReason('');
     setUserState(u);
     if (u) {
       await store.setUser(u);
@@ -78,6 +115,7 @@ function AuthProvider({ children }) {
     await store.clearAll();
     setUserState(null);
     setProfileState(null);
+    setAccessDeniedReason('');
   }, []);
 
   if (loading) {
@@ -89,7 +127,15 @@ function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, setUser, setProfile, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      profile,
+      accessDeniedReason,
+      setUser,
+      setProfile,
+      logout,
+      revokeDesktopSession,
+    }}>
       {children}
     </AuthContext.Provider>
   );

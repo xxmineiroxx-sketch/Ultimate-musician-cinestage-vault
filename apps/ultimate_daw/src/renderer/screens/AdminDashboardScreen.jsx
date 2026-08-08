@@ -17,7 +17,7 @@ const TABS = ['Team', 'Services', 'Songs', 'Analytics'];
 const SERVICE_TYPES = ['standard', 'communion', 'easter', 'christmas', 'conference', 'youth', 'rehearsal'];
 const GRANT_ROLES = [
   { value: 'none', label: 'Remove Access' },
-  { value: 'leader', label: 'Worship Leader' },
+  { value: 'manager', label: 'Worship Leader' },
   { value: 'md', label: 'Music Director' },
   { value: 'admin', label: 'Admin' },
 ];
@@ -313,7 +313,11 @@ export default function AdminDashboardScreen() {
     try {
       await fetchJson(`${SYNC_URL}/sync/role/grant`, {
         method: 'POST',
-        body: JSON.stringify({ email: member.email, role }),
+        body: JSON.stringify({
+          email: member.email,
+          role,
+          actorRole: user?.desktopRole || user?.grantedRole || user?.role || user?.orgRole || '',
+        }),
       });
       setMembers(prev => prev.map(m => m.email === member.email ? { ...m, grantedRole: role } : m));
     } catch (err) {

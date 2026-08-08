@@ -2,10 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { SYNC_URL, syncHeaders } from '../config/syncConfig';
 import { useAuth } from '../App';
+import {
+  DESKTOP_ACCESS_DENIED_MESSAGE,
+  resolveDesktopAccess,
+} from '../services/desktopAccess';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
-  const { setUser } = useAuth();
+  const { accessDeniedReason, setUser } = useAuth();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,7 +39,17 @@ export default function LoginScreen() {
         return;
       }
 
-      const userData = data.user || data;
+      const userData = {
+        ...(data.user || {}),
+        token: data.token || data.user?.token || '',
+        identifier: data.identifier || data.user?.identifier || identifier.trim(),
+        email: data.email || data.user?.email || identifier.trim(),
+        phone: data.phone || data.user?.phone || '',
+        name: data.name || data.user?.name || '',
+        role: data.role || data.user?.role || '',
+        grantedRole: data.grantedRole || data.user?.grantedRole || '',
+        orgRole: data.orgRole || data.user?.orgRole || '',
+      };
 
       // If server requires verification, go to verify screen first
       if (data.requiresVerification || data.needsVerification || userData.requiresVerification || userData.status === 'pending_verification') {
@@ -43,8 +57,15 @@ export default function LoginScreen() {
         return;
       }
 
-      await setUser(userData);
-      window.umDesktop?.store?.set('auth_user', userData);
+      const access = await resolveDesktopAccess(userData);
+      if (!access.ok) {
+        setError(DESKTOP_ACCESS_DENIED_MESSAGE);
+        return;
+      }
+
+      const desktopUser = { ...userData, desktopRole: access.role, grantedRole: access.role };
+      await setUser(desktopUser);
+      window.umDesktop?.store?.set('auth_user', desktopUser);
       navigate('/home');
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
@@ -67,9 +88,9 @@ export default function LoginScreen() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
           <h2 className="text-white text-xl font-semibold mb-6">Sign In</h2>
 
-          {error && (
+          {(error || accessDeniedReason) && (
             <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm rounded-lg px-4 py-3 mb-5">
-              {error}
+              {error || accessDeniedReason}
             </div>
           )}
 

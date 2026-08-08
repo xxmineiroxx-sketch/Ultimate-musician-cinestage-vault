@@ -1464,8 +1464,8 @@
     "hash": "53f22fc7cd22f11bd7cb9c03ea1c7b70"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/cloudflare/ultimate-playback-sync/worker.js": {
-    "mtime": 1786223935.9718132,
-    "hash": "ba252db4489314133319aa75afd72e56"
+    "mtime": 1786224523.8082094,
+    "hash": "37a38672b5a613f4d230d7b58eb84073"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/scripts/setup_xcode_targets.rb": {
     "mtime": 1786209566.1403875,
@@ -1840,8 +1840,8 @@
     "hash": "2784d35dd88b7c5c6eea33a95b0ceab4"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/App.jsx": {
-    "mtime": 1786211898.5925448,
-    "hash": "08c3075c373ad8aa2e1c5ad272a11d24"
+    "mtime": 1786224387.5620208,
+    "hash": "26cc9e211c2ab19b19f843708e27867c"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/App 2.jsx": {
     "mtime": 1786209565.3623867,
@@ -1868,8 +1868,8 @@
     "hash": "abbe38e467c5f2c469b659836c682859"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/AdminDashboardScreen.jsx": {
-    "mtime": 1786209565.3634458,
-    "hash": "21519b6f74285311b44da15d3ddf94f0"
+    "mtime": 1786224476.3573787,
+    "hash": "89e341abe0fca0e9fae13020c55d641b"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/LivePerformanceScreen.jsx": {
     "mtime": 1786220280.7927353,
@@ -1888,8 +1888,8 @@
     "hash": "2da49f03e347809dc6bba4a739bba66a"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/LoginScreen.jsx": {
-    "mtime": 1786209565.3646047,
-    "hash": "4b647a92188bf01727930ee10a0e9419"
+    "mtime": 1786224407.3017793,
+    "hash": "2c186eb8c78095cc8b2bd0ae7d34bd56"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/PersonalPracticeScreen.jsx": {
     "mtime": 1786209565.3649733,
@@ -1954,6 +1954,10 @@
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/components/TopBar.jsx": {
     "mtime": 1786209565.3627656,
     "hash": "22b66f422c46a19aea7c1ba41ed32c85"
+  },
+  "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/services/desktopAccess.js": {
+    "mtime": 1786224367.551993,
+    "hash": "2d69b52b40295c77bfbe9efbf35082b6"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/services/store.js": {
     "mtime": 1786209565.3658473,
@@ -2311,6 +2315,10 @@
     "mtime": 1786223280.966518,
     "hash": "fd9e4954a68338097e1a83f1920ac6e8"
   },
+  "/Users/studio/Ultimate-musician-cinestage-vault/docs/desktop-dashboard-role-access-2026-08-08.md": {
+    "mtime": 1786224535.0645118,
+    "hash": "11ce84f1862a531e9da78c0ca72c9142"
+  },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/docker-desktop-audit-2026-08-01.md": {
     "mtime": 1786209566.1502943,
     "hash": "4e767da82378ddfa36704c7dd1631252"
@@ -2390,6 +2398,10 @@
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - CineStage Brain Query Compatibility Fix.md": {
     "mtime": 1786223997.8094406,
     "hash": "a051d83f00d7560d0a5eb27806e10d67"
+  },
+  "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - Desktop Dashboard Role Access.md": {
+    "mtime": 1786224535.161882,
+    "hash": "a569c7cef5b6f52474c4c2e30cfa000a"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - Competitive Feature Gap Audit 2026-08-01.md": {
     "mtime": 1786209566.1506965,

@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.6-brain-query-compat';
+const WORKER_VERSION = '2.4.7-desktop-role-gate';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -106,6 +106,10 @@ function isAdminGrantRole(value) {
 
 function isElevatedGrantRole(value) {
   return ['org_owner', 'admin', 'manager', 'md'].includes(normalizeGrantRole(value));
+}
+
+function isDesktopAccessGrantRole(value) {
+  return ['org_owner', 'admin', 'manager'].includes(normalizeGrantRole(value));
 }
 
 function collectionItems(value) {
@@ -1539,6 +1543,37 @@ async function handleBrainQuery(request, env, store) {
   });
 }
 
+function desktopAccessFor(store, identifier = '') {
+  const email = normalizeIdentifier(identifier);
+  const person = findPerson(store, { email, identifier: email }) || {};
+  const user = email ? store.users?.[lookupKey(email)] || {} : {};
+  const hasGrantRecord = Boolean(email && store.grants && Object.prototype.hasOwnProperty.call(store.grants, email));
+  const grant = hasGrantRecord ? store.grants[email] || {} : {};
+  const role = normalizeGrantRole(
+    hasGrantRecord
+      ? (grant.grantedRole || grant.role || '')
+      : (user.grantedRole || user.role || person.grantedRole || person.role || '')
+  );
+  const canAccessDesktop = isDesktopAccessGrantRole(role);
+  return {
+    ok: true,
+    email,
+    role,
+    desktopRole: role,
+    canAccessDesktop,
+    reason: canAccessDesktop ? 'allowed_desktop_role' : 'desktop_role_required',
+    allowedRoles: ['org_owner', 'admin', 'manager'],
+  };
+}
+
+async function handleDesktopAccess(request, store, url) {
+  if (request.method === 'POST') {
+    const body = await readJson(request);
+    return json(desktopAccessFor(store, body.email || body.identifier || body.phone || ''));
+  }
+  return json(desktopAccessFor(store, url.searchParams.get('email') || url.searchParams.get('identifier') || ''));
+}
+
 function serviceEndDateForStemJob(job = {}, store = {}) {
   const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
   const date = String(job.serviceDate || service?.date || '').trim();
@@ -2612,6 +2647,7 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
     return handleDesktopHeartbeat(request, env, store);
   }
+  if (path === '/sync/desktop/access') return handleDesktopAccess(request, store, url);
   if (path === '/api/brain/query' || path === '/sync/cinestage/brain/query' || path === '/sync/brain/query') {
     return handleBrainQuery(request, env, store);
   }
@@ -2644,7 +2680,7 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/services/propose') return handleProposeService(request, env, store);
   if (path === '/sync/services/approve') return handleApproveService(request, env, store, url);
   if (path === '/sync/services/reject') return handleRejectService(request, env, store, url);
-  if (path === '/sync/grant' || path === '/sync/setlist/creator') {
+  if (path === '/sync/grant' || path === '/sync/role/grant' || path === '/sync/setlist/creator') {
     const body = await readJson(request);
     const email = normalizeIdentifier(body.email);
     if (!email) return json({ ok: false, error: 'email is required' }, 400);
@@ -2901,7 +2937,7 @@ async function handlePost(request, env, store, path, url) {
   return json({ ok: true, id: `sync_${Date.now()}` });
 }
 
-async function handleGet(env, store, path, url) {
+async function handleGet(request, env, store, path, url) {
   if (path === '/sync/status' || path === '/health') {
     return json({
       ok: true,
@@ -2921,15 +2957,20 @@ async function handleGet(env, store, path, url) {
       id: url.searchParams.get('accountId') || '',
     }));
   }
+  if (path === '/sync/desktop/access') return handleDesktopAccess(request, store, url);
 
   if (path === '/sync/people') return json(store.people);
   if (path === '/sync/role') {
     const email = normalizeIdentifier(url.searchParams.get('email') || '');
     const person = findPerson(store, { email, identifier: email }) || {};
-    const grant = email ? store.grants?.[email] || {} : {};
+    const hasGrantRecord = Boolean(email && store.grants && Object.prototype.hasOwnProperty.call(store.grants, email));
+    const grant = hasGrantRecord ? store.grants[email] || {} : {};
     const user = email ? store.users?.[lookupKey(email)] || {} : {};
-    const grantedRole = grant.grantedRole || grant.role || user.grantedRole || person.grantedRole || '';
+    const grantedRole = hasGrantRecord
+      ? (grant.grantedRole || grant.role || '')
+      : (user.grantedRole || person.grantedRole || '');
     const orgRole = user.orgRole || person.orgRole || person.role || '';
+    const desktopRole = normalizeGrantRole(grantedRole || orgRole);
     const roles = [
       ...(Array.isArray(person.roles) ? person.roles : []),
       ...(Array.isArray(grant.roles) ? grant.roles : []),
@@ -2950,6 +2991,8 @@ async function handleGet(env, store, path, url) {
       roles: [...new Set(roles)],
       roleAssignments: person.roleAssignments || grant.roleAssignments || roles.join(', '),
       canCreateSetlists: Boolean(grant.canCreateSetlists || canCreateSetlist(store, person, '', {})),
+      desktopRole,
+      canAccessDesktop: isDesktopAccessGrantRole(desktopRole),
     });
   }
   if (path === '/sync/cinestage/desktops' || path === '/sync/desktop/workers') {
@@ -3059,7 +3102,7 @@ export default {
     const path = url.pathname;
     const store = await getStore(env);
 
-    if (request.method === 'GET') return handleGet(env, store, path, url);
+    if (request.method === 'GET') return handleGet(request, env, store, path, url);
     if (request.method === 'POST') return handlePost(request, env, store, path, url);
     if (request.method === 'DELETE') return json({ ok: true });
 
