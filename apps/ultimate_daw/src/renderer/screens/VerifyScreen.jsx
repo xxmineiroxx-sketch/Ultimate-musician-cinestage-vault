@@ -1,12 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { SYNC_URL, syncHeaders } from '../config/syncConfig';
+import { useAuth } from '../App';
+import {
+  DESKTOP_ACCESS_DENIED_MESSAGE,
+  resolveDesktopAccess,
+} from '../services/desktopAccess';
 
 export default function VerifyScreen() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setUser } = useAuth();
 
   const emailFromState = location.state?.email || '';
+  const identifierFromState = location.state?.identifier || emailFromState;
+  const purposeFromState = location.state?.purpose || 'login';
+  const verificationCodeFromState = location.state?.verificationCode || '';
   const [email, setEmail] = useState(emailFromState);
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -80,7 +89,13 @@ export default function VerifyScreen() {
       const res = await fetch(`${SYNC_URL}/sync/auth/verify`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ email: email.trim().toLowerCase(), code }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          identifier: identifierFromState || email.trim().toLowerCase(),
+          code,
+          purpose: purposeFromState,
+          client: 'ultimate_daw_desktop',
+        }),
       });
 
       const data = await res.json();
@@ -90,7 +105,28 @@ export default function VerifyScreen() {
         return;
       }
 
-      navigate('/login', { state: { successMessage: 'Email verified! You can now sign in.' } });
+      const userData = {
+        ...(data.user || {}),
+        token: data.token || data.user?.token || '',
+        identifier: data.identifier || data.user?.identifier || identifierFromState || email.trim(),
+        email: data.email || data.user?.email || email.trim(),
+        phone: data.phone || data.user?.phone || '',
+        name: data.name || data.user?.name || '',
+        role: data.role || data.user?.role || '',
+        grantedRole: data.grantedRole || data.user?.grantedRole || '',
+        orgRole: data.orgRole || data.user?.orgRole || '',
+      };
+
+      const access = await resolveDesktopAccess(userData);
+      if (!access.ok) {
+        setError(DESKTOP_ACCESS_DENIED_MESSAGE);
+        return;
+      }
+
+      const desktopUser = { ...userData, desktopRole: access.role, grantedRole: access.role };
+      await setUser(desktopUser);
+      window.umDesktop?.store?.set('auth_user', desktopUser);
+      navigate('/home');
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
     } finally {
@@ -112,7 +148,12 @@ export default function VerifyScreen() {
       const res = await fetch(`${SYNC_URL}/sync/auth/resend-verification`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          identifier: identifierFromState || email.trim().toLowerCase(),
+          purpose: purposeFromState,
+          client: 'ultimate_daw_desktop',
+        }),
       });
 
       const data = await res.json();
@@ -122,7 +163,9 @@ export default function VerifyScreen() {
         return;
       }
 
-      setSuccessMsg('A new code has been sent to your email.');
+      setSuccessMsg(data.verificationCode
+        ? `A new code has been sent. Beta code: ${data.verificationCode}`
+        : 'A new code has been sent to your email.');
       setDigits(['', '', '', '', '', '']);
       inputRefs.current[0]?.focus();
     } catch (err) {
@@ -176,6 +219,12 @@ export default function VerifyScreen() {
           {successMsg && (
             <div className="bg-green-900/40 border border-green-700 text-green-300 text-sm rounded-lg px-4 py-3 mb-5">
               {successMsg}
+            </div>
+          )}
+
+          {verificationCodeFromState && !successMsg && (
+            <div className="bg-indigo-950/50 border border-indigo-700 text-indigo-200 text-sm rounded-lg px-4 py-3 mb-5">
+              Beta verification code: {verificationCodeFromState}
             </div>
           )}
 

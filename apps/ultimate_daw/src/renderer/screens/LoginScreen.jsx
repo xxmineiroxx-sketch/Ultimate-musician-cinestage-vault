@@ -29,7 +29,12 @@ export default function LoginScreen() {
       const res = await fetch(`${SYNC_URL}/sync/auth/login`, {
         method: 'POST',
         headers: syncHeaders(),
-        body: JSON.stringify({ identifier: identifier.trim(), password }),
+        body: JSON.stringify({
+          identifier: identifier.trim(),
+          password,
+          client: 'ultimate_daw_desktop',
+          requireVerification: true,
+        }),
       });
 
       const data = await res.json();
@@ -53,7 +58,14 @@ export default function LoginScreen() {
 
       // If server requires verification, go to verify screen first
       if (data.requiresVerification || data.needsVerification || userData.requiresVerification || userData.status === 'pending_verification') {
-        navigate('/verify', { state: { email: (userData.email || identifier).trim() } });
+        navigate('/verify', {
+          state: {
+            email: (data.email || userData.email || identifier).trim(),
+            identifier: (data.identifier || userData.identifier || identifier).trim(),
+            purpose: data.verificationPurpose || 'login',
+            verificationCode: data.verificationCode || '',
+          },
+        });
         return;
       }
 

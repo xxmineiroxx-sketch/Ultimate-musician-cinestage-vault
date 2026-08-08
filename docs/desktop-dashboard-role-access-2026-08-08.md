@@ -15,6 +15,7 @@ Music Director, Lead Singer, setlist creators, musicians, vocals, and volunteers
 ## Enforcement
 
 - Desktop login checks `/sync/desktop/access` after password authentication.
+- Desktop login now requires the `/sync/auth/verify` code challenge before creating the desktop session.
 - Saved desktop sessions re-check the live role grant on app startup.
 - Active desktop sessions re-check the live grant every 60 seconds.
 - If the role is removed, the desktop session is cleared and the user is returned to sign in.
@@ -26,4 +27,4 @@ The sync Worker treats explicit grant records as authoritative. If a user is set
 
 Live Worker version:
 
-- `2.4.7-desktop-role-gate`
+- `2.4.8-desktop-login-verification`

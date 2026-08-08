@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.7-desktop-role-gate';
+const WORKER_VERSION = '2.4.8-desktop-login-verification';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -80,6 +80,17 @@ function normalizePhone(value) {
 
 function normalizeRole(value) {
   return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function shouldRequireLoginVerification(body = {}) {
+  const client = normalizeRole(body.client || body.app || body.source || '');
+  return Boolean(
+    body.requireVerification ||
+    body.requireLoginVerification ||
+    client === 'ultimate_daw_desktop' ||
+    client === 'ultimate_daw' ||
+    client === 'desktop'
+  );
 }
 
 function normalizeGrantRole(value) {
@@ -593,6 +604,34 @@ async function handleLogin(request, env, store) {
     phone: user.phone,
     identifier,
   }) || profilePayload(user);
+
+  if (shouldRequireLoginVerification(body)) {
+    const challenge = createAuthChallenge(user, 'login');
+    user.lastLoginChallengeAt = nowIso();
+    user.updatedAt = user.lastLoginChallengeAt;
+    await saveStore(env, store);
+    return json({
+      ok: true,
+      requiresVerification: true,
+      needsVerification: true,
+      verificationPurpose: 'login',
+      email: user.email || identifier,
+      identifier,
+      user: {
+        id: user.id,
+        personId: user.personId,
+        email: user.email || '',
+        phone: user.phone || '',
+        identifier,
+        name: user.name || '',
+        status: 'pending_verification',
+      },
+      verificationCode: challenge.code,
+      betaVerification: true,
+      expiresAt: challenge.expiresAt,
+    });
+  }
+
   const token = await createSession(store, user, body.deviceId);
   await saveStore(env, store);
 
@@ -628,6 +667,28 @@ function authChallengeCode(challenge) {
   if (typeof challenge === 'string' || typeof challenge === 'number') return String(challenge).trim();
   if (!challenge || typeof challenge !== 'object') return '';
   return String(challenge.code || challenge.token || challenge.value || '').trim();
+}
+
+function createAuthChallenge(user = {}, purpose = 'login') {
+  const normalizedPurpose = normalizeRole(purpose || 'login');
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const challenge = {
+    code,
+    purpose: normalizedPurpose,
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    createdAt: nowIso(),
+  };
+
+  if (normalizedPurpose === 'login') {
+    user.loginVerification = challenge;
+    user.loginChallenge = challenge;
+  } else if (normalizedPurpose === 'signup') {
+    user.signupVerification = challenge;
+  } else {
+    user.authChallenge = challenge;
+  }
+
+  return challenge;
 }
 
 function authChallengeExpired(challenge) {
@@ -682,6 +743,35 @@ async function handleVerifyAuth(request, env, store) {
   await saveStore(env, store);
 
   return json(authResponse(user, token, profile));
+}
+
+async function handleResendVerification(request, env, store) {
+  const body = await readJson(request);
+  const identifier = normalizeIdentifier(body.identifier || body.email || body.phone);
+  const purpose = normalizeRole(body.purpose || 'login');
+
+  if (!identifier) {
+    return json({ ok: false, error: 'Email or phone is required.' }, 400);
+  }
+
+  const user = store.users[lookupKey(identifier)];
+  if (!user) return json({ ok: false, error: 'Account not found.' }, 404);
+
+  const challenge = createAuthChallenge(user, purpose);
+  user.updatedAt = nowIso();
+  await saveStore(env, store);
+
+  return json({
+    ok: true,
+    sent: true,
+    requiresVerification: true,
+    verificationPurpose: purpose,
+    email: user.email || identifier,
+    identifier,
+    verificationCode: challenge.code,
+    betaVerification: true,
+    expiresAt: challenge.expiresAt,
+  });
 }
 
 async function handleForgotPassword(request, env, store) {
@@ -2630,6 +2720,7 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/auth/forgot-password' || path === '/sync/auth/resend') {
     return handleForgotPassword(request, env, store);
   }
+  if (path === '/sync/auth/resend-verification') return handleResendVerification(request, env, store);
   if (path === '/sync/auth/reset-password') return handleResetPassword(request, env, store);
   if (path === '/sync/auth/change-password') return handleChangePassword(request, env, store);
   if (path === '/sync/auth/verify') return handleVerifyAuth(request, env, store);
