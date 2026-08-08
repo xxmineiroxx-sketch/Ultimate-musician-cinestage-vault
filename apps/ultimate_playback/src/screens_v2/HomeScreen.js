@@ -36,7 +36,7 @@ import {
 } from '../services/serviceBundleCache';
 import { playNotificationSound } from '../services/notificationSounds';
 import { ROLE_LABELS } from '../models_v2/models';
-import { normalizeGrantRole } from '../utils/roleUtils';
+import { ADMIN_GRANT_ROLES, LEADER_GRANT_ROLES, normalizeGrantRole } from '../utils/roleUtils';
 import {
   formatServiceTime,
   getServiceDateKey,
@@ -378,6 +378,21 @@ function isPastService(dateStr) {
   const svc = new Date(String(dateStr).includes('T') ? dateStr : dateStr + 'T00:00:00');
   svc.setHours(0, 0, 0, 0);
   return svc < today;
+}
+
+function serviceDateLabel(assignment) {
+  if (!assignment?.service_date) return 'Date pending';
+  return new Date(
+    String(assignment.service_date).includes('T')
+      ? assignment.service_date
+      : assignment.service_date + 'T00:00:00'
+  ).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  });
+}
+
+function serviceRoleLabels(group = []) {
+  return [...new Set(group.map(a => ROLE_LABELS[a.role] || a.role).filter(Boolean))];
 }
 
 export default function HomeScreen({ navigation }) {
@@ -965,6 +980,19 @@ export default function HomeScreen({ navigation }) {
   const serviceGroups = groupByService(activeAssignments);
   const pendingCount  = serviceGroups.filter(g => groupStatus(g) === 'pending').length;
   const acceptedCount = serviceGroups.filter(g => groupStatus(g) === 'accepted').length;
+  const grantRole = normalizeGrantRole(
+    mdRole ||
+    profile?.grantedRole ||
+    profile?.role ||
+    profile?.orgRole ||
+    ''
+  );
+  const hasFullDashboard = ADMIN_GRANT_ROLES.has(grantRole);
+  const hasPlanningAccess = LEADER_GRANT_ROLES.has(grantRole);
+  const isSimpleMemberHome = !hasFullDashboard && !hasPlanningAccess;
+  const nextServiceGroup = upcomingServices[0] || null;
+  const nextService = nextServiceGroup?.[0] || null;
+  const nextServiceRoles = serviceRoleLabels(nextServiceGroup || []);
 
   // ── Deadline reminder: pending assignments with service_date within 3 days ──
   const urgentAssignments = useMemo(() => {
@@ -1149,6 +1177,141 @@ export default function HomeScreen({ navigation }) {
         </Animated.View>
       ) : null}
 
+      {isSimpleMemberHome ? (
+        <>
+          <View style={styles.memberHero}>
+            <View style={styles.memberHeroTop}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.memberEyebrow}>My Next Step</Text>
+                <Text style={styles.memberHeroTitle}>
+                  {nextService ? (nextService.service_name || nextService.name || 'Upcoming Service') : 'You are all caught up'}
+                </Text>
+              </View>
+              <View style={styles.memberStatusPill}>
+                <Text style={styles.memberStatusText}>
+                  {pendingCount > 0 ? `${pendingCount} pending` : 'Ready'}
+                </Text>
+              </View>
+            </View>
+
+            {nextService ? (
+              <>
+                <Text style={styles.memberServiceDate}>{serviceDateLabel(nextService)}</Text>
+                {nextServiceRoles.length > 0 ? (
+                  <View style={styles.memberRoleRow}>
+                    {nextServiceRoles.map((role) => (
+                      <View key={role} style={styles.memberRoleChip}>
+                        <Text style={styles.memberRoleChipText}>{role}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                <View style={styles.memberPrimaryActions}>
+                  <TouchableOpacity
+                    style={styles.memberPrimaryButton}
+                    onPress={() => openServiceCard(nextServiceGroup)}
+                  >
+                    <Text style={styles.memberPrimaryButtonText}>Open Setlist</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.memberSecondaryButton}
+                    onPress={() => navigation.navigate('PersonalPractice')}
+                  >
+                    <Text style={styles.memberSecondaryButtonText}>Practice</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={styles.memberServiceDate}>No assigned services are due right now.</Text>
+                <TouchableOpacity
+                  style={[styles.memberPrimaryButton, { alignSelf: 'flex-start', marginTop: 16 }]}
+                  onPress={() => navigation.navigate('ProfileTab')}
+                >
+                  <Text style={styles.memberPrimaryButtonText}>Review Profile</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
+          {pendingCount > 0 ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={styles.memberAlert}
+              onPress={() => navigation.navigate('Assignments')}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.memberAlertTitle}>Response needed</Text>
+                <Text style={styles.memberAlertText}>
+                  Accept or decline your pending assignment{pendingCount > 1 ? 's' : ''}.
+                </Text>
+              </View>
+              <Text style={styles.memberAlertArrow}>Review</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {upcomingServices.length > 0 ? (
+            <View style={styles.memberSection}>
+              <Text style={styles.memberSectionTitle}>Upcoming Services</Text>
+              {upcomingServices.slice(0, 3).map((group) => {
+                const first = group[0];
+                const roles = serviceRoleLabels(group);
+                return (
+                  <TouchableOpacity
+                    key={first.service_id || first.id}
+                    style={styles.memberServiceRow}
+                    onPress={() => setServiceDetailGroup(group)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberServiceName}>{first.service_name || first.name || 'Service'}</Text>
+                      <Text style={styles.memberServiceMeta}>{serviceDateLabel(first)}</Text>
+                      {roles.length > 0 ? (
+                        <Text style={styles.memberServiceMeta} numberOfLines={1}>{roles.join(' · ')}</Text>
+                      ) : null}
+                    </View>
+                    <Text style={styles.memberServiceArrow}>›</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+
+          <View style={styles.memberSection}>
+            <Text style={styles.memberSectionTitle}>My Tools</Text>
+            <View style={styles.memberToolGrid}>
+              <TouchableOpacity style={styles.memberTool} onPress={() => navigation.navigate('Setlist')}>
+                <Text style={styles.memberToolIcon}>📋</Text>
+                <Text style={styles.memberToolText}>Setlist</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.memberTool} onPress={() => navigation.navigate('Assignments')}>
+                <Text style={styles.memberToolIcon}>📬</Text>
+                <Text style={styles.memberToolText}>Assignments</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.memberTool} onPress={() => navigation.navigate('Messages')}>
+                <Text style={styles.memberToolIcon}>💬</Text>
+                <Text style={styles.memberToolText}>Messages</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.memberTool} onPress={() => setShowSuggestSong(true)}>
+                <Text style={styles.memberToolIcon}>🎵</Text>
+                <Text style={styles.memberToolText}>Suggest</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ModernDashboardCard variant="verse">
+            <View style={styles.verseHeader}>
+              <Text style={styles.verseLabel}>Verse of the Day</Text>
+              <Text style={styles.verseSeason}>{seasonTheme.label}</Text>
+            </View>
+            <Text style={styles.verseText}>"{verseOfDay.text}"</Text>
+            <Text style={styles.verseRef}>{verseOfDay.ref}</Text>
+          </ModernDashboardCard>
+        </>
+      ) : null}
+
+      {!isSimpleMemberHome ? (
+        <>
       <View style={isTablet && styles.tabletRow}>
         <View style={isTablet && styles.tabletColumn}>
           {!profile && (
@@ -1412,6 +1575,8 @@ export default function HomeScreen({ navigation }) {
           />
         )
       }
+        </>
+      ) : null}
 
       {/* ── Monthly Assignment Tracker (hidden — last day of month only) ── */}
       <Modal
@@ -1601,6 +1766,7 @@ export default function HomeScreen({ navigation }) {
       </Modal>
 
       {/* Quick Actions Grid */}
+      {!isSimpleMemberHome ? (
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         
@@ -1631,6 +1797,7 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       </View>
+      ) : null}
 
       {/* ── This Week Practice Summary ───────────────────────────────────── */}
       {practiceStats && (
@@ -1834,6 +2001,192 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  memberHero: {
+    backgroundColor: '#0B1120',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1E3A8A',
+    padding: 18,
+    marginBottom: 16,
+  },
+  memberHeroTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  memberEyebrow: {
+    color: '#60A5FA',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  memberHeroTitle: {
+    color: '#F9FAFB',
+    fontSize: 23,
+    fontWeight: '900',
+    lineHeight: 29,
+  },
+  memberStatusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    backgroundColor: '#1D4ED822',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  memberStatusText: {
+    color: '#BFDBFE',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  memberServiceDate: {
+    color: '#CBD5E1',
+    fontSize: 14,
+    marginTop: 12,
+    lineHeight: 20,
+  },
+  memberRoleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  memberRoleChip: {
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  memberRoleChipText: {
+    color: '#A5B4FC',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  memberPrimaryActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  memberPrimaryButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  memberPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  memberSecondaryButton: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  memberSecondaryButtonText: {
+    color: '#CBD5E1',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  memberAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#451A03',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#B45309',
+    padding: 14,
+    marginBottom: 16,
+  },
+  memberAlertTitle: {
+    color: '#FEF3C7',
+    fontSize: 15,
+    fontWeight: '900',
+    marginBottom: 3,
+  },
+  memberAlertText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  memberAlertArrow: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  memberSection: {
+    marginBottom: 18,
+  },
+  memberSectionTitle: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    fontWeight: '900',
+    marginBottom: 10,
+  },
+  memberServiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    padding: 14,
+    marginBottom: 8,
+  },
+  memberServiceName: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '900',
+    marginBottom: 3,
+  },
+  memberServiceMeta: {
+    color: '#94A3B8',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  memberServiceArrow: {
+    color: '#475569',
+    fontSize: 28,
+  },
+  memberToolGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  memberTool: {
+    width: '47%',
+    minHeight: 78,
+    backgroundColor: '#0F172A',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  memberToolIcon: {
+    fontSize: 25,
+    marginBottom: 6,
+  },
+  memberToolText: {
+    color: '#F1F5F9',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   // Monthly tracker modal (hidden — last day of month only)
   monthlyBackdrop: {
