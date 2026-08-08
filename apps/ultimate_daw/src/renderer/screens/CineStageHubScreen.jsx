@@ -55,6 +55,9 @@ export default function CineStageHubScreen() {
   const [preview, setPreview] = useState(null);
   const [matchQuery, setMatchQuery] = useState({ artist: '', title: '' });
   const [match, setMatch] = useState(null);
+  const [chartRequest, setChartRequest] = useState({ artist: '', title: '', key: '', bpm: '' });
+  const [chartAnalysis, setChartAnalysis] = useState(null);
+  const [chartState, setChartState] = useState('idle');
   const [workerStatus, setWorkerStatus] = useState({ running: false, pid: null, lastExit: null });
   const [brainStatus, setBrainStatus] = useState(null);
 
@@ -113,7 +116,7 @@ export default function CineStageHubScreen() {
       setConfig(saved);
       const nextIndex = await api.scanLibraries({ libraryRoots: saved.libraryRoots, indexPath: saved.indexPath });
       setIndex(nextIndex);
-      setMessage(`Indexed ${nextIndex.songCount} songs and ${nextIndex.stemCount} stems.`);
+      setMessage(`Indexed ${nextIndex.songCount} songs, ${nextIndex.stemCount} stems, and ${nextIndex.chartCount || 0} charts.`);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -144,6 +147,40 @@ export default function CineStageHubScreen() {
   const findMatch = async () => {
     const result = await api.findMatch({ ...matchQuery, minScore: 40 });
     setMatch(result);
+  };
+
+  const analyzeChart = async () => {
+    setChartState('analyzing');
+    setMessage('');
+    try {
+      const result = await api.analyzeChartRequest({ ...chartRequest, minScore: 30 });
+      setChartAnalysis(result);
+      setMessage(result?.analysis?.hasChart ? 'Chart vault match analyzed.' : 'No local chart match found yet. Choose the chart folder and scan again.');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setChartState('idle');
+    }
+  };
+
+  const prepareChartWorkspace = async () => {
+    setChartState('preparing');
+    setMessage('');
+    try {
+      const result = await api.prepareChartWorkspace({ ...chartRequest, minScore: 30 });
+      setChartAnalysis(result);
+      setPreviewSong({
+        artist: result.analysis.artist || chartRequest.artist,
+        album: result.analysis.album || 'Singles',
+        title: result.analysis.title || chartRequest.title,
+      });
+      setPreview({ path: result.workspace.songDir, ...result.analysis });
+      setMessage('Chart workspace prepared with metadata for CineStage Brain review.');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setChartState('idle');
+    }
   };
 
   if (!api) {
@@ -187,7 +224,7 @@ export default function CineStageHubScreen() {
       <div className="grid grid-cols-4 gap-3">
         <Stat label="Songs Indexed" value={index?.songCount || 0} />
         <Stat label="Stems Found" value={index?.stemCount || 0} />
-        <Stat label="Library Roots" value={(config.libraryRoots || []).length} />
+        <Stat label="Charts Found" value={index?.chartCount || 0} />
         <Stat label="Mode" value={WORKER_MODES[config.workerMode] || 'Desktop'} />
       </div>
 
@@ -278,6 +315,58 @@ export default function CineStageHubScreen() {
           className="mt-4 h-24 w-full border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-200 outline-none focus:border-indigo-500"
         />
         <p className="mt-2 text-xs text-slate-500">Use one folder per line. External drives, shared folders, and your always-on laptop library mounts can all be indexed.</p>
+      </section>
+
+      <section className="mt-5 border border-amber-900/70 bg-amber-950/10 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-amber-300">Chart Vault</p>
+            <h2 className="mt-1 text-lg font-black">Local Chart and Lyrics Search</h2>
+            <p className="mt-1 text-sm text-slate-400">Search selected folders for existing charts before CineStage Brain fills missing key, BPM, chords, lyrics, or stems.</p>
+          </div>
+          <div className="border border-amber-700 bg-amber-950/50 px-3 py-2 text-sm font-black text-amber-200">
+            {(index?.chartCount || 0)} charts indexed
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-[1fr_1fr_90px_90px] gap-3">
+          <Field label="Artist / Band" value={chartRequest.artist} onChange={(value) => setChartRequest((request) => ({ ...request, artist: value }))} placeholder="Maverick City Music" />
+          <Field label="Song" value={chartRequest.title} onChange={(value) => setChartRequest((request) => ({ ...request, title: value }))} placeholder="Firm Foundation" />
+          <Field label="Key" value={chartRequest.key} onChange={(value) => setChartRequest((request) => ({ ...request, key: value }))} placeholder="C" />
+          <Field label="BPM" type="number" value={chartRequest.bpm} onChange={(value) => setChartRequest((request) => ({ ...request, bpm: value }))} placeholder="72" />
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button onClick={analyzeChart} disabled={chartState !== 'idle'} className="border border-amber-500 bg-amber-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {chartState === 'analyzing' ? 'Analyzing...' : 'Analyze Local Chart'}
+          </button>
+          <button onClick={prepareChartWorkspace} disabled={chartState !== 'idle'} className="border border-indigo-500 bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+            {chartState === 'preparing' ? 'Preparing...' : 'Create Working Area'}
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-[0.8fr_1.2fr] gap-4">
+          <div className="border border-slate-800 bg-slate-950 p-3 text-sm text-slate-300">
+            {chartAnalysis?.analysis ? (
+              <div>
+                <p className="font-bold text-white">{chartAnalysis.analysis.title || 'Untitled'} · {chartAnalysis.analysis.artist || 'Unknown Artist'}</p>
+                <p className="mt-1 text-xs text-slate-500">Confidence {chartAnalysis.analysis.confidence}% · Key {chartAnalysis.analysis.key || 'missing'} · BPM {chartAnalysis.analysis.bpm || 'missing'}</p>
+                <p className="mt-2 text-xs text-slate-400">Source: <span className="break-all font-mono text-slate-300">{chartAnalysis.sourcePath || 'No local chart found'}</span></p>
+                {chartAnalysis.workspace?.songDir ? (
+                  <p className="mt-2 text-xs text-emerald-300 break-all">Workspace: {chartAnalysis.workspace.songDir}</p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {['hasChart', 'hasChords', 'hasLyrics'].map((key) => (
+                    <span key={key} className={`border px-2 py-1 text-[11px] font-bold ${chartAnalysis.analysis[key] ? 'border-emerald-700 bg-emerald-950/40 text-emerald-200' : 'border-slate-700 bg-slate-900 text-slate-500'}`}>
+                      {key.replace('has', '')}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-3 text-xs text-slate-500">Needs review: {(chartAnalysis.analysis.missing || []).join(', ') || 'ready for approval'}</p>
+              </div>
+            ) : 'No chart analysis yet.'}
+          </div>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300">
+            {chartAnalysis?.analysis?.preview || 'Chart preview will appear here for text, ChordPro, markdown, CRD, or TXT files. PDF and DOCX files are indexed by filename until a parser is added.'}
+          </pre>
+        </div>
       </section>
 
       <div className="mt-5 grid grid-cols-2 gap-5">

@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('umDesktop', {
     scanLibraries: (options) => ipcRenderer.invoke('stemHub:scan-libraries', options),
     getIndex: (indexPath) => ipcRenderer.invoke('stemHub:get-index', indexPath),
     findMatch: (query) => ipcRenderer.invoke('stemHub:find-match', query),
+    analyzeChartRequest: (query) => ipcRenderer.invoke('stemHub:analyze-chart-request', query),
+    prepareChartWorkspace: (query) => ipcRenderer.invoke('stemHub:prepare-chart-workspace', query),
     workerEnv: () => ipcRenderer.invoke('stemHub:worker-env'),
     workerStatus: () => ipcRenderer.invoke('stemHub:worker-status'),
     brainStatus: () => ipcRenderer.invoke('stemHub:brain-status'),

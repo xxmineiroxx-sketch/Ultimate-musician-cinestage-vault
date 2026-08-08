@@ -7,6 +7,7 @@ const path = require('path');
 
 const AUDIO_EXTENSIONS = new Set(['.aac', '.aif', '.aiff', '.caf', '.flac', '.m4a', '.mp3', '.mp4', '.ogg', '.opus', '.wav']);
 const CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.docx', '.md', '.pdf', '.txt']);
+const TEXT_CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.md', '.txt']);
 const STEM_TYPES = [
   'drums',
   'bass',
@@ -125,6 +126,59 @@ function readJson(filePath) {
   } catch {
     return null;
   }
+}
+
+function readTextChart(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!TEXT_CHART_EXTENSIONS.has(ext)) return '';
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > 1024 * 1024) return '';
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function lineHasChord(line) {
+  return /(^|\s)([A-G](?:#|b)?(?:m|maj|min|sus|dim|aug|add)?[0-9]*(?:\/[A-G](?:#|b)?)?)(\s|$|[|)\]])/.test(line);
+}
+
+function extractChartInfo(filePath) {
+  const text = readTextChart(filePath);
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const chordLines = lines.filter(lineHasChord);
+  const lyricLines = lines.filter((line) => !lineHasChord(line) && !/^\[.*\]$/.test(line));
+  const keyMatch = text.match(/(?:^|\n)\s*(?:key|tom|tone)\s*[:=-]\s*([A-G](?:#|b)?m?)\b/i);
+  const bpmMatch = text.match(/(?:^|\n)\s*(?:bpm|tempo)\s*[:=-]\s*(\d{2,3})\b/i);
+  return {
+    filePath,
+    readable: Boolean(text),
+    hasChords: chordLines.length > 0,
+    hasLyrics: lyricLines.length > 2,
+    detectedKey: keyMatch?.[1] || '',
+    detectedBpm: bpmMatch ? Number(bpmMatch[1]) : null,
+    chordLineCount: chordLines.length,
+    lyricLineCount: lyricLines.length,
+    preview: text ? text.slice(0, 1600) : '',
+  };
+}
+
+function bestChartForSong(song = {}) {
+  const charts = Array.isArray(song.charts) ? song.charts : [];
+  const ranked = charts
+    .map((filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      const name = normalizeText(path.basename(filePath));
+      let score = 0;
+      if (TEXT_CHART_EXTENSIONS.has(ext)) score += 20;
+      if (name.includes('chord') || name.includes('cifra') || name.includes('chart')) score += 15;
+      if (name.includes('lyrics') || name.includes('letra')) score += 10;
+      if (ext === '.cho' || ext === '.chordpro') score += 12;
+      return { filePath, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.filePath || charts[0] || '';
 }
 
 function writeJson(filePath, data) {
@@ -295,23 +349,34 @@ function findProjectFolders(files) {
 
 function finalizeRecord(record) {
   const stems = Object.fromEntries(Object.entries(record.stems).filter(([, filePath]) => fs.existsSync(filePath)));
+  const charts = Array.from(new Set(record.charts || [])).filter((filePath) => fs.existsSync(filePath));
+  const bestChart = bestChartForSong({ ...record, charts });
+  const chartInfo = bestChart ? extractChartInfo(bestChart) : null;
   const missing = [];
   if (!record.bpm) missing.push('bpm');
   if (!record.key) missing.push('key');
   if (!Object.keys(stems).length) missing.push('stems');
+  if (!charts.length) missing.push('chart');
   return {
     ...record,
     roots: Array.from(record.roots || []),
     sourceFiles: Array.from(new Set(record.sourceFiles || [])),
     stems,
-    charts: Array.from(new Set(record.charts || [])),
+    charts,
+    bestChart,
+    hasChart: charts.length > 0,
+    hasLyrics: Boolean(chartInfo?.hasLyrics),
+    hasChords: Boolean(chartInfo?.hasChords),
+    detectedKey: chartInfo?.detectedKey || '',
+    detectedBpm: chartInfo?.detectedBpm || null,
+    chartPreview: chartInfo?.preview || '',
     metadataFiles: Array.from(new Set(record.metadataFiles || [])),
     missing,
   };
 }
 
 function hasMusicContent(record) {
-  return Object.keys(record.stems || {}).length > 0 || (record.sourceFiles || []).length > 0;
+  return Object.keys(record.stems || {}).length > 0 || (record.sourceFiles || []).length > 0 || (record.charts || []).length > 0;
 }
 
 function scanLibraryRoots(roots = [], options = {}) {
@@ -341,6 +406,7 @@ function scanLibraryRoots(roots = [], options = {}) {
     filesScanned,
     songCount: songs.length,
     stemCount: songs.reduce((sum, song) => sum + Object.keys(song.stems || {}).length, 0),
+    chartCount: songs.reduce((sum, song) => sum + (song.charts || []).length, 0),
     songs,
   };
 }
@@ -353,6 +419,7 @@ function loadIndex(indexPath = defaultIndexPath()) {
     filesScanned: 0,
     songCount: 0,
     stemCount: 0,
+    chartCount: 0,
     songs: [],
   };
 }
@@ -376,6 +443,9 @@ function scoreSongMatch(song, query = {}) {
   if (artist && songArtist === artist) score += 30;
   else if (artist && (songArtist.includes(artist) || artist.includes(songArtist))) score += 15;
   if (Object.keys(song.stems || {}).length) score += 10;
+  if ((song.charts || []).length) score += 10;
+  if (song.hasChords) score += 4;
+  if (song.hasLyrics) score += 4;
   if (song.bpm) score += 4;
   if (song.key) score += 4;
   return score;
@@ -390,17 +460,81 @@ function findLibraryMatch(index, query = {}, minScore = 60) {
   return ranked[0] || null;
 }
 
+function analyzeChartRequest(index, query = {}) {
+  const match = findLibraryMatch(index, query, query.minScore || 35);
+  const song = match?.song || null;
+  const bestChart = song ? bestChartForSong(song) : '';
+  const chartInfo = bestChart ? extractChartInfo(bestChart) : null;
+  const detectedKey = query.key || song?.key || chartInfo?.detectedKey || '';
+  const detectedBpm = query.bpm || song?.bpm || chartInfo?.detectedBpm || null;
+  const missing = [];
+  if (!song) missing.push('library_match');
+  if (!bestChart) missing.push('chart');
+  if (!detectedKey) missing.push('key');
+  if (!detectedBpm) missing.push('bpm');
+  if (!chartInfo?.hasChords) missing.push('chords');
+  if (!chartInfo?.hasLyrics) missing.push('lyrics');
+
+  return {
+    query,
+    match,
+    sourcePath: bestChart,
+    analysis: {
+      title: song?.title || query.title || query.name || '',
+      artist: song?.artist || query.artist || query.band || '',
+      album: song?.album || query.album || query.collection || 'Singles',
+      key: detectedKey,
+      bpm: detectedBpm,
+      hasChart: Boolean(bestChart),
+      hasChords: Boolean(chartInfo?.hasChords),
+      hasLyrics: Boolean(chartInfo?.hasLyrics),
+      chordLineCount: chartInfo?.chordLineCount || 0,
+      lyricLineCount: chartInfo?.lyricLineCount || 0,
+      missing,
+      needsReview: missing.length > 0,
+      confidence: match ? Math.min(99, match.score + (chartInfo?.hasChords ? 5 : 0) + (chartInfo?.hasLyrics ? 5 : 0)) : 0,
+      preview: chartInfo?.preview || '',
+    },
+  };
+}
+
+function prepareChartWorkspace(root, index, query = {}) {
+  const result = analyzeChartRequest(index, query);
+  const workspace = ensureSongWorkspace(root || defaultHubDir(), result.analysis);
+  let copiedChart = '';
+  if (result.sourcePath && fs.existsSync(result.sourcePath)) {
+    const ext = path.extname(result.sourcePath) || '.txt';
+    const base = safeSegment(path.basename(result.sourcePath, ext), 'chart');
+    copiedChart = path.join(workspace.chartsDir, `${base}${ext}`);
+    if (path.resolve(copiedChart) !== path.resolve(result.sourcePath)) {
+      fs.copyFileSync(result.sourcePath, copiedChart);
+    }
+  }
+  const manifest = {
+    ...result.analysis,
+    sourcePath: result.sourcePath,
+    copiedChart,
+    preparedAt: nowIso(),
+  };
+  writeJson(path.join(workspace.metadataDir, 'chart-analysis.json'), manifest);
+  return { ...result, workspace, copiedChart, manifest };
+}
+
 module.exports = {
   AUDIO_EXTENSIONS,
   STEM_TYPES,
+  analyzeChartRequest,
+  bestChartForSong,
   defaultHubDir,
   defaultIndexPath,
   detectStemType,
   ensureSongWorkspace,
+  extractChartInfo,
   findLibraryMatch,
   getSongFolder,
   loadIndex,
   normalizeText,
+  prepareChartWorkspace,
   safeSegment,
   saveIndex,
   scanLibraryRoots,

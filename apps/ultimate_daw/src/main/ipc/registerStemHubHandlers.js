@@ -8,12 +8,14 @@ const {
   inspectBrainRoot,
 } = require('../stemHub/brainInstallation');
 const {
+  analyzeChartRequest,
   defaultHubDir,
   defaultIndexPath,
   ensureSongWorkspace,
   findLibraryMatch,
   getSongFolder,
   loadIndex,
+  prepareChartWorkspace,
   safeSegment,
   saveIndex,
   scanLibraryRoots,
@@ -209,6 +211,18 @@ function registerStemHubHandlers({ ipcMain, dialog }) {
     const config = readConfig();
     const index = loadIndex(config.indexPath || defaultIndexPath());
     return findLibraryMatch(index, query, query.minScore || 60);
+  });
+
+  ipcMain.handle('stemHub:analyze-chart-request', (_event, query = {}) => {
+    const config = readConfig();
+    const index = loadIndex(config.indexPath || defaultIndexPath());
+    return analyzeChartRequest(index, query);
+  });
+
+  ipcMain.handle('stemHub:prepare-chart-workspace', (_event, query = {}) => {
+    const config = readConfig();
+    const index = loadIndex(config.indexPath || defaultIndexPath());
+    return prepareChartWorkspace(config.libraryRoots?.[0] || defaultHubDir(), index, query);
   });
 
   ipcMain.handle('stemHub:worker-env', () => {
