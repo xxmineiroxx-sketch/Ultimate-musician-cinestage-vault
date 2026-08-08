@@ -16,6 +16,7 @@ build/
 *.orig
 __pycache__/
 *.pyc
+**/.venv-stems/
 __MACOSX/
 **/target/
 **/dist/
