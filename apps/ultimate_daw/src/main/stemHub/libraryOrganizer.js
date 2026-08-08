@@ -93,12 +93,12 @@ function detectStemType(filePath) {
   const name = normalizeText(path.basename(filePath, path.extname(filePath))).replace(/\s+/g, '_');
   const tests = [
     ['lead_vocal', /lead[_-]?vocal|main[_-]?vocal/],
-    ['bgv', /bgv|background[_-]?vocal|backing[_-]?vocal|backing|choir|soprano|contralto|tenor|vozes/],
+    ['bgv', /bgv|bgvs|background[_-]?vocal|backing[_-]?vocal|backing|choir|soprano|contralto|tenor|vozes/],
     ['vocals', /vocal|voice|voz|guia[_-]?voz/],
-    ['electric_guitar', /electric|egtr|e[_-]?gtr|eg[0-9]?|gtr|lead[_-]?guitar/],
+    ['electric_guitar', /electric|egtr|e[_-]?gtr|eg[_-]?[0-9]*|gtr|lead[_-]?guitar/],
     ['acoustic_guitar', /acoustic|agtr|a[_-]?gtr|acg|ag|violao|viola_o|viol/],
     ['guitar', /guitar|gtr|guitarra/],
-    ['keys', /keys|keyboard|teclas|synth|pad|organ|piano[_-]?nord|strings|cordas|cordass|bells|arpejador|pluck/],
+    ['keys', /keys|keyboard|teclas|synth|pad|organ|rhodes|piano[_-]?nord|strings|cordas|cordass|bells|arpejador|pluck/],
     ['piano', /piano/],
     ['drums', /drum|kick|snare|toms|overhead|perc|percussao|percuss_o/],
     ['bass', /bass/],
@@ -293,10 +293,20 @@ function metadataFromProjectFolder(root, folderPath) {
   const folderName = safeSegment(path.basename(folderPath), 'Untitled Song');
   const parentName = safeSegment(path.basename(path.dirname(folderPath)), folderName);
   const grandparentName = safeSegment(path.basename(path.dirname(path.dirname(folderPath))), parentName);
+  const greatGrandparentName = safeSegment(path.basename(path.dirname(path.dirname(path.dirname(folderPath)))), grandparentName);
   const rootName = safeSegment(path.basename(root), 'Local Library');
   const libraryFolderNames = new Set(['multitracks', 'stems', 'stem', 'imported', 'samples', 'tracks']);
   const folderKey = normalizeText(folderName).replace(/\s+/g, '');
   const parentKey = normalizeText(parentName).replace(/\s+/g, '');
+
+  if (libraryFolderNames.has(folderKey) && parts.length >= 4) {
+    return {
+      artist: safeSegment(parts[parts.length - 4] || greatGrandparentName),
+      album: safeSegment(parts[parts.length - 3] || grandparentName),
+      title: safeSegment(parts[parts.length - 2] || parentName),
+    };
+  }
+
   const title = folderKey === 'imported' && parentKey === 'samples'
     ? grandparentName
     : libraryFolderNames.has(folderKey) ? parentName : folderName;
