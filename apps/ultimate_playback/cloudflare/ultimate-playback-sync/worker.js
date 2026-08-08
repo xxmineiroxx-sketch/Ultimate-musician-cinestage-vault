@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.5-desktop-brain-install';
+const WORKER_VERSION = '2.4.6-brain-query-compat';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1486,6 +1486,59 @@ function buildBrainSnapshot(store = {}, account = {}) {
   };
 }
 
+function summarizeBrainQuery(snapshot = {}, prompt = '', context = {}) {
+  const route = snapshot.stemProcessingRoute || {};
+  const install = snapshot.brain?.localInstallation || {};
+  const caps = install.capabilities || {};
+  const enabledCaps = Object.entries(caps)
+    .filter(([, enabled]) => Boolean(enabled))
+    .map(([name]) => name);
+  const screen = String(context?.screen || '').trim();
+  const service = context?.service?.name || context?.serviceName || '';
+  const songs = Array.isArray(context?.songs) ? context.songs : [];
+  const team = Array.isArray(context?.team) ? context.team : [];
+
+  return [
+    'CineStage Brain is online.',
+    route.desktopOnline
+      ? `${String(route.detail || 'The desktop processor is ready.').replace(/[.!?]*$/, '.') } Stem requests are routed to desktop first.`
+      : 'No account desktop is online, so stem requests will use the fallback lane.',
+    install.status
+      ? `Local Brain install: ${install.status}${install.path ? ` at ${install.path}` : ''}.`
+      : 'No local Brain install is attached to the selected desktop yet.',
+    enabledCaps.length > 0
+      ? `Detected engines: ${enabledCaps.slice(0, 8).join(', ')}${enabledCaps.length > 8 ? `, +${enabledCaps.length - 8} more` : ''}.`
+      : 'No local song-intelligence engines were reported in the last heartbeat.',
+    service ? `Current service context: ${service}.` : '',
+    songs.length > 0 ? `Setlist context includes ${songs.length} song${songs.length === 1 ? '' : 's'}.` : '',
+    team.length > 0 ? `Team context includes ${team.length} member${team.length === 1 ? '' : 's'}.` : '',
+    prompt ? `Request received: "${prompt}".` : '',
+  ].filter(Boolean).join('\n');
+}
+
+async function handleBrainQuery(request, env, store) {
+  const body = await readJson(request);
+  const prompt = String(body.query || body.prompt || body.message || '').trim();
+  const context = body.context && typeof body.context === 'object' ? body.context : {};
+  const account = {
+    email: body.accountEmail || body.email || context.accountEmail || context.email || '',
+    id: body.accountId || context.accountId || '',
+  };
+  const snapshot = buildBrainSnapshot(store, account);
+  const response = summarizeBrainQuery(snapshot, prompt, context);
+  return json({
+    ok: true,
+    sourceOfTruth: 'cinestage_brain',
+    response,
+    answer: response,
+    message: response,
+    intent: prompt,
+    brain: snapshot.brain,
+    stemProcessingRoute: snapshot.stemProcessingRoute,
+    checkedAt: snapshot.checkedAt,
+  });
+}
+
 function serviceEndDateForStemJob(job = {}, store = {}) {
   const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
   const date = String(job.serviceDate || service?.date || '').trim();
@@ -2558,6 +2611,9 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/publish') return handlePublish(request, env, store);
   if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
     return handleDesktopHeartbeat(request, env, store);
+  }
+  if (path === '/api/brain/query' || path === '/sync/cinestage/brain/query' || path === '/sync/brain/query') {
+    return handleBrainQuery(request, env, store);
   }
   if (path === '/sync/stems/upload' || path === '/sync/stem-sources/upload') {
     return handleUploadStemSource(request, env, store, url);

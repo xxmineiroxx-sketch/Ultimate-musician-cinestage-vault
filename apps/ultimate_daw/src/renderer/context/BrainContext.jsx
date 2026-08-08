@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useRef, useState, useEffect, useCallback } from 'react';
-import { CINESTAGE_URL } from '../config/syncConfig';
+import { CINESTAGE_URL, SYNC_URL, syncHeaders } from '../config/syncConfig';
 
 const BrainContext = createContext(null);
 export const useBrain = () => useContext(BrainContext);
@@ -7,18 +7,21 @@ export const useBrain = () => useContext(BrainContext);
 const MAX_EVENTS = 50;
 const MAX_CHAT = 200;
 const POLL_INTERVAL_MS = 30000;
+const hasBrainAnswer = (data) => Boolean(
+  data?.response || data?.answer || data?.message || data?.text || data?.result
+);
 
 // Route all CineStage HTTP calls through the Electron main process (no CORS).
 // Falls back to direct fetch for non-Electron environments (e.g. browser testing).
-async function brainFetch(path, { method = 'GET', body } = {}) {
-  const url = `${CINESTAGE_URL}${path}`;
+async function brainFetch(path, { method = 'GET', body, baseUrl = CINESTAGE_URL, headers } = {}) {
+  const url = `${baseUrl}${path}`;
   const ipc = window?.umDesktop?.cinestage?.fetch;
   if (ipc) {
-    return ipc({ url, method, body });
+    return ipc({ url, method, body, headers });
   }
   const res = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers || { 'Content-Type': 'application/json' },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return { ok: res.ok, status: res.status, data: await res.json().catch(() => null) };
@@ -89,10 +92,24 @@ export function BrainProvider({ children }) {
     setIsPanelOpen(true);
 
     try {
-      const { data } = await brainFetch('/api/brain/query', {
+      const requestBody = { query: prompt, prompt, context: ctx };
+      let result = await brainFetch('/api/brain/query', {
         method: 'POST',
-        body: { query: prompt, prompt, context: ctx },
+        body: requestBody,
       });
+      if (!result.ok || result.data?.detail === 'Not Found' || !hasBrainAnswer(result.data)) {
+        result = await brainFetch('/api/brain/query', {
+          method: 'POST',
+          baseUrl: SYNC_URL,
+          headers: syncHeaders(),
+          body: requestBody,
+        });
+      }
+      if (!result.ok || !hasBrainAnswer(result.data)) {
+        throw new Error(result.data?.error || result.data?.detail || `HTTP ${result.status}`);
+      }
+
+      const { data } = result;
       const content = data?.response || data?.answer || data?.message || data?.text || data?.result || JSON.stringify(data);
       setChatLog((prev) => [...prev, { role: 'assistant', content, ts: Date.now() }].slice(-MAX_CHAT));
       addEvent({ type: 'query', content: prompt.slice(0, 80), ts: Date.now() });

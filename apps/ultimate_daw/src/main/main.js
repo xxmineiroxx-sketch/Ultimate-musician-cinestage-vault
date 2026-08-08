@@ -69,9 +69,9 @@ function createMainWindow() {
 
 // CineStage API proxy — Node.js has no CORS restrictions, so all brain requests
 // route through here instead of being made directly from the renderer.
-ipcMain.handle('cinestage:fetch', async (_event, { url, method = 'GET', body }) => {
+ipcMain.handle('cinestage:fetch', async (_event, { url, method = 'GET', body, headers }) => {
   try {
-    const init = { method, headers: { 'Content-Type': 'application/json' } };
+    const init = { method, headers: headers || { 'Content-Type': 'application/json' } };
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetch(url, init);
     const data = await res.json().catch(() => null);

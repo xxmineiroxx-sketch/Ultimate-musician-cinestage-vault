@@ -1464,8 +1464,8 @@
     "hash": "53f22fc7cd22f11bd7cb9c03ea1c7b70"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/cloudflare/ultimate-playback-sync/worker.js": {
-    "mtime": 1786222454.9803643,
-    "hash": "12f97885a90f9fb42f05387c48d2f318"
+    "mtime": 1786223935.9718132,
+    "hash": "ba252db4489314133319aa75afd72e56"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/scripts/setup_xcode_targets.rb": {
     "mtime": 1786209566.1403875,
@@ -1852,8 +1852,8 @@
     "hash": "2784d35dd88b7c5c6eea33a95b0ceab4"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/context/BrainContext.jsx": {
-    "mtime": 1786209565.3629425,
-    "hash": "befd90db8eb4f761932a4eef9873cf58"
+    "mtime": 1786223873.3906124,
+    "hash": "06fa92a853e0ecc3dddebe33998288be"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/config/syncConfig.js": {
     "mtime": 1786219859.781827,
@@ -2016,8 +2016,8 @@
     "hash": "b0f96579e3089f2b5b729b0441275f6a"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/main.js": {
-    "mtime": 1786220783.4917336,
-    "hash": "1e63c82fe6ee76a8f567612397f53e08"
+    "mtime": 1786223878.5760343,
+    "hash": "a97b53836d0df7b5052c1fe7e0919a39"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/stemHub/brainInstallation.js": {
     "mtime": 1786222374.2521508,
@@ -2343,6 +2343,10 @@
     "mtime": 1786223669.0359979,
     "hash": "14ce45d6ec06a23bd67cd12c3bf76571"
   },
+  "/Users/studio/Ultimate-musician-cinestage-vault/docs/cinestage-brain-query-compat-2026-08-08.md": {
+    "mtime": 1786223997.7144802,
+    "hash": "b4577aad2a1a28d8c2fadc7d4ae861e8"
+  },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/apple-notes-idea-inventory-2026-08-01.md": {
     "mtime": 1786209566.1499276,
     "hash": "4148a9865abc3f6548f5c0c3c8f644ff"
@@ -2382,6 +2386,10 @@
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - iCloud Idea Inventory.md": {
     "mtime": 1786209566.1511536,
     "hash": "6bf84a4bf3c085dfe48e5f411fdcac27"
+  },
+  "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - CineStage Brain Query Compatibility Fix.md": {
+    "mtime": 1786223997.8094406,
+    "hash": "a051d83f00d7560d0a5eb27806e10d67"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian/Ultimate Musician - Competitive Feature Gap Audit 2026-08-01.md": {
     "mtime": 1786209566.1506965,
