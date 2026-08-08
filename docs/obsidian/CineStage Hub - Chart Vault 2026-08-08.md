@@ -25,6 +25,7 @@ CineStage Hub should be able to use the account holder's local chart and lyrics 
 - Supported chart metadata formats: `.cho`, `.chordpro`, `.crd`, `.md`, `.rtf`, `.txt`, `.pdf`, `.docx`.
 - Text parsing is active for `.cho`, `.chordpro`, `.crd`, `.md`, `.rtf`, and `.txt`.
 - Flat Cifras-style filenames such as `Song - Artist - Key.rtf` are parsed into song title, artist, and key.
+- PDF/base naming noise such as `Chord Chart`, `Base`, and `2 Column` is ignored when parsing chart filenames.
 - PDF and DOCX are indexed by file path/name for now. Full content extraction should be added later with a document parser.
 - The Hub UI has a Chart Vault panel with local analysis and working-area creation.
 

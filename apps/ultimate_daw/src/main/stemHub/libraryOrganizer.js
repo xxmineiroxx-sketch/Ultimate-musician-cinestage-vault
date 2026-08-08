@@ -183,21 +183,37 @@ function parseFilenameMetadata(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const rawBase = path.basename(filePath, ext)
     .replace(/\s+\d+$/g, '')
-    .replace(/\s*\([^)]*\)\s*$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const keyMatch = rawBase.match(/(?:^|[-_\s])([A-G](?:#|b)?m?)(?:\s*(?:base|toc(?:ar)?|$))$/i);
-  const withoutKey = keyMatch
-    ? rawBase.slice(0, keyMatch.index).replace(/[-_\s]+$/g, '').trim()
-    : rawBase;
-  const parts = withoutKey.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
+  const parenthetical = Array.from(rawBase.matchAll(/\(([^)]*)\)/g)).map((match) => match[1].trim()).filter(Boolean);
+  const parentheticalKey = parenthetical.find((value) => /^[A-G](?:#|b)?m?$/i.test(value));
+  const parentheticalArtist = parenthetical.find((value) => !/^[A-G](?:#|b)?m?$/i.test(value) && !/^\d+$/.test(value));
+  const baseWithoutParens = rawBase.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  const rawParts = baseWithoutParens.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
+  const noise = /^(?:base|chord chart|chart|lyrics|letra|cifra|2 column|1 column|two column|one column|pdf)$/i;
+  let key = parentheticalKey || '';
+  const parts = [];
+  for (const part of rawParts) {
+    const keyOnly = part.match(/^([A-G](?:#|b)?m?)$/i);
+    const baseKey = part.match(/^base\s+([A-G](?:#|b)?m?)$/i);
+    if (keyOnly) {
+      key = key || keyOnly[1];
+      continue;
+    }
+    if (baseKey) {
+      key = key || baseKey[1];
+      continue;
+    }
+    if (noise.test(part)) continue;
+    parts.push(part.replace(/\s+\d+$/g, '').trim());
+  }
   const title = parts[0] || rawBase;
-  const artist = parts.length > 1 ? parts[1] : 'Unknown Artist';
+  const artist = parts.length > 1 ? parts[1] : parentheticalArtist || 'Unknown Artist';
   return {
     artist: safeSegment(artist),
     album: 'Cifras',
     title: safeSegment(title, 'Untitled Song'),
-    key: keyMatch?.[1] || '',
+    key,
   };
 }
 
