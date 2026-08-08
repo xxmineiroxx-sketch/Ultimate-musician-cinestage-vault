@@ -52,7 +52,9 @@ function createMainWindow() {
 
   if (DEV_SERVER_URL) {
     mainWindow.loadURL(DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools();
+    if (process.env.UM_OPEN_DEVTOOLS === 'true') {
+      mainWindow.webContents.openDevTools();
+    }
   } else {
     mainWindow.loadFile(RENDERER_INDEX);
   }
