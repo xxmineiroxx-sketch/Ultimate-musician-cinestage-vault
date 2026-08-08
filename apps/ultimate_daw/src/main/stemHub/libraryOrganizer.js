@@ -310,6 +310,10 @@ function finalizeRecord(record) {
   };
 }
 
+function hasMusicContent(record) {
+  return Object.keys(record.stems || {}).length > 0 || (record.sourceFiles || []).length > 0;
+}
+
 function scanLibraryRoots(roots = [], options = {}) {
   const uniqueRoots = Array.from(new Set((roots || []).map((root) => path.resolve(String(root || ''))).filter((root) => root && fs.existsSync(root))));
   const records = new Map();
@@ -328,7 +332,7 @@ function scanLibraryRoots(roots = [], options = {}) {
       .forEach((filePath) => mergeSongRecord(records, root, filePath));
   }
 
-  const songs = Array.from(records.values()).map(finalizeRecord);
+  const songs = Array.from(records.values()).filter(hasMusicContent).map(finalizeRecord);
   return {
     version: 1,
     generatedAt: nowIso(),
