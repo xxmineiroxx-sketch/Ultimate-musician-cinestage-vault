@@ -298,6 +298,15 @@ function metadataFromProjectFolder(root, folderPath) {
   const libraryFolderNames = new Set(['multitracks', 'stems', 'stem', 'imported', 'samples', 'tracks']);
   const folderKey = normalizeText(folderName).replace(/\s+/g, '');
   const parentKey = normalizeText(parentName).replace(/\s+/g, '');
+  const libraryFolderIndex = parts.findIndex((part) => libraryFolderNames.has(normalizeText(part).replace(/\s+/g, '')));
+
+  if (libraryFolderIndex >= 3) {
+    return {
+      artist: safeSegment(parts[libraryFolderIndex - 3]),
+      album: safeSegment(parts[libraryFolderIndex - 2]),
+      title: safeSegment(parts[libraryFolderIndex - 1]),
+    };
+  }
 
   if (libraryFolderNames.has(folderKey) && parts.length >= 4) {
     return {
