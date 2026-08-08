@@ -4,6 +4,7 @@ const { createAudioEngine } = require('../backend/audio');
 const { registerAudioHandlers } = require('./ipc/registerAudioHandlers');
 const { registerStoreHandlers } = require('./ipc/registerStoreHandlers');
 const { registerStemHandlers } = require('./ipc/registerStemHandlers');
+const { registerStemHubHandlers } = require('./ipc/registerStemHubHandlers');
 const { registerFileHandlers } = require('./ipc/registerFileHandlers');
 
 nativeTheme.themeSource = 'dark';
@@ -80,6 +81,7 @@ app.whenReady().then(() => {
   registerAudioHandlers({ ipcMain, audioEngine, sendToRenderers: broadcastEngineState });
   registerStoreHandlers({ ipcMain });
   registerStemHandlers({ ipcMain });
+  registerStemHubHandlers({ ipcMain, dialog });
   registerFileHandlers({ ipcMain, dialog });
 
   createMainWindow();

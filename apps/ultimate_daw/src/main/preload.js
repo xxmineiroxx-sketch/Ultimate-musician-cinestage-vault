@@ -34,6 +34,20 @@ contextBridge.exposeInMainWorld('umDesktop', {
       return () => ipcRenderer.removeListener('stems:progress', wrapped);
     },
   },
+  stemHub: {
+    getConfig: () => ipcRenderer.invoke('stemHub:get-config'),
+    saveConfig: (config) => ipcRenderer.invoke('stemHub:save-config', config),
+    chooseLibraryRoots: () => ipcRenderer.invoke('stemHub:choose-library-roots'),
+    previewSongFolder: (payload) => ipcRenderer.invoke('stemHub:preview-song-folder', payload),
+    createSongWorkspace: (payload) => ipcRenderer.invoke('stemHub:create-song-workspace', payload),
+    scanLibraries: (options) => ipcRenderer.invoke('stemHub:scan-libraries', options),
+    getIndex: (indexPath) => ipcRenderer.invoke('stemHub:get-index', indexPath),
+    findMatch: (query) => ipcRenderer.invoke('stemHub:find-match', query),
+    workerEnv: () => ipcRenderer.invoke('stemHub:worker-env'),
+    workerStatus: () => ipcRenderer.invoke('stemHub:worker-status'),
+    startWorker: () => ipcRenderer.invoke('stemHub:start-worker'),
+    stopWorker: () => ipcRenderer.invoke('stemHub:stop-worker'),
+  },
   file: {
     openAudio: () => ipcRenderer.invoke('file:open-audio'),
     openImage: () => ipcRenderer.invoke('file:open-image'),

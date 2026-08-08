@@ -27,6 +27,7 @@ import LeaderDashboardScreen from './screens/LeaderDashboardScreen';
 import ContentEditorScreen from './screens/ContentEditorScreen';
 import PersonalPracticeScreen from './screens/PersonalPracticeScreen';
 import CineStageBrainScreen from './screens/CineStageBrainScreen';
+import CineStageHubScreen from './screens/CineStageHubScreen';
 import FeedbackScreen from './screens/FeedbackScreen';
 import DAWWorkspaceScreen from './screens/DAWWorkspaceScreen';
 
@@ -288,6 +289,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ProtectedLayout><CineStageBrainScreen /></ProtectedLayout>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/cinestage-hub"
+          element={
+            <RequireAuth>
+              <ProtectedLayout><CineStageHubScreen /></ProtectedLayout>
             </RequireAuth>
           }
         />

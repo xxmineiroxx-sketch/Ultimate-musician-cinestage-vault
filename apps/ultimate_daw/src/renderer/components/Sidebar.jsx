@@ -40,8 +40,9 @@ const NAV_GROUPS = [
   {
     label: 'System',
     items: [
-      { to: '/cinestage', icon: '🧠', label: 'CineStage Brain' },
-      { to: '/feedback',  icon: '📊', label: 'Feedback' },
+      { to: '/cinestage',     icon: '🧠', label: 'CineStage Brain' },
+      { to: '/cinestage-hub', icon: '🗄️', label: 'CineStage Hub' },
+      { to: '/feedback',      icon: '📊', label: 'Feedback' },
     ],
   },
 ];

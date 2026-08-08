@@ -7,9 +7,16 @@ const path = require('path');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { separateStems } = require('../ipc/registerStemHandlers');
+const {
+  defaultHubDir,
+  defaultIndexPath,
+  ensureSongWorkspace,
+  findLibraryMatch,
+  loadIndex,
+} = require('../stemHub/libraryOrganizer');
 
 const AUDIO_EXTENSIONS = new Set(['.aac', '.aif', '.aiff', '.caf', '.flac', '.m4a', '.mp3', '.mp4', '.ogg', '.opus', '.wav']);
-const DEFAULT_SYNC_URL = 'http://127.0.0.1:8099';
+const DEFAULT_SYNC_URL = 'https://ultimate-playback-sync.studio-cinestage.workers.dev';
 const DEFAULT_MODEL = 'htdemucs_6s';
 const DEFAULT_POLL_INTERVAL_MS = 60000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60000;
@@ -65,6 +72,13 @@ function cacheKeyFor(job = {}) {
     job.artist || '',
   ].join('|');
   return crypto.createHash('sha256').update(stable).digest('hex').slice(0, 20);
+}
+
+function splitPathList(value) {
+  return String(value || '')
+    .split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function defaultRoleStemMap(stems = {}) {
@@ -197,6 +211,11 @@ class DesktopStemJobWorker {
     this.desktopId = String(options.desktopId || process.env.UM_DESKTOP_ID || `desktop_${os.hostname()}`).trim();
     this.desktopName = String(options.desktopName || process.env.UM_DESKTOP_NAME || `CineStage Desktop ${os.hostname()}`).trim();
     this.cacheDir = path.resolve(options.cacheDir || process.env.UM_STEM_CACHE_DIR || path.join(os.homedir(), 'Music', 'Ultimate Musician', 'Stem Cache'));
+    this.libraryRoots = options.libraryRoots || splitPathList(process.env.UM_STEM_LIBRARY_ROOTS);
+    if (!this.libraryRoots.length) this.libraryRoots = [defaultHubDir()];
+    this.indexPath = path.resolve(options.indexPath || process.env.UM_STEM_INDEX_PATH || defaultIndexPath());
+    this.searchLibrary = options.searchLibrary ?? process.env.UM_STEM_SEARCH_LIBRARY !== 'false';
+    this.workerMode = String(options.workerMode || process.env.UM_STEM_WORKER_MODE || 'account_desktop').trim();
     this.model = String(options.model || process.env.UM_STEM_MODEL || DEFAULT_MODEL).trim();
     this.pollIntervalMs = Number(options.pollIntervalMs || process.env.UM_STEM_POLL_INTERVAL_MS || DEFAULT_POLL_INTERVAL_MS);
     this.heartbeatIntervalMs = Number(options.heartbeatIntervalMs || process.env.UM_STEM_HEARTBEAT_INTERVAL_MS || DEFAULT_HEARTBEAT_INTERVAL_MS);
@@ -240,11 +259,15 @@ class DesktopStemJobWorker {
         cacheDir: this.cacheDir,
         storage: {
           cacheDir: this.cacheDir,
-          externalDrive: false,
+          libraryRoots: this.libraryRoots,
+          externalDrive: this.libraryRoots.some((root) => root !== this.cacheDir),
         },
         capabilities: {
           stems: true,
           demucs: true,
+          localStemLibrary: Boolean(this.searchLibrary),
+          organizeStemFolders: true,
+          workerMode: this.workerMode,
           youtubeDownload: Boolean(this.allowYouTubeDownload),
           waveform: false,
           roleStemMap: true,
@@ -364,10 +387,38 @@ class DesktopStemJobWorker {
 
   async processJob(job) {
     const key = job.localCache?.cacheKey || cacheKeyFor(job);
-    const jobDir = path.join(this.cacheDir, key);
-    const outputDir = path.join(jobDir, 'demucs');
+    const workspace = ensureSongWorkspace(this.libraryRoots[0] || this.cacheDir, {
+      title: job.title,
+      artist: job.artist,
+      album: job.album || job.collection || 'Singles',
+    });
+    const jobDir = workspace.songDir || path.join(this.cacheDir, key);
+    const outputDir = path.join(workspace.stemsDir || jobDir, 'demucs');
     const manifestPath = path.join(jobDir, 'manifest.json');
     const existing = readManifest(manifestPath);
+
+    if (this.searchLibrary) {
+      const index = loadIndex(this.indexPath);
+      const match = findLibraryMatch(index, job, 60);
+      if (match?.song?.stems && Object.keys(match.song.stems).length) {
+        const localStems = stemFilePayload(match.song.stems, match.song.songDir || jobDir);
+        await this.updateJob(job.id, this.readyPayload(job, localStems, match.song.songDir || jobDir, key, {
+          cacheHit: true,
+          deliveryMode: 'local_library',
+          sourceAudioPath: match.song.sourceFiles?.[0] || '',
+          externalDrive: true,
+          libraryMatch: {
+            id: match.song.id,
+            title: match.song.title,
+            artist: match.song.artist,
+            album: match.song.album,
+            score: match.score,
+            missing: match.song.missing || [],
+          },
+        }));
+        return;
+      }
+    }
 
     const cachedStems = existing?.deliveryStems || existing?.stems || existing?.localStems;
     if (cachedStems && Object.keys(cachedStems).length) {
@@ -432,6 +483,18 @@ class DesktopStemJobWorker {
         preparedAt: nowIso(),
       };
       writeManifest(manifestPath, manifest);
+      writeManifest(path.join(workspace.metadataDir || path.dirname(manifestPath), 'song.json'), {
+        title: job.title,
+        artist: job.artist,
+        album: job.album || job.collection || 'Singles',
+        bpm: job.bpm || job.tempo || job.analysis?.bpm || job.analysis?.tempo || null,
+        key: job.key || job.analysis?.key || null,
+        sourceUrl: job.sourceUrl,
+        sourceType: job.sourceType,
+        model: this.model,
+        cacheKey: key,
+        updatedAt: nowIso(),
+      });
 
       await this.updateJob(job.id, this.readyPayload(job, stems, jobDir, key, {
         sourceAudioPath,
@@ -478,7 +541,8 @@ class DesktopStemJobWorker {
         desktopWorkerId: this.desktopId,
         cacheKey,
         localPath: jobDir,
-        externalDrive: false,
+        externalDrive: Boolean(extra.externalDrive),
+        libraryMatch: extra.libraryMatch || null,
         savedAt: nowIso(),
       },
     };
