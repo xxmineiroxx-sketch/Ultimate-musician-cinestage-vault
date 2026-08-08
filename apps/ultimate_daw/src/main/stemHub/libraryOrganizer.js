@@ -6,8 +6,8 @@ const os = require('os');
 const path = require('path');
 
 const AUDIO_EXTENSIONS = new Set(['.aac', '.aif', '.aiff', '.caf', '.flac', '.m4a', '.mp3', '.mp4', '.ogg', '.opus', '.wav']);
-const CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.docx', '.md', '.pdf', '.txt']);
-const TEXT_CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.md', '.txt']);
+const CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.docx', '.md', '.pdf', '.rtf', '.txt']);
+const TEXT_CHART_EXTENSIONS = new Set(['.cho', '.chordpro', '.crd', '.md', '.rtf', '.txt']);
 const STEM_TYPES = [
   'drums',
   'bass',
@@ -134,10 +134,25 @@ function readTextChart(filePath) {
   try {
     const stat = fs.statSync(filePath);
     if (stat.size > 1024 * 1024) return '';
-    return fs.readFileSync(filePath, 'utf8');
+    const buffer = fs.readFileSync(filePath);
+    let text = buffer.toString(buffer[0] === 0xff && buffer[1] === 0xfe ? 'utf16le' : 'utf8');
+    if (ext === '.rtf') text = rtfToText(text);
+    return text;
   } catch {
     return '';
   }
+}
+
+function rtfToText(value) {
+  return String(value || '')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\line/g, '\n')
+    .replace(/\\tab/g, ' ')
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function lineHasChord(line) {
@@ -161,6 +176,28 @@ function extractChartInfo(filePath) {
     chordLineCount: chordLines.length,
     lyricLineCount: lyricLines.length,
     preview: text ? text.slice(0, 1600) : '',
+  };
+}
+
+function parseFilenameMetadata(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const rawBase = path.basename(filePath, ext)
+    .replace(/\s+\d+$/g, '')
+    .replace(/\s*\([^)]*\)\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const keyMatch = rawBase.match(/(?:^|[-_\s])([A-G](?:#|b)?m?)(?:\s*(?:base|toc(?:ar)?|$))$/i);
+  const withoutKey = keyMatch
+    ? rawBase.slice(0, keyMatch.index).replace(/[-_\s]+$/g, '').trim()
+    : rawBase;
+  const parts = withoutKey.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
+  const title = parts[0] || rawBase;
+  const artist = parts.length > 1 ? parts[1] : 'Unknown Artist';
+  return {
+    artist: safeSegment(artist),
+    album: 'Cifras',
+    title: safeSegment(title, 'Untitled Song'),
+    key: keyMatch?.[1] || '',
   };
 }
 
@@ -220,6 +257,8 @@ function metadataFromFolder(root, filePath) {
   const relative = path.relative(root, filePath);
   const parts = relative.split(path.sep).filter(Boolean);
   const fileBase = safeSegment(path.basename(filePath, path.extname(filePath)), 'Untitled Song');
+  const ext = path.extname(filePath).toLowerCase();
+  if (parts.length <= 1 && CHART_EXTENSIONS.has(ext)) return parseFilenameMetadata(filePath);
   return {
     artist: safeSegment(parts[0] || 'Unknown Artist'),
     album: safeSegment(parts[1] || 'Singles'),
@@ -264,6 +303,7 @@ function mergeSongRecord(records, root, filePath) {
     missing: [],
     updatedAt: nowIso(),
   };
+  existing.key = existing.key || fileMeta.key;
   existing.roots.add(root);
   const classification = classifyFile(filePath);
   if (classification.kind === 'stem') {
