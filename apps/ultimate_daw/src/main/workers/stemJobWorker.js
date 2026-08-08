@@ -445,10 +445,15 @@ class DesktopStemJobWorker {
 
   async processJob(job) {
     const key = job.localCache?.cacheKey || cacheKeyFor(job);
+    const albumName = job.album || job.collection || (
+      job.serviceName && job.serviceDate
+        ? `${job.serviceName} ${job.serviceDate}`
+        : job.serviceName
+    ) || 'Singles';
     const workspace = ensureSongWorkspace(this.libraryRoots[0] || this.cacheDir, {
       title: job.title,
       artist: job.artist,
-      album: job.album || job.collection || 'Singles',
+      album: albumName,
     });
     const jobDir = workspace.songDir || path.join(this.cacheDir, key);
     const outputDir = path.join(workspace.stemsDir || jobDir, 'demucs');
@@ -530,7 +535,8 @@ class DesktopStemJobWorker {
           deliveryMode = 'cloudflare_r2';
         }
       } catch (uploadErr) {
-        if (![404, 501].includes(uploadErr.status)) throw uploadErr;
+        const uploadOptional = !uploadErr.status || [404, 501].includes(uploadErr.status);
+        if (!uploadOptional) throw uploadErr;
       }
       const manifest = {
         jobId: job.id,
@@ -550,7 +556,7 @@ class DesktopStemJobWorker {
       writeManifest(path.join(workspace.metadataDir || path.dirname(manifestPath), 'song.json'), {
         title: job.title,
         artist: job.artist,
-        album: job.album || job.collection || 'Singles',
+        album: albumName,
         bpm: job.bpm || job.tempo || job.analysis?.bpm || job.analysis?.tempo || null,
         key: job.key || job.analysis?.key || null,
         detectedBpm: analysis?.bpm || null,
