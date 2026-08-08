@@ -56,6 +56,27 @@ Implemented in `apps/ultimate_daw`:
 - Start/stop for the background stem worker.
 - Stem worker searches the local index before running Demucs.
 - New stem jobs are written into the organized Artist/Album/Song workspace.
+- Optional audio analyzer for BPM, key, waveform, and coarse sections, adapted from older iCloud CineStage pipeline files.
+
+## iCloud Versions Reviewed
+
+Relevant existing versions found on this machine:
+
+- `~/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop`
+  - Older Electron desktop shell with Cloudflare API notes.
+  - Useful as history, but the repo `apps/ultimate_daw` is the cleaner desktop base.
+- `~/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusicianDAW`
+  - Python DAW/backend prototype with tracks, clips, transport, MIDI, effects, and export routers.
+  - Useful later for DAW/audio engine ideas, not the first stem-hub path.
+- `~/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/pipeline`
+  - Tempo, key, chord, waveform, and structure detector prototypes.
+  - The first desktop analyzer was adapted from these files.
+- `~/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStage_Music_AI`
+  - Larger Python music AI service with Demucs stem separator, vocal harmony, instrument chart, MIDI preset, mix intelligence, and device adapters.
+  - Best next source for advanced stem quality metrics, chart generation, MIDI/preset exports, and device-aware musician packages.
+- `~/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage`
+  - Multiple terminal/server builds, Modal Demucs experiments, Cloudflare R2 setup notes, waveform plans, and assistant architecture notes.
+  - Useful as a reference library, but code should be harvested selectively into the current repo.
 
 ## Matching Rules
 

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
 const { pipeline } = require('stream/promises');
 const { Readable } = require('stream');
 const { separateStems } = require('../ipc/registerStemHandlers');
@@ -160,6 +161,38 @@ function readManifest(filePath) {
 function writeManifest(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+function analyzeAudioFile(audioPath, { points = 1200 } = {}) {
+  if (!audioPath || !fs.existsSync(audioPath)) return Promise.resolve(null);
+  const scriptPath = path.join(__dirname, '../stemHub/audioAnalyzer.py');
+  if (!fs.existsSync(scriptPath)) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    const proc = spawn('python3', [scriptPath, audioPath, '--points', String(points)]);
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', (err) => {
+      resolve({ error: `Unable to launch audio analyzer: ${err.message}` });
+    });
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        resolve({ error: stderr.trim() || `Audio analyzer exited with code ${code}` });
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (err) {
+        resolve({ error: `Audio analyzer returned invalid JSON: ${err.message}` });
+      }
+    });
+  });
 }
 
 async function downloadAudio(url, outputDir, title) {
@@ -402,11 +435,15 @@ class DesktopStemJobWorker {
       const match = findLibraryMatch(index, job, 60);
       if (match?.song?.stems && Object.keys(match.song.stems).length) {
         const localStems = stemFilePayload(match.song.stems, match.song.songDir || jobDir);
+        const sourceForAnalysis = match.song.sourceFiles?.[0] || Object.values(match.song.stems || {})[0] || '';
+        const missingMetadata = (match.song.missing || []).some((item) => ['bpm', 'key'].includes(item));
+        const analysis = missingMetadata ? await analyzeAudioFile(sourceForAnalysis) : null;
         await this.updateJob(job.id, this.readyPayload(job, localStems, match.song.songDir || jobDir, key, {
           cacheHit: true,
           deliveryMode: 'local_library',
           sourceAudioPath: match.song.sourceFiles?.[0] || '',
           externalDrive: true,
+          analysis,
           libraryMatch: {
             id: match.song.id,
             title: match.song.title,
@@ -458,6 +495,7 @@ class DesktopStemJobWorker {
         },
       });
       const localStems = stemFilePayload(result.stems || {}, jobDir);
+      const analysis = await analyzeAudioFile(sourceAudioPath);
       let stems = localStems;
       let deliveryMode = 'local_cache_only';
       try {
@@ -480,6 +518,7 @@ class DesktopStemJobWorker {
         localStems,
         deliveryStems: stems,
         deliveryMode,
+        analysis,
         preparedAt: nowIso(),
       };
       writeManifest(manifestPath, manifest);
@@ -489,6 +528,11 @@ class DesktopStemJobWorker {
         album: job.album || job.collection || 'Singles',
         bpm: job.bpm || job.tempo || job.analysis?.bpm || job.analysis?.tempo || null,
         key: job.key || job.analysis?.key || null,
+        detectedBpm: analysis?.bpm || null,
+        detectedKey: analysis?.key || null,
+        sections: analysis?.sections || null,
+        waveform: analysis?.waveform ? { points: analysis.waveform.points } : null,
+        analyzerError: analysis?.error || null,
         sourceUrl: job.sourceUrl,
         sourceType: job.sourceType,
         model: this.model,
@@ -499,6 +543,7 @@ class DesktopStemJobWorker {
       await this.updateJob(job.id, this.readyPayload(job, stems, jobDir, key, {
         sourceAudioPath,
         deliveryMode,
+        analysis,
       }));
     } catch (err) {
       const waitingForSource = err.code === 'SOURCE_PREP_REQUIRED' || err.code === 'SOURCE_MISSING';
@@ -523,6 +568,14 @@ class DesktopStemJobWorker {
       roleStemMap,
       analysis: {
         ...(job.analysis || {}),
+        ...(extra.analysis && !extra.analysis.error ? {
+          bpm: extra.analysis.bpm,
+          key: extra.analysis.key,
+          duration_s: extra.analysis.duration_s,
+          sections: extra.analysis.sections,
+          waveform: extra.analysis.waveform,
+        } : {}),
+        analyzerError: extra.analysis?.error || undefined,
         sourceType: job.sourceType,
         model: this.model,
         cacheHit: Boolean(extra.cacheHit),

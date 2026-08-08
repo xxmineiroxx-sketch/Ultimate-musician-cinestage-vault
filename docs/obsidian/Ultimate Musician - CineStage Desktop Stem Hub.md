@@ -12,6 +12,15 @@ Implemented in `apps/ultimate_daw`:
 - Local index for song/stem/chart/metadata lookup.
 - Search-before-separate behavior in the background stem worker.
 - Start/stop controls for the worker from the desktop UI.
+- Optional analyzer for BPM, key, waveform, and coarse section metadata.
+
+iCloud versions checked:
+
+- `Ultimate_Workspace/UltimateMusicianDesktop`: older Electron desktop shell and Cloudflare API notes.
+- `Utimate Musician app/UltimateMusicianDAW`: Python DAW/backend prototype for future DAW ideas.
+- `Cinestage/pipeline`: tempo, key, chord, waveform, and structure detector prototypes; first analyzer was adapted from here.
+- `Cinestage/CineStage_Music_AI`: larger music AI service with Demucs, vocal harmony, charts, MIDI presets, mix intelligence, and device adapters.
+- `Cinestage`: multiple terminal/server builds, Modal Demucs experiments, R2 notes, waveform plans, and assistant architecture references.
 
 Folder model:
 
