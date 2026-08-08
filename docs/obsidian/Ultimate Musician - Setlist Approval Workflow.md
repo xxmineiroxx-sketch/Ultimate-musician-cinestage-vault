@@ -15,6 +15,8 @@ Implemented in repo:
 - Admin dashboard now supports assigning a service Lead Singer and shows each member's assignment count for the current month.
 - App UI now separates direct publishing from Submit for Approval, with Lead Singer shown as a planning entry point only for assigned services.
 - Lead Singer cannot create/delete services, manage roster members, grant permissions, or change the master song library.
+- Admin has the special authority to grant or remove Admin, Worship Leader, and Music Director access.
+- Worship Leader has full operating access but cannot remove Admins or grant/remove Admin, Worship Leader, or Music Director access.
 - Assigning a service Lead Singer sends that singer a direct message so they know they can create the setlist and assign the team.
 - Submitting a setlist creates an Admin Panel message; approval creates a message for assigned team members.
 - Everyone can suggest songs; suggestions stay pending until Admin/Worship Leader approves or rejects them.

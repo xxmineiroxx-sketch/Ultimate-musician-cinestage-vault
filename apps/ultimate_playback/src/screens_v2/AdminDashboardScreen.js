@@ -219,6 +219,42 @@ function personRoles(person) {
   return person?.role ? [person.role] : [];
 }
 
+function grantRoleKey(role) {
+  const normalized = String(role || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const aliases = {
+    owner: 'org_owner',
+    orgowner: 'org_owner',
+    administrator: 'admin',
+    worshipleader: 'manager',
+    worship_leader: 'manager',
+    music_director: 'md',
+    musicdirector: 'md',
+    service_planner: 'leader',
+    planner: 'leader',
+    lead_vocal: 'lead_singer',
+    vocal_lead: 'lead_singer',
+  };
+  return aliases[normalized] || normalized;
+}
+
+function personGrantRole(person) {
+  const candidates = [
+    person?.grantedRole,
+    person?.orgRole,
+    person?.role,
+    person?.roleAssignments,
+    ...personRoles(person),
+  ];
+  return candidates
+    .flatMap((role) => String(role || '').split(/[,/|]/g))
+    .map(grantRoleKey)
+    .find(Boolean) || '';
+}
+
+function isAdminProtectedPerson(person) {
+  return ['org_owner', 'admin'].includes(personGrantRole(person));
+}
+
 function firstPersonRole(person) {
   return personRoles(person)[0] || '';
 }
@@ -498,8 +534,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const canDeleteServices = hasFullAccess;
   const canManageRoster = hasFullAccess;
   const canGrantRoles = hasFullAccess;
+  const canGrantElevatedRoles = isAdmin;
   const canManageLibrary = hasFullAccess;
   const canPlanAssignedServices = hasFullAccess || isLeadSingerPlanner;
+  const canRemovePerson = (person) => canManageRoster && (isAdmin || !isAdminProtectedPerson(person));
 
   const isLeadSingerForService = (svcId) => {
     if (!isLeadSingerPlanner) return false;
@@ -1289,6 +1327,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       Alert.alert('Not allowed', 'Lead Singers cannot remove team members.');
       return;
     }
+    if (!canRemovePerson(person)) {
+      Alert.alert('Admin protected', 'Only an Admin can remove another Admin.');
+      return;
+    }
     Alert.alert('Remove member?', `Remove ${person.name} from the team?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
@@ -1508,6 +1550,14 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
       return;
     }
     if (!showGrantRole || !grantingRole) return;
+    const targetCurrentRole = personGrantRole(showGrantRole);
+    const nextRole = grantRoleKey(grantingRole);
+    const touchesElevatedRole = ['org_owner', 'admin', 'manager', 'md'].includes(nextRole)
+      || ['org_owner', 'admin', 'manager', 'md'].includes(targetCurrentRole);
+    if (touchesElevatedRole && !canGrantElevatedRoles) {
+      Alert.alert('Admin only', 'Only an Admin can grant or remove Admin, Worship Leader, or Music Director access.');
+      return;
+    }
     setSavingGrant(true);
     try {
       // 'none' = revoke grant (send null)
@@ -1518,6 +1568,9 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
           email: showGrantRole.email,
           name: showGrantRole.name,
           role: roleValue,
+          actorRole: mdRole,
+          grantedByRole: mdRole,
+          grantedByEmail: profile?.email || '',
           canCreateSetlists: ['lead_singer', 'setlist_creator'].includes(grantingRole),
         }),
       });
@@ -2400,7 +2453,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                     <Text style={s.tmActionBtnTxt}>🔑</Text>
                   </TouchableOpacity>
                 )}
-                {canManageRoster && (
+                {canRemovePerson(person) && (
                   <TouchableOpacity style={[s.tmActionBtn, s.tmActionBtnRed]} onPress={() => handleDeleteMember(person)}>
                     <Text style={[s.tmActionBtnTxt, { color: '#F87171' }]}>✕</Text>
                   </TouchableOpacity>
@@ -3310,7 +3363,7 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
             <Text style={{ color: '#E0E7FF', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>Team Permission</Text>
             <Text style={{ color: '#6B7280', fontSize: 13, marginBottom: 16 }}>
               Set service access for {showGrantRole?.name}
-              {(isWorshipLeader || isMusicDirector) && !isAdmin ? '\n🎼 Worship Leader / MD: full access, including Lead Singer and Service Planner permissions' : ''}
+              {(isWorshipLeader || isMusicDirector) && !isAdmin ? '\n🎼 Worship Leader / MD: can grant Lead Singer or Service Planner access. Admin-level permission changes stay Admin-only.' : ''}
               {isAdmin && !isOrgOwner ? '\n👑 Admin: can grant Worship Leader, Music Director, Lead Singer, or Service Planner' : ''}
             </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
@@ -3318,7 +3371,11 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
                 isOrgOwner ? ['org_owner', 'admin', 'manager', 'md', 'lead_singer', 'leader', 'none']
                 : isAdmin  ? ['manager', 'md', 'lead_singer', 'leader', 'none']
                 :             ['lead_singer', 'leader', 'none']
-              ).map(r => {
+              ).filter((role) => {
+                if (role !== 'none') return true;
+                const currentRole = personGrantRole(showGrantRole);
+                return canGrantElevatedRoles || !['org_owner', 'admin', 'manager', 'md'].includes(currentRole);
+              }).map(r => {
                 const label = playbackGrantLabel(r);
                 return (
                   <TouchableOpacity key={r}

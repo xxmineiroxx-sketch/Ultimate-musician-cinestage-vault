@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.0-service-readiness';
+const WORKER_VERSION = '2.4.1-admin-role-guard';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -78,6 +78,32 @@ function normalizePhone(value) {
 
 function normalizeRole(value) {
   return String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function normalizeGrantRole(value) {
+  const normalized = normalizeRole(value);
+  const aliases = {
+    owner: 'org_owner',
+    orgowner: 'org_owner',
+    administrator: 'admin',
+    worshipleader: 'manager',
+    worship_leader: 'manager',
+    music_director: 'md',
+    musicdirector: 'md',
+    service_planner: 'leader',
+    planner: 'leader',
+    lead_vocal: 'lead_singer',
+    vocal_lead: 'lead_singer',
+  };
+  return aliases[normalized] || normalized;
+}
+
+function isAdminGrantRole(value) {
+  return ['org_owner', 'admin'].includes(normalizeGrantRole(value));
+}
+
+function isElevatedGrantRole(value) {
+  return ['org_owner', 'admin', 'manager', 'md'].includes(normalizeGrantRole(value));
 }
 
 function collectionItems(value) {
@@ -2229,6 +2255,17 @@ async function handlePost(request, env, store, path, url) {
     const existing = store.grants[email] || {};
     const hasRole = Object.prototype.hasOwnProperty.call(body, 'role');
     const nextRole = hasRole ? body.role : (existing.role || 'lead_singer');
+    const actorRole = normalizeGrantRole(body.actorRole || body.grantedByRole || body.requesterRole);
+    const nextRoleKey = normalizeGrantRole(nextRole);
+    const existingRoleKey = normalizeGrantRole(existing.role);
+    const touchesElevatedRole = isElevatedGrantRole(nextRoleKey) || isElevatedGrantRole(existingRoleKey);
+    const actorIsAdmin = isAdminGrantRole(actorRole);
+    if (touchesElevatedRole && !actorIsAdmin) {
+      return json({
+        ok: false,
+        error: 'Only an Admin can grant or remove Admin, Worship Leader, or Music Director access.',
+      }, 403);
+    }
     const hasCreateSetlistFlag = Object.prototype.hasOwnProperty.call(body, 'canCreateSetlists');
     const canCreateSetlists = hasCreateSetlistFlag
       ? body.canCreateSetlists === true

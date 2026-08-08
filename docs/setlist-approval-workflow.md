@@ -32,6 +32,8 @@ flowchart TD
 - A Lead Singer cannot create or delete services.
 - A Lead Singer cannot add, edit, remove, invite, or grant permissions to team members.
 - A Lead Singer cannot add or remove songs from the master library; they can only add existing library songs to the assigned service setlist.
+- Admin has the special authority to grant or remove Admin, Worship Leader, and Music Director access.
+- Worship Leader has full operating access but cannot remove Admins or grant/remove Admin, Worship Leader, or Music Director access.
 - Assigning a Lead Singer sends that singer a direct message and opens their setlist planning entry point.
 - Submitting a completed setlist creates an Admin Panel message for Admin/Worship Leader inspection.
 - Approval turns a pending setlist into the service plan that members receive.
