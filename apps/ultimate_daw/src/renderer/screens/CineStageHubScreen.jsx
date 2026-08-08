@@ -31,6 +31,10 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
+function mergeRoots(currentRoots = [], nextRoots = []) {
+  return Array.from(new Set([...(currentRoots || []), ...(nextRoots || [])].map((root) => String(root || '').trim()).filter(Boolean)));
+}
+
 function Field({ label, value, onChange, placeholder, type = 'text' }) {
   return (
     <label className="block">
@@ -90,13 +94,28 @@ export default function CineStageHubScreen() {
     setMessage('CineStage Hub settings saved.');
   };
 
-  const chooseFolders = async () => {
-    const folders = await api.chooseLibraryRoots();
+  const chooseFolders = async (kind = 'library') => {
+    const title = kind === 'charts'
+      ? 'Choose Song Chords and Chart Folder'
+      : kind === 'stems'
+        ? 'Choose VS or Stem Folder'
+        : 'Choose CineStage Library Folder';
+    const folders = await api.chooseLibraryRoots({ title });
     if (!folders.length) return;
-    const nextConfig = { ...config, libraryRoots: folders };
+    const nextConfig = { ...config, libraryRoots: mergeRoots(config.libraryRoots, folders) };
     const saved = await api.saveConfig(nextConfig);
     setConfig(saved);
-    setMessage('Stem library folders saved. Run Scan Libraries to refresh the index.');
+    setMessage('Library folder added. Run Scan Libraries to refresh stems, chords, and lyrics.');
+  };
+
+  const removeRoot = async (rootToRemove) => {
+    const nextConfig = {
+      ...config,
+      libraryRoots: (config.libraryRoots || []).filter((root) => root !== rootToRemove),
+    };
+    const saved = await api.saveConfig(nextConfig);
+    setConfig(saved);
+    setMessage('Library folder removed. Run Scan Libraries to refresh the index.');
   };
 
   const chooseBrainPath = async () => {
@@ -306,15 +325,31 @@ export default function CineStageHubScreen() {
 
       <section className="mt-5 border border-slate-800 bg-slate-900/40 p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-black">Stem Library Roots</h2>
-          <button onClick={chooseFolders} className="border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-bold text-slate-100">Choose Folders</button>
+          <div>
+            <h2 className="text-lg font-black">Local Library Folders</h2>
+            <p className="mt-1 text-sm text-slate-400">Add your VS/stems folder and your separate song chords/charts folder. CineStage scans both and matches by song.</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => chooseFolders('stems')} className="border border-cyan-600 bg-cyan-700 px-3 py-2 text-sm font-bold text-white">Add VS/Stems Folder</button>
+            <button onClick={() => chooseFolders('charts')} className="border border-amber-600 bg-amber-700 px-3 py-2 text-sm font-bold text-white">Add Chord Chart Folder</button>
+          </div>
         </div>
         <textarea
           value={rootsText}
           onChange={(event) => updateConfig({ libraryRoots: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
           className="mt-4 h-24 w-full border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-200 outline-none focus:border-indigo-500"
         />
-        <p className="mt-2 text-xs text-slate-500">Use one folder per line. External drives, shared folders, and your always-on laptop library mounts can all be indexed.</p>
+        {(config.libraryRoots || []).length ? (
+          <div className="mt-3 space-y-2">
+            {(config.libraryRoots || []).map((root) => (
+              <div key={root} className="flex items-center justify-between gap-3 border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                <span className="break-all font-mono">{root}</span>
+                <button onClick={() => removeRoot(root)} className="shrink-0 border border-red-900 bg-red-950/50 px-2 py-1 font-bold text-red-200">Remove</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <p className="mt-2 text-xs text-slate-500">Use one folder per line or the add buttons. External drives, shared folders, and your always-on laptop library mounts can all be indexed together.</p>
       </section>
 
       <section className="mt-5 border border-amber-900/70 bg-amber-950/10 p-5">

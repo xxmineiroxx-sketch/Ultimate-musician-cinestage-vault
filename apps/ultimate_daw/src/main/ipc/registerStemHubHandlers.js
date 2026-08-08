@@ -168,9 +168,9 @@ function registerStemHubHandlers({ ipcMain, dialog }) {
 
   ipcMain.handle('stemHub:save-config', (_event, config) => writeConfig(config));
 
-  ipcMain.handle('stemHub:choose-library-roots', async () => {
+  ipcMain.handle('stemHub:choose-library-roots', async (_event, options = {}) => {
     const result = await dialog.showOpenDialog({
-      title: 'Choose CineStage Stem Library Folders',
+      title: options.title || 'Choose CineStage Library Folder',
       properties: ['openDirectory', 'multiSelections', 'createDirectory'],
     });
     if (result.canceled) return [];

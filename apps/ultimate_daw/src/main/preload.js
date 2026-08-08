@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('umDesktop', {
   stemHub: {
     getConfig: () => ipcRenderer.invoke('stemHub:get-config'),
     saveConfig: (config) => ipcRenderer.invoke('stemHub:save-config', config),
-    chooseLibraryRoots: () => ipcRenderer.invoke('stemHub:choose-library-roots'),
+    chooseLibraryRoots: (options) => ipcRenderer.invoke('stemHub:choose-library-roots', options),
     previewSongFolder: (payload) => ipcRenderer.invoke('stemHub:preview-song-folder', payload),
     createSongWorkspace: (payload) => ipcRenderer.invoke('stemHub:create-song-workspace', payload),
     scanLibraries: (options) => ipcRenderer.invoke('stemHub:scan-libraries', options),

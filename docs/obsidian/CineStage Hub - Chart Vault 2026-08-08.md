@@ -20,6 +20,8 @@ CineStage Hub should be able to use the account holder's local chart and lyrics 
 ## Current Implementation
 
 - Chart-only folders are now indexed as songs.
+- CineStage Hub can add multiple local library roots without replacing the existing list.
+- The desktop UI has separate actions for adding a VS/stems folder and adding a song chords/charts folder, while both feed the same matching index.
 - Supported chart metadata formats: `.cho`, `.chordpro`, `.crd`, `.md`, `.txt`, `.pdf`, `.docx`.
 - Text parsing is active for `.cho`, `.chordpro`, `.crd`, `.md`, and `.txt`.
 - PDF and DOCX are indexed by file path/name for now. Full content extraction should be added later with a document parser.
