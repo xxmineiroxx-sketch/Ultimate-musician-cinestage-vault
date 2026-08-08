@@ -173,6 +173,27 @@ function metadataFromFolder(root, filePath) {
   };
 }
 
+function metadataFromProjectFolder(root, folderPath) {
+  const relative = path.relative(root, folderPath);
+  const parts = relative.split(path.sep).filter(Boolean);
+  const folderName = safeSegment(path.basename(folderPath), 'Untitled Song');
+  const parentName = safeSegment(path.basename(path.dirname(folderPath)), folderName);
+  const grandparentName = safeSegment(path.basename(path.dirname(path.dirname(folderPath))), parentName);
+  const rootName = safeSegment(path.basename(root), 'Local Library');
+  const libraryFolderNames = new Set(['multitracks', 'stems', 'stem', 'imported', 'samples', 'tracks']);
+  const folderKey = normalizeText(folderName).replace(/\s+/g, '');
+  const parentKey = normalizeText(parentName).replace(/\s+/g, '');
+  const title = folderKey === 'imported' && parentKey === 'samples'
+    ? grandparentName
+    : libraryFolderNames.has(folderKey) ? parentName : folderName;
+  const album = parts.length > 1 ? safeSegment(parts[parts.length - 2], rootName) : rootName;
+  return {
+    artist: libraryFolderNames.has(folderKey) ? 'Local Library' : rootName,
+    album,
+    title,
+  };
+}
+
 function mergeSongRecord(records, root, filePath) {
   const fileMeta = metadataFromFolder(root, filePath);
   const key = songKey(fileMeta);
@@ -210,6 +231,68 @@ function mergeSongRecord(records, root, filePath) {
   records.set(key, existing);
 }
 
+function mergeProjectFolderRecord(records, root, folderPath, files) {
+  const fileMeta = metadataFromProjectFolder(root, folderPath);
+  const key = songKey(fileMeta);
+  const existing = records.get(key) || {
+    id: key,
+    ...fileMeta,
+    aliases: [],
+    roots: new Set(),
+    songDir: folderPath,
+    sourceFiles: [],
+    stems: {},
+    charts: [],
+    metadataFiles: [],
+    missing: [],
+    updatedAt: nowIso(),
+  };
+  existing.roots.add(root);
+  existing.songDir = folderPath;
+  for (const filePath of files) {
+    const classification = classifyFile(filePath);
+    if (classification.kind === 'stem') {
+      existing.stems[classification.stemType] = filePath;
+    } else if (classification.kind === 'source') {
+      existing.sourceFiles.push(filePath);
+    } else if (classification.kind === 'chart') {
+      existing.charts.push(filePath);
+    } else if (classification.kind === 'metadata') {
+      existing.metadataFiles.push(filePath);
+      const metadata = readJson(filePath);
+      if (metadata && typeof metadata === 'object') {
+        existing.bpm = existing.bpm || metadata.bpm || metadata.tempo;
+        existing.key = existing.key || metadata.key;
+        existing.ccli = existing.ccli || metadata.ccli;
+        existing.sourceId = existing.sourceId || metadata.sourceId || metadata.youtubeId;
+      }
+    }
+  }
+  records.set(key, existing);
+}
+
+function findProjectFolders(files) {
+  const byDir = new Map();
+  for (const filePath of files) {
+    const dir = path.dirname(filePath);
+    const group = byDir.get(dir) || [];
+    group.push(filePath);
+    byDir.set(dir, group);
+  }
+
+  const projectDirs = new Set();
+  for (const [dir, group] of byDir.entries()) {
+    const audioFiles = group.filter((filePath) => AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase()));
+    const stemTypes = new Set(audioFiles.map(detectStemType).filter(Boolean));
+    const folderKey = normalizeText(path.basename(dir)).replace(/\s+/g, '');
+    const looksLikeStemFolder = ['multitracks', 'stems', 'stem', 'imported', 'tracks'].includes(folderKey);
+    if (audioFiles.length >= 4 && (stemTypes.size >= 2 || looksLikeStemFolder)) {
+      projectDirs.add(dir);
+    }
+  }
+  return projectDirs;
+}
+
 function finalizeRecord(record) {
   const stems = Object.fromEntries(Object.entries(record.stems).filter(([, filePath]) => fs.existsSync(filePath)));
   const missing = [];
@@ -236,7 +319,13 @@ function scanLibraryRoots(roots = [], options = {}) {
   for (const root of uniqueRoots) {
     const files = walkFiles(root, options);
     filesScanned += files.length;
-    files.forEach((filePath) => mergeSongRecord(records, root, filePath));
+    const projectDirs = findProjectFolders(files);
+    for (const projectDir of projectDirs) {
+      mergeProjectFolderRecord(records, root, projectDir, files.filter((filePath) => path.dirname(filePath) === projectDir));
+    }
+    files
+      .filter((filePath) => !projectDirs.has(path.dirname(filePath)))
+      .forEach((filePath) => mergeSongRecord(records, root, filePath));
   }
 
   const songs = Array.from(records.values()).map(finalizeRecord);

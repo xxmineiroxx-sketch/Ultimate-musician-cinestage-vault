@@ -8,6 +8,7 @@ Implemented in `apps/ultimate_daw`:
 - Worker identity, sync URL, and account settings.
 - Account desktop, backup laptop, and library server modes.
 - External drive/shared folder stem library scanning.
+- Flat Ableton-style `MultiTracks`, `Imported`, and `stems` folders are grouped as one song/project.
 - Artist/Album/Song folder organizer.
 - Local index for song/stem/chart/metadata lookup.
 - Search-before-separate behavior in the background stem worker.

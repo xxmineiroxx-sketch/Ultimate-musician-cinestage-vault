@@ -51,6 +51,7 @@ Implemented in `apps/ultimate_daw`:
 - Account desktop, backup laptop, and library server modes.
 - External/shared library root selection.
 - Local scan/index of stems, charts, and metadata.
+- Flat Ableton-style folders such as `MultiTracks`, `Imported`, and `stems` are grouped as one song/project instead of one song per WAV file.
 - Folder preview and folder creation.
 - Library match testing.
 - Start/stop for the background stem worker.
