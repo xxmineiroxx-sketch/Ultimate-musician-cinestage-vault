@@ -614,6 +614,10 @@ export async function verifyCode(identifier, code, options = {}) {
     deviceId: await getDeviceId(),
   });
 
+  if (!data?.token) {
+    throw new Error('Verification succeeded, but the server did not return a secure session token.');
+  }
+
   await completeAuthFromResponse(data, {
     identifier: normalizedIdentifier,
     email: extractEmail(options?.email, normalizedIdentifier),

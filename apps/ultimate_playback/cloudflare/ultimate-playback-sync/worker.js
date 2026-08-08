@@ -593,6 +593,91 @@ async function handleLogin(request, env, store) {
   return json(authResponse(user, token, profile));
 }
 
+function authChallengeForPurpose(user = {}, purpose = '') {
+  const normalizedPurpose = normalizeRole(purpose || '');
+  const candidates = [
+    user.verification,
+    user.verificationCode,
+    user.pendingVerification,
+    user.loginVerification,
+    user.loginChallenge,
+    user.authChallenge,
+    normalizedPurpose === 'signup' ? user.signupVerification : null,
+    normalizedPurpose === 'login' ? user.loginVerification : null,
+    normalizedPurpose === 'login' ? user.reset : null,
+    normalizedPurpose === 'reset' ? user.reset : null,
+  ];
+  return candidates.find((challenge) => {
+    if (!challenge) return false;
+    if (typeof challenge === 'string' || typeof challenge === 'number') return true;
+    if (typeof challenge !== 'object') return false;
+    if (challenge.purpose && normalizedPurpose && normalizeRole(challenge.purpose) !== normalizedPurpose) {
+      return false;
+    }
+    return Boolean(challenge.code || challenge.token || challenge.value);
+  }) || null;
+}
+
+function authChallengeCode(challenge) {
+  if (typeof challenge === 'string' || typeof challenge === 'number') return String(challenge).trim();
+  if (!challenge || typeof challenge !== 'object') return '';
+  return String(challenge.code || challenge.token || challenge.value || '').trim();
+}
+
+function authChallengeExpired(challenge) {
+  if (!challenge || typeof challenge !== 'object') return false;
+  const expiresAt = Number(challenge.expiresAt || 0) || Date.parse(challenge.expiresAt || '');
+  return Boolean(expiresAt && expiresAt < Date.now());
+}
+
+function clearAuthChallenge(user = {}, purpose = '') {
+  const normalizedPurpose = normalizeRole(purpose || '');
+  user.verification = null;
+  user.verificationCode = null;
+  user.pendingVerification = null;
+  user.authChallenge = null;
+  if (normalizedPurpose === 'signup') user.signupVerification = null;
+  if (normalizedPurpose === 'login') {
+    user.loginVerification = null;
+    user.loginChallenge = null;
+    user.reset = null;
+  }
+}
+
+async function handleVerifyAuth(request, env, store) {
+  const body = await readJson(request);
+  const identifier = normalizeIdentifier(body.identifier || body.email || body.phone);
+  const code = String(body.code || '').trim();
+  const purpose = normalizeRole(body.purpose || 'login');
+
+  if (!identifier || !code) {
+    return json({ ok: false, error: 'Email or phone, plus verification code, are required.' }, 400);
+  }
+
+  const user = store.users[lookupKey(identifier)];
+  if (!user) return json({ ok: false, error: 'Account not found.' }, 404);
+
+  const challenge = authChallengeForPurpose(user, purpose) || authChallengeForPurpose(user, '');
+  if (!challenge || authChallengeCode(challenge) !== code || authChallengeExpired(challenge)) {
+    return json({ ok: false, error: 'Invalid or expired verification code.' }, 401);
+  }
+
+  clearAuthChallenge(user, purpose);
+  user.verifiedAt ||= nowIso();
+  user.lastLoginAt = nowIso();
+  user.updatedAt = user.lastLoginAt;
+  const profile = findPerson(store, {
+    id: user.personId,
+    email: user.email,
+    phone: user.phone,
+    identifier,
+  }) || profilePayload(user);
+  const token = await createSession(store, user, body.deviceId);
+  await saveStore(env, store);
+
+  return json(authResponse(user, token, profile));
+}
+
 async function handleForgotPassword(request, env, store) {
   const body = await readJson(request);
   const identifier = normalizeIdentifier(body.identifier || body.email || body.phone);
@@ -2211,7 +2296,7 @@ async function handlePost(request, env, store, path, url) {
   }
   if (path === '/sync/auth/reset-password') return handleResetPassword(request, env, store);
   if (path === '/sync/auth/change-password') return handleChangePassword(request, env, store);
-  if (path === '/sync/auth/verify') return json({ ok: true });
+  if (path === '/sync/auth/verify') return handleVerifyAuth(request, env, store);
   if (path === '/sync/auth/apple') {
     return json({ ok: false, error: 'Apple Sign In is not enabled on this sync Worker.' }, 501);
   }
