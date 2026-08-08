@@ -4,6 +4,10 @@ const Store = require('electron-store');
 const { fork } = require('child_process');
 const path = require('path');
 const {
+  findBrainInstallation,
+  inspectBrainRoot,
+} = require('../stemHub/brainInstallation');
+const {
   defaultHubDir,
   defaultIndexPath,
   ensureSongWorkspace,
@@ -54,6 +58,7 @@ function savedIdentity() {
 
 function defaultConfig() {
   const identity = savedIdentity();
+  const brain = findBrainInstallation();
   return {
     syncUrl: 'https://ultimate-playback-sync.studio-cinestage.workers.dev',
     accountEmail: identity.email,
@@ -69,6 +74,8 @@ function defaultConfig() {
     allowBackupWorker: false,
     allowYouTubeDownload: false,
     keepMasterStems: true,
+    brainEnabled: Boolean(brain.selected?.installed),
+    brainPath: brain.selected?.installed ? brain.selected.path : '',
     serviceExportTtlHours: 2,
   };
 }
@@ -76,12 +83,17 @@ function defaultConfig() {
 function readConfig() {
   const identity = savedIdentity();
   const saved = store.get(CONFIG_KEY) || {};
+  const detectedBrain = findBrainInstallation(saved.brainPath ? [saved.brainPath] : []);
   const merged = { ...defaultConfig(), ...saved };
+  const brainPath = String(merged.brainPath || detectedBrain.selected?.path || '').trim();
+  const brainInstalled = brainPath ? inspectBrainRoot(brainPath).installed : false;
   return {
     ...merged,
     accountEmail: normalizeIdentifier(merged.accountEmail || identity.email),
     accountId: String(merged.accountId || identity.accountId || '').trim(),
     desktopName: String(merged.desktopName || (identity.name ? `${identity.name} Desktop` : '')).trim(),
+    brainPath: brainInstalled ? brainPath : '',
+    brainEnabled: saved.brainEnabled === false ? false : Boolean(brainInstalled),
   };
 }
 
@@ -92,6 +104,9 @@ function writeConfig(nextConfig) {
 }
 
 function workerEnvFromConfig(config) {
+  const brain = config.brainPath
+    ? inspectBrainRoot(config.brainPath)
+    : findBrainInstallation().selected;
   return {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
@@ -105,6 +120,8 @@ function workerEnvFromConfig(config) {
     UM_STEM_SEARCH_LIBRARY: String(config.searchBeforeSeparate !== false),
     UM_STEM_WORKER_MODE: config.workerMode,
     UM_STEM_ALLOW_BACKUP_WORKER: String(Boolean(config.allowBackupWorker)),
+    UM_CINESTAGE_BRAIN_ENABLED: String(Boolean(config.brainEnabled && brain?.installed)),
+    UM_CINESTAGE_BRAIN_PATH: config.brainEnabled && brain?.installed ? brain.path : '',
   };
 }
 
@@ -201,6 +218,25 @@ function registerStemHubHandlers({ ipcMain, dialog }) {
   });
 
   ipcMain.handle('stemHub:worker-status', () => workerStatus());
+
+  ipcMain.handle('stemHub:brain-status', () => {
+    const config = readConfig();
+    return findBrainInstallation(config.brainPath ? [config.brainPath] : []);
+  });
+
+  ipcMain.handle('stemHub:choose-brain-path', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Choose CineStage Brain Folder',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths?.[0]) return readConfig();
+    const brain = inspectBrainRoot(result.filePaths[0]);
+    const saved = writeConfig({
+      brainPath: brain.installed ? brain.path : result.filePaths[0],
+      brainEnabled: Boolean(brain.installed),
+    });
+    return { config: saved, brain };
+  });
 
   ipcMain.handle('stemHub:start-worker', () => startStemHubWorker());
 

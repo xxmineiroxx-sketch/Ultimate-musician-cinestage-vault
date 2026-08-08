@@ -15,6 +15,9 @@ const {
   findLibraryMatch,
   loadIndex,
 } = require('../stemHub/libraryOrganizer');
+const {
+  inspectBrainRoot,
+} = require('../stemHub/brainInstallation');
 
 const AUDIO_EXTENSIONS = new Set(['.aac', '.aif', '.aiff', '.caf', '.flac', '.m4a', '.mp3', '.mp4', '.ogg', '.opus', '.wav']);
 const DEFAULT_SYNC_URL = 'https://ultimate-playback-sync.studio-cinestage.workers.dev';
@@ -250,6 +253,9 @@ class DesktopStemJobWorker {
     this.searchLibrary = options.searchLibrary ?? process.env.UM_STEM_SEARCH_LIBRARY !== 'false';
     this.workerMode = String(options.workerMode || process.env.UM_STEM_WORKER_MODE || 'account_desktop').trim();
     this.allowBackupWorker = options.allowBackupWorker ?? process.env.UM_STEM_ALLOW_BACKUP_WORKER === 'true';
+    this.brainEnabled = options.brainEnabled ?? process.env.UM_CINESTAGE_BRAIN_ENABLED === 'true';
+    this.brainPath = String(options.brainPath || process.env.UM_CINESTAGE_BRAIN_PATH || '').trim();
+    this.brainInstallation = this.brainPath ? inspectBrainRoot(this.brainPath) : { installed: false, capabilities: {} };
     this.model = String(options.model || process.env.UM_STEM_MODEL || DEFAULT_MODEL).trim();
     this.pollIntervalMs = Number(options.pollIntervalMs || process.env.UM_STEM_POLL_INTERVAL_MS || DEFAULT_POLL_INTERVAL_MS);
     this.heartbeatIntervalMs = Number(options.heartbeatIntervalMs || process.env.UM_STEM_HEARTBEAT_INTERVAL_MS || DEFAULT_HEARTBEAT_INTERVAL_MS);
@@ -301,6 +307,13 @@ class DesktopStemJobWorker {
         capabilities: {
           stems: true,
           demucs: true,
+          cineStageBrain: Boolean(this.brainEnabled && this.brainInstallation.installed),
+          songPipeline: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.songPipeline),
+          songIntelligence: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.songIntelligence),
+          chordDetection: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.chordDetection),
+          instrumentCharts: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.instrumentCharts),
+          partsheets: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.partsheets),
+          worshipMemory: Boolean(this.brainEnabled && this.brainInstallation.capabilities?.worshipMemory),
           localStemLibrary: Boolean(this.searchLibrary),
           organizeStemFolders: true,
           workerMode: this.workerMode,
@@ -309,6 +322,14 @@ class DesktopStemJobWorker {
           waveform: false,
           roleStemMap: true,
         },
+        brain: this.brainEnabled && this.brainInstallation.installed
+          ? {
+            status: this.brainInstallation.status,
+            path: this.brainInstallation.path,
+            capabilities: this.brainInstallation.capabilities,
+            storage: this.brainInstallation.storage,
+          }
+          : { status: 'disabled' },
       },
     });
   }

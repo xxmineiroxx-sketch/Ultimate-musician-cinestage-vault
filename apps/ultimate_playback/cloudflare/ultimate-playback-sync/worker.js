@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.4-brain-authority';
+const WORKER_VERSION = '2.4.5-desktop-brain-install';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1427,6 +1427,8 @@ function buildBrainSnapshot(store = {}, account = {}) {
     return worker.status === 'online';
   });
   const selectedRoute = selectedDesktop ? 'desktop' : 'cloudflare_fallback';
+  const localBrain = selectedDesktop?.brain || null;
+  const localBrainCapabilities = localBrain?.capabilities || {};
 
   return {
     ok: true,
@@ -1449,7 +1451,12 @@ function buildBrainSnapshot(store = {}, account = {}) {
         serviceReadiness: true,
         setlistApproval: true,
         teamNotifications: true,
+        localSongIntelligence: Boolean(localBrainCapabilities.songIntelligence || localBrainCapabilities.songPipeline),
+        localChartGeneration: Boolean(localBrainCapabilities.instrumentCharts),
+        localPartsheets: Boolean(localBrainCapabilities.partsheets),
+        localWorshipMemory: Boolean(localBrainCapabilities.worshipMemory),
       },
+      localInstallation: localBrain,
     },
     stemProcessingRoute: {
       preferred: 'desktop',
@@ -1717,6 +1724,18 @@ async function handleDesktopHeartbeat(request, env, store) {
     queueDepth: Math.max(0, Number(body.queueDepth || 0) || 0),
     activeJobId: String(body.activeJobId || '').trim(),
     storagePath: String(body.storagePath || body.cacheDir || '').trim(),
+    brain: body.brain && typeof body.brain === 'object'
+      ? {
+        status: String(body.brain.status || '').trim(),
+        path: String(body.brain.path || '').trim(),
+        capabilities: body.brain.capabilities && typeof body.brain.capabilities === 'object'
+          ? body.brain.capabilities
+          : {},
+        storage: body.brain.storage && typeof body.brain.storage === 'object'
+          ? body.brain.storage
+          : {},
+      }
+      : null,
     storage: body.storage && typeof body.storage === 'object'
       ? {
         cacheDir: String(body.storage.cacheDir || body.cacheDir || '').trim(),

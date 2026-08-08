@@ -122,3 +122,33 @@ Needs adaptation before production:
 ## Product Rule
 
 CineStage Brain should own the record and decision state. Desktop workers should do heavy processing. Ultimate Musician should review and approve. Ultimate Playback should consume the approved result.
+
+## Desktop Install Bridge Added
+
+August 8, 2026:
+
+- The desktop Hub now detects a local CineStage Brain package on this machine.
+- Default detection includes:
+  - `/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage`
+  - `/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStage_Music_AI`
+  - packaged future desktop paths such as `resources/cinestage-brain`
+- Detection verified the iCloud Brain as `ready` with 17 engines:
+  - song pipeline
+  - song intelligence
+  - stem separation
+  - advanced stem separation
+  - chord detection
+  - key detection
+  - tempo detection
+  - waveform analysis
+  - section detection
+  - cue generation
+  - instrument charts
+  - partsheets
+  - vocal parts
+  - worship flow
+  - worship memory
+  - MIDI presets
+  - mix intelligence
+- The desktop worker now advertises this Brain installation in its Cloudflare heartbeat.
+- The live `/sync/cinestage/brain` response now reports local Brain authority flags for song intelligence, chart generation, partsheets, and worship memory.

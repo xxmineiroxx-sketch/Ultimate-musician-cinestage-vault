@@ -65,3 +65,13 @@ Create a canonical `SongIntelligenceRecord` owned by CineStage Brain:
 - service/team publish state
 
 Desktop workers should run the heavy Python intelligence pipeline. Cloudflare should coordinate and persist metadata. Ultimate Musician should review/approve. Ultimate Playback should consume approved role-specific output.
+
+## Desktop Install Bridge
+
+Added August 8, 2026:
+
+- Ultimate Musician desktop now detects a local CineStage Brain install.
+- Detection found `/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage` as `ready`.
+- Verified engines: song pipeline, song intelligence, stem separation, advanced stem separation, chord/key/tempo/waveform/section detection, cue generation, instrument charts, partsheets, vocal parts, worship flow, worship memory, MIDI presets, and mix intelligence.
+- The desktop worker advertises the local Brain installation to Cloudflare.
+- `/sync/cinestage/brain` now reports local Brain authority for song intelligence, chart generation, partsheets, and worship memory.

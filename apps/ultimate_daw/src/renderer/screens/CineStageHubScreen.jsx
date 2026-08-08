@@ -56,15 +56,17 @@ export default function CineStageHubScreen() {
   const [matchQuery, setMatchQuery] = useState({ artist: '', title: '' });
   const [match, setMatch] = useState(null);
   const [workerStatus, setWorkerStatus] = useState({ running: false, pid: null, lastExit: null });
+  const [brainStatus, setBrainStatus] = useState(null);
 
   const rootsText = useMemo(() => (config?.libraryRoots || []).join('\n'), [config]);
 
   useEffect(() => {
     if (!api) return;
-    Promise.all([api.getConfig(), api.getIndex()])
-      .then(([nextConfig, nextIndex]) => {
+    Promise.all([api.getConfig(), api.getIndex(), api.brainStatus()])
+      .then(([nextConfig, nextIndex, nextBrainStatus]) => {
         setConfig(nextConfig);
         setIndex(nextIndex);
+        setBrainStatus(nextBrainStatus);
       })
       .catch((err) => setMessage(err.message));
     api.workerStatus().then(setWorkerStatus).catch(() => null);
@@ -92,6 +94,15 @@ export default function CineStageHubScreen() {
     const saved = await api.saveConfig(nextConfig);
     setConfig(saved);
     setMessage('Stem library folders saved. Run Scan Libraries to refresh the index.');
+  };
+
+  const chooseBrainPath = async () => {
+    const result = await api.chooseBrainPath();
+    if (result?.config) setConfig(result.config);
+    if (result?.brain) {
+      setBrainStatus({ selected: result.brain, candidates: [result.brain] });
+      setMessage(result.brain.installed ? 'CineStage Brain folder connected.' : 'Selected folder does not contain CineStage Brain.');
+    }
   };
 
   const scanLibraries = async () => {
@@ -193,6 +204,34 @@ export default function CineStageHubScreen() {
         {workerStatus.lastExit ? (
           <p className="mt-3 text-xs text-slate-500">Last exit: code {workerStatus.lastExit.code ?? 'n/a'} · signal {workerStatus.lastExit.signal || 'none'} · {workerStatus.lastExit.at}</p>
         ) : null}
+      </section>
+
+      <section className="mt-5 border border-cyan-900/70 bg-cyan-950/20 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-300">Local Intelligence</p>
+            <h2 className="mt-1 text-lg font-black">CineStage Brain Installation</h2>
+            <p className="mt-1 text-sm text-slate-400">The desktop should host the heavy music brain: song pipeline, stems, chords, charts, partsheets, and worship memory.</p>
+          </div>
+          <div className={`border px-3 py-2 text-sm font-black ${brainStatus?.selected?.installed ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-amber-500 bg-amber-500/10 text-amber-200'}`}>
+            {brainStatus?.selected?.installed ? `${brainStatus.selected.status} · ${brainStatus.selected.capabilityCount || 0} engines` : 'Not connected'}
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-3">
+          <Field label="Brain Path" value={config.brainPath} onChange={(value) => updateConfig({ brainPath: value })} placeholder="Choose or paste CineStage Brain folder" />
+          <button onClick={chooseBrainPath} className="self-end border border-cyan-500 bg-cyan-600 px-4 py-2 text-sm font-bold text-white">Choose Brain</button>
+        </div>
+        <Toggle label="Enable local CineStage Brain for worker jobs" checked={config.brainEnabled} onChange={(value) => updateConfig({ brainEnabled: value })} />
+        <div className="mt-4 grid grid-cols-4 gap-2 text-xs">
+          {Object.entries(brainStatus?.selected?.capabilities || {}).map(([name, enabled]) => (
+            <div key={name} className={`border px-3 py-2 ${enabled ? 'border-emerald-900 bg-emerald-950/40 text-emerald-200' : 'border-slate-800 bg-slate-950 text-slate-500'}`}>
+              <span className="font-bold">{name}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Charts indexed: {brainStatus?.selected?.storage?.charts || 0} · stems indexed: {brainStatus?.selected?.storage?.stems || 0} · memory DB: {brainStatus?.selected?.storage?.memoryDbBytes || 0} bytes
+        </p>
       </section>
 
       <div className="mt-6 grid grid-cols-[1.2fr_0.8fr] gap-5">

@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld('umDesktop', {
     findMatch: (query) => ipcRenderer.invoke('stemHub:find-match', query),
     workerEnv: () => ipcRenderer.invoke('stemHub:worker-env'),
     workerStatus: () => ipcRenderer.invoke('stemHub:worker-status'),
+    brainStatus: () => ipcRenderer.invoke('stemHub:brain-status'),
+    chooseBrainPath: () => ipcRenderer.invoke('stemHub:choose-brain-path'),
     startWorker: () => ipcRenderer.invoke('stemHub:start-worker'),
     stopWorker: () => ipcRenderer.invoke('stemHub:stop-worker'),
   },
