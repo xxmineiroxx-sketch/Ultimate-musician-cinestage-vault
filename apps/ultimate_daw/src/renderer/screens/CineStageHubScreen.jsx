@@ -87,7 +87,11 @@ export default function CineStageHubScreen() {
 
   const chooseFolders = async () => {
     const folders = await api.chooseLibraryRoots();
-    if (folders.length) updateConfig({ libraryRoots: folders });
+    if (!folders.length) return;
+    const nextConfig = { ...config, libraryRoots: folders };
+    const saved = await api.saveConfig(nextConfig);
+    setConfig(saved);
+    setMessage('Stem library folders saved. Run Scan Libraries to refresh the index.');
   };
 
   const scanLibraries = async () => {
