@@ -102,9 +102,7 @@ export default function CineStageHubScreen() {
       ? 'Choose Song Chords and Chart Folder'
       : kind === 'intake'
         ? 'Choose Raw VS, Stems, Lyrics, or Chart Intake Folder'
-        : kind === 'stems'
-        ? 'Choose VS or Stem Folder'
-        : 'Choose CineStage Library Folder';
+        : 'Choose Clean CineStage Database Folder';
     const folders = await api.chooseLibraryRoots({ title });
     if (!folders.length) return;
     if (kind === 'intake') {
@@ -117,7 +115,7 @@ export default function CineStageHubScreen() {
     const nextConfig = { ...config, libraryRoots: mergeRoots(config.libraryRoots, folders) };
     const saved = await api.saveConfig(nextConfig);
     setConfig(saved);
-    setMessage('Library folder added. Run Scan Libraries to refresh stems, chords, and lyrics.');
+    setMessage('Clean database folder added. Use raw VS, stems, lyrics, and charts folders in Clean Database Intake.');
   };
 
   const removeRoot = async (rootToRemove) => {
@@ -180,7 +178,8 @@ export default function CineStageHubScreen() {
       if (result.index) setIndex({ ...(index || {}), ...result.index });
       const refreshed = await api.getConfig();
       setConfig(refreshed);
-      setMessage(`Organized ${result.imported.length} song workspaces into CineStage Library. Future jobs will search the clean index first.`);
+      const adjusted = result.targetAdjusted ? ` Target changed to clean library: ${result.targetRoot}` : '';
+      setMessage(`Organized ${result.imported.length} song workspaces into CineStage Library. Future jobs will search the clean index first.${adjusted}`);
     } catch (err) {
       setMessage(err.message);
     } finally {
@@ -371,12 +370,11 @@ export default function CineStageHubScreen() {
       <section className="mt-5 border border-slate-800 bg-slate-900/40 p-5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-black">Local Library Folders</h2>
-            <p className="mt-1 text-sm text-slate-400">Add your VS/stems folder and your separate song chords/charts folder. CineStage scans both and matches by song.</p>
+            <h2 className="text-lg font-black">Clean Database Folders</h2>
+            <p className="mt-1 text-sm text-slate-400">Use this for organized CineStage storage only. Add raw VS, stems, lyrics, and chart folders in Clean Database Intake.</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => chooseFolders('stems')} className="border border-cyan-600 bg-cyan-700 px-3 py-2 text-sm font-bold text-white">Add VS/Stems Folder</button>
-            <button onClick={() => chooseFolders('charts')} className="border border-amber-600 bg-amber-700 px-3 py-2 text-sm font-bold text-white">Add Chord Chart Folder</button>
+            <button onClick={() => chooseFolders('library')} className="border border-cyan-600 bg-cyan-700 px-3 py-2 text-sm font-bold text-white">Add Clean Library Folder</button>
           </div>
         </div>
         <textarea
@@ -394,7 +392,7 @@ export default function CineStageHubScreen() {
             ))}
           </div>
         ) : null}
-        <p className="mt-2 text-xs text-slate-500">Use one folder per line or the add buttons. External drives, shared folders, and your always-on laptop library mounts can all be indexed together.</p>
+        <p className="mt-2 text-xs text-slate-500">Use one folder per line or the add button. External drives, shared folders, and always-on laptop library mounts can all be indexed together after they are organized.</p>
       </section>
 
       <section className="mt-5 border border-emerald-900/70 bg-emerald-950/10 p-5">
@@ -436,7 +434,7 @@ export default function CineStageHubScreen() {
             >
               {organizeState === 'organizing' ? 'Organizing...' : 'Organize Intake'}
             </button>
-            <p className="mt-3 text-xs text-slate-500">Creates stems, charts, original, and metadata folders per song. Raw intake roots are not kept in the clean library scan path after organization.</p>
+            <p className="mt-3 text-xs text-slate-500">Creates stems, charts, original, and metadata folders per song. If the target matches a raw intake folder, CineStage automatically uses the default clean library instead.</p>
           </div>
         </div>
         {organizeReport ? (

@@ -32,6 +32,16 @@ function defaultHubDir() {
   return path.join(os.homedir(), 'Music', 'CineStage Stem Library');
 }
 
+function normalizedPath(value) {
+  return path.resolve(String(value || '')).replace(/[\\/]+$/g, '');
+}
+
+function isSameOrNestedPath(parent, child) {
+  const normalizedParent = normalizedPath(parent);
+  const normalizedChild = normalizedPath(child);
+  return normalizedParent === normalizedChild || normalizedChild.startsWith(`${normalizedParent}${path.sep}`);
+}
+
 function defaultIndexPath() {
   return path.join(os.homedir(), 'Library', 'Application Support', 'Ultimate Musician', 'cinestage-stem-index.json');
 }
@@ -308,10 +318,21 @@ function serviceAlbumForIntake(options = {}) {
 }
 
 function organizeLibraryIntake(options = {}) {
-  const targetRoot = path.resolve(String(options.targetRoot || defaultHubDir()));
   const intakeRoots = Array.from(new Set((options.intakeRoots || [])
     .map((root) => path.resolve(String(root || '')))
     .filter((root) => root && fs.existsSync(root))));
+  const requestedTargetRoot = path.resolve(String(options.targetRoot || defaultHubDir()));
+  const targetConflictsWithIntake = intakeRoots.some((root) => (
+    isSameOrNestedPath(root, requestedTargetRoot) ||
+    isSameOrNestedPath(requestedTargetRoot, root)
+  ));
+  const fallbackRoot = defaultHubDir();
+  const targetRoot = targetConflictsWithIntake && !intakeRoots.some((root) => (
+    isSameOrNestedPath(root, fallbackRoot) ||
+    isSameOrNestedPath(fallbackRoot, root)
+  ))
+    ? fallbackRoot
+    : requestedTargetRoot;
   const existingIndex = options.currentIndex || loadIndex(options.indexPath || defaultIndexPath());
   const intakeIndex = scanLibraryRoots(intakeRoots, {
     maxFiles: options.maxFiles || 50000,
@@ -441,7 +462,15 @@ function organizeLibraryIntake(options = {}) {
 
   const nextRoots = Array.from(new Set([
     targetRoot,
-    ...(options.keepOtherRoots === false ? [] : (existingIndex.roots || []).filter((root) => root !== targetRoot)),
+    ...(options.keepOtherRoots === false ? [] : (existingIndex.roots || []).filter((root) => {
+      const normalizedRoot = path.resolve(String(root || ''));
+      if (normalizedRoot === targetRoot) return false;
+      if (normalizedRoot === requestedTargetRoot && targetRoot !== requestedTargetRoot) return false;
+      return !intakeRoots.some((intakeRoot) => (
+        isSameOrNestedPath(intakeRoot, normalizedRoot) ||
+        isSameOrNestedPath(normalizedRoot, intakeRoot)
+      ));
+    })),
   ]));
   const nextIndex = dryRun
     ? existingIndex
@@ -455,6 +484,8 @@ function organizeLibraryIntake(options = {}) {
     ok: true,
     dryRun,
     targetRoot,
+    requestedTargetRoot,
+    targetAdjusted: targetRoot !== requestedTargetRoot,
     intakeRoots,
     imported,
     skipped,
@@ -847,6 +878,7 @@ module.exports = {
   extractChartInfo,
   findLibraryMatch,
   getSongFolder,
+  isSameOrNestedPath,
   loadIndex,
   normalizeText,
   organizeLibraryIntake,
