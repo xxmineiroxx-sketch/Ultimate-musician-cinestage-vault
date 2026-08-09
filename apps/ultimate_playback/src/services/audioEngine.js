@@ -875,7 +875,9 @@ class AudioEngine {
     await FileSystem.makeDirectoryAsync(AUDIO_CACHE_DIR, { intermediates: true }).catch(() => {});
 
     const extensionMatch = trimmed.split('?')[0].match(/\.([a-z0-9]{2,8})$/i);
-    const extension = extensionMatch ? `.${extensionMatch[1].toLowerCase()}` : '.mp3';
+    const extension = extensionMatch
+      ? `.${extensionMatch[1].toLowerCase()}`
+      : (trimmed.includes('/sync/stem-assets/download') ? '.wav' : '.mp3');
     const cacheKey = encodeURIComponent(trimmed).replace(/%/g, '_');
     const localUri = `${AUDIO_CACHE_DIR}${cacheKey}${extension}`;
     const info = await FileSystem.getInfoAsync(localUri).catch(() => null);

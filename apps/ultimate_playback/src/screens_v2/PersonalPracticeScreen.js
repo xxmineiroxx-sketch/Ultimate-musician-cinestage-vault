@@ -39,6 +39,7 @@ import {
 } from '../utils/songMedia';
 
 const { width } = Dimensions.get('window');
+const MAX_INITIAL_TRACK_SOURCES = 2;
 
 // ─── Role classification ────────────────────────────────────────────────────
 
@@ -287,6 +288,21 @@ function getTrackSources(def) {
   if (!def) return [];
   if (Array.isArray(def.sources) && def.sources.length > 0) return def.sources;
   return def.uri ? [{ id: def.id, uri: def.uri }] : [];
+}
+
+function getInitialPracticeSources(trackA, trackB) {
+  const sources = [
+    ...getTrackSources(trackB),
+    ...getTrackSources(trackA),
+  ];
+  const seenUris = new Set();
+  return sources
+    .filter((source) => {
+      if (!source?.uri || seenUris.has(source.uri)) return false;
+      seenUris.add(source.uri);
+      return true;
+    })
+    .slice(0, MAX_INITIAL_TRACK_SOURCES);
 }
 
 function isPlaybackOnlyRole(role) {
@@ -938,12 +954,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       await audioEngine.stop().catch(() => {});
       await audioEngine.unloadAll();
       let loaded = 0;
-      for (const source of getTrackSources(trackA)) {
-        // eslint-disable-next-line no-await-in-loop
-        const ok = await audioEngine.loadStem(source.id, source.uri);
-        if (ok) loaded++;
-      }
-      for (const source of getTrackSources(trackB)) {
+      for (const source of getInitialPracticeSources(trackA, trackB)) {
         // eslint-disable-next-line no-await-in-loop
         const ok = await audioEngine.loadStem(source.id, source.uri);
         if (ok) loaded++;
