@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('umDesktop', {
     previewSongFolder: (payload) => ipcRenderer.invoke('stemHub:preview-song-folder', payload),
     createSongWorkspace: (payload) => ipcRenderer.invoke('stemHub:create-song-workspace', payload),
     scanLibraries: (options) => ipcRenderer.invoke('stemHub:scan-libraries', options),
+    organizeIntake: (options) => ipcRenderer.invoke('stemHub:organize-intake', options),
     getIndex: (indexPath) => ipcRenderer.invoke('stemHub:get-index', indexPath),
     findMatch: (query) => ipcRenderer.invoke('stemHub:find-match', query),
     analyzeChartRequest: (query) => ipcRenderer.invoke('stemHub:analyze-chart-request', query),

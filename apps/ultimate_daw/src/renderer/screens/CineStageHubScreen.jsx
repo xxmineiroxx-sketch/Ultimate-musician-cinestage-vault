@@ -64,8 +64,11 @@ export default function CineStageHubScreen() {
   const [chartState, setChartState] = useState('idle');
   const [workerStatus, setWorkerStatus] = useState({ running: false, pid: null, lastExit: null });
   const [brainStatus, setBrainStatus] = useState(null);
+  const [organizeState, setOrganizeState] = useState('idle');
+  const [organizeReport, setOrganizeReport] = useState(null);
 
   const rootsText = useMemo(() => (config?.libraryRoots || []).join('\n'), [config]);
+  const intakeRootsText = useMemo(() => (config?.intakeRoots || []).join('\n'), [config]);
 
   useEffect(() => {
     if (!api) return;
@@ -97,11 +100,20 @@ export default function CineStageHubScreen() {
   const chooseFolders = async (kind = 'library') => {
     const title = kind === 'charts'
       ? 'Choose Song Chords and Chart Folder'
-      : kind === 'stems'
+      : kind === 'intake'
+        ? 'Choose Raw VS, Stems, Lyrics, or Chart Intake Folder'
+        : kind === 'stems'
         ? 'Choose VS or Stem Folder'
         : 'Choose CineStage Library Folder';
     const folders = await api.chooseLibraryRoots({ title });
     if (!folders.length) return;
+    if (kind === 'intake') {
+      const nextConfig = { ...config, intakeRoots: mergeRoots(config.intakeRoots, folders) };
+      const saved = await api.saveConfig(nextConfig);
+      setConfig(saved);
+      setMessage('Intake folder added. Run Organize Intake to move supported files into the clean CineStage Library.');
+      return;
+    }
     const nextConfig = { ...config, libraryRoots: mergeRoots(config.libraryRoots, folders) };
     const saved = await api.saveConfig(nextConfig);
     setConfig(saved);
@@ -116,6 +128,16 @@ export default function CineStageHubScreen() {
     const saved = await api.saveConfig(nextConfig);
     setConfig(saved);
     setMessage('Library folder removed. Run Scan Libraries to refresh the index.');
+  };
+
+  const removeIntakeRoot = async (rootToRemove) => {
+    const nextConfig = {
+      ...config,
+      intakeRoots: (config.intakeRoots || []).filter((root) => root !== rootToRemove),
+    };
+    const saved = await api.saveConfig(nextConfig);
+    setConfig(saved);
+    setMessage('Intake folder removed.');
   };
 
   const chooseBrainPath = async () => {
@@ -140,6 +162,29 @@ export default function CineStageHubScreen() {
       setMessage(err.message);
     } finally {
       setScanState('idle');
+    }
+  };
+
+  const organizeIntake = async () => {
+    setOrganizeState('organizing');
+    setMessage('');
+    try {
+      const saved = await api.saveConfig(config);
+      setConfig(saved);
+      const result = await api.organizeIntake({
+        targetRoot: saved.libraryRoots?.[0],
+        intakeRoots: saved.intakeRoots || [],
+        indexPath: saved.indexPath,
+      });
+      setOrganizeReport(result);
+      if (result.index) setIndex({ ...(index || {}), ...result.index });
+      const refreshed = await api.getConfig();
+      setConfig(refreshed);
+      setMessage(`Organized ${result.imported.length} song workspaces into CineStage Library. Future jobs will search the clean index first.`);
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setOrganizeState('idle');
     }
   };
 
@@ -350,6 +395,68 @@ export default function CineStageHubScreen() {
           </div>
         ) : null}
         <p className="mt-2 text-xs text-slate-500">Use one folder per line or the add buttons. External drives, shared folders, and your always-on laptop library mounts can all be indexed together.</p>
+      </section>
+
+      <section className="mt-5 border border-emerald-900/70 bg-emerald-950/10 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Clean Database Intake</p>
+            <h2 className="mt-1 text-lg font-black">Organize VS, Lyrics, and Chord Charts</h2>
+            <p className="mt-1 text-sm text-slate-400">Move raw folders into the main CineStage Library once, then remove raw folders from daily scanning so future song requests hit the organized index first.</p>
+          </div>
+          <button onClick={() => chooseFolders('intake')} className="border border-emerald-600 bg-emerald-700 px-3 py-2 text-sm font-bold text-white">Add Intake Folder</button>
+        </div>
+        <div className="mt-4 grid grid-cols-[1fr_0.9fr] gap-4">
+          <div>
+            <span className="mb-1 block text-[10px] font-black uppercase tracking-widest text-slate-500">Raw Intake Folders</span>
+            <textarea
+              value={intakeRootsText}
+              onChange={(event) => updateConfig({ intakeRoots: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean) })}
+              placeholder={'/Users/name/Downloads/VS\n/Volumes/Drive/Cifras'}
+              className="h-28 w-full border border-slate-800 bg-slate-950 p-3 font-mono text-xs text-slate-200 outline-none focus:border-emerald-500"
+            />
+            {(config.intakeRoots || []).length ? (
+              <div className="mt-3 space-y-2">
+                {(config.intakeRoots || []).map((root) => (
+                  <div key={root} className="flex items-center justify-between gap-3 border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300">
+                    <span className="break-all font-mono">{root}</span>
+                    <button onClick={() => removeIntakeRoot(root)} className="shrink-0 border border-red-900 bg-red-950/50 px-2 py-1 font-bold text-red-200">Remove</button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="border border-slate-800 bg-slate-950 p-4">
+            <p className="text-sm font-bold text-white">Target Library</p>
+            <p className="mt-2 break-all font-mono text-xs text-emerald-300">{config.libraryRoots?.[0] || 'Choose a CineStage Library folder first.'}</p>
+            <button
+              onClick={organizeIntake}
+              disabled={organizeState !== 'idle' || !(config.intakeRoots || []).length || !config.libraryRoots?.[0]}
+              className="mt-4 w-full border border-emerald-500 bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {organizeState === 'organizing' ? 'Organizing...' : 'Organize Intake'}
+            </button>
+            <p className="mt-3 text-xs text-slate-500">Creates stems, charts, original, and metadata folders per song. Raw intake roots are not kept in the clean library scan path after organization.</p>
+          </div>
+        </div>
+        {organizeReport ? (
+          <div className="mt-4 grid grid-cols-[0.8fr_1.2fr] gap-4">
+            <div className="grid grid-cols-3 gap-2">
+              <Stat label="Imported" value={organizeReport.imported?.length || 0} />
+              <Stat label="Intake Songs" value={organizeReport.intake?.songCount || 0} />
+              <Stat label="Skipped" value={organizeReport.skipped?.length || 0} />
+            </div>
+            <div className="max-h-56 overflow-auto border border-slate-800 bg-slate-950 p-3 text-xs text-slate-300">
+              {(organizeReport.imported || []).map((song) => (
+                <div key={`${song.artist}-${song.title}-${song.songDir}`} className="border-b border-slate-800 py-2 last:border-b-0">
+                  <p className="font-bold text-white">{song.title} · {song.artist}</p>
+                  <p className="mt-1 text-slate-500">{song.copiedCounts.stems} stems · {song.copiedCounts.charts} charts · {song.copiedCounts.original} originals</p>
+                  <p className="mt-1 break-all font-mono text-emerald-300">{song.songDir}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="mt-5 border border-amber-900/70 bg-amber-950/10 p-5">

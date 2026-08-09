@@ -244,6 +244,31 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+function uniqueFilePath(dir, filename) {
+  const ext = path.extname(filename);
+  const base = safeSegment(path.basename(filename, ext), 'file');
+  let candidate = path.join(dir, `${base}${ext}`);
+  let counter = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(dir, `${base} ${counter}${ext}`);
+    counter += 1;
+  }
+  return candidate;
+}
+
+function copyFileIntoDir(sourcePath, targetDir) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) return '';
+  fs.mkdirSync(targetDir, { recursive: true });
+  const targetPath = uniqueFilePath(targetDir, path.basename(sourcePath));
+  fs.copyFileSync(sourcePath, targetPath);
+  return targetPath;
+}
+
+function classifyWorkspaceFiles(songDir) {
+  const files = walkFiles(songDir, { maxFiles: 10000, maxDepth: 10 });
+  return files.map((filePath) => ({ filePath, ...classifyFile(filePath) }));
+}
+
 function walkFiles(root, options = {}) {
   const maxFiles = Number(options.maxFiles || 20000);
   const maxDepth = Number(options.maxDepth || 8);
@@ -274,6 +299,181 @@ function walkFiles(root, options = {}) {
   return files;
 }
 
+function serviceAlbumForIntake(options = {}) {
+  const serviceName = String(options.serviceName || '').trim();
+  const serviceDate = String(options.serviceDate || '').trim();
+  if (serviceName && serviceDate) return `${serviceName} ${serviceDate}`;
+  if (serviceName) return serviceName;
+  return String(options.album || options.collection || `Local Intake ${new Date().toISOString().slice(0, 10)}`).trim();
+}
+
+function organizeLibraryIntake(options = {}) {
+  const targetRoot = path.resolve(String(options.targetRoot || defaultHubDir()));
+  const intakeRoots = Array.from(new Set((options.intakeRoots || [])
+    .map((root) => path.resolve(String(root || '')))
+    .filter((root) => root && fs.existsSync(root))));
+  const existingIndex = options.currentIndex || loadIndex(options.indexPath || defaultIndexPath());
+  const intakeIndex = scanLibraryRoots(intakeRoots, {
+    maxFiles: options.maxFiles || 50000,
+    maxDepth: options.maxDepth || 10,
+  });
+  const dryRun = options.dryRun === true;
+  const minMergeScore = Number(options.minMergeScore || 85);
+  const importedAt = nowIso();
+  const imported = [];
+  const skipped = [];
+  const intakeSongs = intakeIndex.songs || [];
+  const extraFilesBySongDir = new Map();
+  const skipSongIds = new Set();
+
+  for (const song of intakeSongs) {
+    const chartOnly = (song.charts || []).length > 0 &&
+      !Object.keys(song.stems || {}).length &&
+      !(song.sourceFiles || []).length;
+    const genericChartName = /^(importante|readme|info|instrucoes|instructions)$/.test(normalizeText(song.title).replace(/\s+/g, ''));
+    const genericStemKitName = /^(kitdeensaio|rehearsalkit|practicekit)$/.test(normalizeText(song.title).replace(/\s+/g, ''));
+    if ((!chartOnly || !genericChartName) && !genericStemKitName) continue;
+    const chartDir = chartOnly ? path.dirname(song.charts[0]) : '';
+    const songParentDir = path.dirname(song.songDir || '');
+    const target = intakeSongs.find((candidate) => (
+      candidate.id !== song.id &&
+      Object.keys(candidate.stems || {}).length > 0 &&
+      (
+        path.dirname(candidate.songDir || '') === (chartOnly ? chartDir : songParentDir) ||
+        (chartDir && String(candidate.songDir || '').startsWith(`${chartDir}${path.sep}`))
+      )
+    ));
+    if (!target) continue;
+    const files = extraFilesBySongDir.get(target.songDir) || [];
+    if (chartOnly) {
+      files.push(...song.charts.map((filePath) => ({ filePath, kind: 'chart' })));
+    } else {
+      files.push(...classifyWorkspaceFiles(song.songDir));
+    }
+    extraFilesBySongDir.set(target.songDir, files);
+    skipSongIds.add(song.id);
+  }
+
+  for (const song of intakeSongs) {
+    if (skipSongIds.has(song.id)) continue;
+    if (!hasMusicContent(song)) continue;
+    const existingMatch = findLibraryMatch(existingIndex, song, minMergeScore);
+    const targetSong = existingMatch?.song || {
+      artist: song.artist,
+      album: serviceAlbumForIntake(options),
+      title: song.title,
+    };
+    const workspace = ensureSongWorkspace(targetRoot, {
+      artist: targetSong.artist || song.artist,
+      album: targetSong.album || serviceAlbumForIntake(options),
+      title: targetSong.title || song.title,
+    });
+    const fileRecords = classifyWorkspaceFiles(song.songDir || path.dirname(song.sourceFiles?.[0] || song.charts?.[0] || ''));
+    for (const extraRecord of extraFilesBySongDir.get(song.songDir) || []) {
+      fileRecords.push(extraRecord);
+    }
+    const copied = { stems: [], charts: [], original: [] };
+    const seenSources = new Set();
+
+    for (const record of fileRecords) {
+      if (!['stem', 'source', 'chart'].includes(record.kind)) continue;
+      if (seenSources.has(record.filePath)) continue;
+      seenSources.add(record.filePath);
+      if (String(record.filePath).includes(`${path.sep}metadata${path.sep}`)) continue;
+      if (String(record.filePath).endsWith('.asd')) continue;
+
+      const bucket = record.kind === 'chart'
+        ? 'charts'
+        : record.kind === 'stem'
+          ? 'stems'
+          : 'original';
+      const targetDir = bucket === 'charts'
+        ? workspace.chartsDir
+        : bucket === 'stems'
+          ? workspace.stemsDir
+          : workspace.originalDir;
+      const targetPath = dryRun ? path.join(targetDir, path.basename(record.filePath)) : copyFileIntoDir(record.filePath, targetDir);
+      if (targetPath) copied[bucket].push(targetPath);
+    }
+
+    const copiedCount = copied.stems.length + copied.charts.length + copied.original.length;
+    if (!copiedCount) {
+      skipped.push({
+        title: song.title,
+        artist: song.artist,
+        reason: 'no_supported_files',
+        sourceDir: song.songDir,
+      });
+      continue;
+    }
+
+    const metadata = {
+      title: targetSong.title || song.title,
+      artist: targetSong.artist || song.artist,
+      album: targetSong.album || serviceAlbumForIntake(options),
+      key: song.key || song.detectedKey || null,
+      bpm: song.bpm || song.detectedBpm || null,
+      sourceStorage: 'cinestage_hub_intake',
+      sourceDir: song.songDir,
+      intakeRoots,
+      mergedWithExisting: Boolean(existingMatch?.song),
+      existingMatch: existingMatch?.song ? {
+        id: existingMatch.song.id,
+        title: existingMatch.song.title,
+        artist: existingMatch.song.artist,
+        album: existingMatch.song.album,
+        score: existingMatch.score,
+      } : null,
+      copiedCounts: {
+        stems: copied.stems.length,
+        charts: copied.charts.length,
+        original: copied.original.length,
+      },
+      importedAt,
+    };
+    if (!dryRun) writeJson(path.join(workspace.metadataDir, 'song.json'), metadata);
+    imported.push({
+      ...metadata,
+      songDir: workspace.songDir,
+      copied,
+    });
+  }
+
+  const nextRoots = Array.from(new Set([
+    targetRoot,
+    ...(options.keepOtherRoots === false ? [] : (existingIndex.roots || []).filter((root) => root !== targetRoot)),
+  ]));
+  const nextIndex = dryRun
+    ? existingIndex
+    : scanLibraryRoots(nextRoots, {
+      maxFiles: options.outputMaxFiles || 120000,
+      maxDepth: options.outputMaxDepth || 10,
+    });
+  if (!dryRun) saveIndex(options.indexPath || defaultIndexPath(), nextIndex);
+
+  return {
+    ok: true,
+    dryRun,
+    targetRoot,
+    intakeRoots,
+    imported,
+    skipped,
+    intake: {
+      songCount: intakeIndex.songCount,
+      stemCount: intakeIndex.stemCount,
+      chartCount: intakeIndex.chartCount,
+      filesScanned: intakeIndex.filesScanned,
+    },
+    index: dryRun ? null : {
+      songCount: nextIndex.songCount,
+      stemCount: nextIndex.stemCount,
+      chartCount: nextIndex.chartCount,
+      filesScanned: nextIndex.filesScanned,
+      roots: nextIndex.roots,
+    },
+  };
+}
+
 function metadataFromFolder(root, filePath) {
   const relative = path.relative(root, filePath);
   const parts = relative.split(path.sep).filter(Boolean);
@@ -285,6 +485,34 @@ function metadataFromFolder(root, filePath) {
     album: safeSegment(parts[1] || 'Singles'),
     title: safeSegment(parts[2] && !['original', 'stems', 'charts', 'metadata', 'exports'].includes(parts[2].toLowerCase()) ? parts[2] : fileBase),
   };
+}
+
+function parseLooseSongFolderName(value) {
+  const raw = String(value || '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const parts = raw.split(/\s+-\s+/).map((part) => part.trim()).filter(Boolean);
+  const cleanTitle = (title) => safeSegment(String(title || '')
+    .replace(/\bbpm\s*\.?\s*\d{2,3}\b/ig, '')
+    .replace(/\b\d{2,3}\s*bpm\b/ig, '')
+    .replace(/\s+/g, ' ')
+    .trim(), 'Untitled Song');
+  const metadata = { artist: '', title: cleanTitle(raw), key: '', bpm: null };
+  const bpmMatch = raw.match(/\bbpm\s*\.?\s*(\d{2,3})\b/i) || raw.match(/\b(\d{2,3})\s*bpm\b/i);
+  const keyPart = parts.find((part) => /^[A-G](?:#|b)?m?$/i.test(part));
+  if (bpmMatch) metadata.bpm = Number(bpmMatch[1]);
+  if (keyPart) metadata.key = keyPart;
+  const contentParts = parts.filter((part) => (
+    !/^[A-G](?:#|b)?m?$/i.test(part) &&
+    !/\bbpm\s*\.?\s*\d{2,3}\b/i.test(part) &&
+    !/^comp/i.test(part) &&
+    !/^elite$/i.test(part)
+  ));
+  if (contentParts.length >= 2) {
+    metadata.artist = safeSegment(contentParts[0], '');
+    metadata.title = cleanTitle(contentParts[1]);
+  } else if (/^multitracks?\b/i.test(raw) && contentParts.length) {
+    metadata.title = cleanTitle(contentParts[contentParts.length - 1].replace(/^multitracks?\s*/i, ''));
+  }
+  return metadata;
 }
 
 function metadataFromProjectFolder(root, folderPath) {
@@ -319,11 +547,14 @@ function metadataFromProjectFolder(root, folderPath) {
   const title = folderKey === 'imported' && parentKey === 'samples'
     ? grandparentName
     : libraryFolderNames.has(folderKey) ? parentName : folderName;
+  const loose = parseLooseSongFolderName(title);
   const album = parts.length > 1 ? safeSegment(parts[parts.length - 2], rootName) : rootName;
   return {
-    artist: libraryFolderNames.has(folderKey) ? 'Local Library' : rootName,
+    artist: loose.artist || (libraryFolderNames.has(folderKey) ? 'Local Library' : rootName),
     album,
-    title,
+    title: loose.title || title,
+    key: loose.key,
+    bpm: loose.bpm,
   };
 }
 
@@ -383,6 +614,8 @@ function mergeProjectFolderRecord(records, root, folderPath, files) {
   };
   existing.roots.add(root);
   existing.songDir = folderPath;
+  existing.key = existing.key || fileMeta.key;
+  existing.bpm = existing.bpm || fileMeta.bpm;
   for (const filePath of files) {
     const classification = classifyFile(filePath);
     if (classification.kind === 'stem') {
@@ -422,7 +655,7 @@ function findProjectFolders(files) {
     const looksLikeStemFolder = ['multitracks', 'stems', 'stem', 'imported', 'tracks'].includes(folderKey);
     const stemLikeFiles = audioFiles.filter((filePath) => detectStemType(filePath));
     const stemLikeRatio = audioFiles.length ? stemLikeFiles.length / audioFiles.length : 0;
-    if (audioFiles.length >= 4 && (looksLikeStemFolder || (stemTypes.size >= 2 && stemLikeRatio >= 0.5))) {
+    if ((looksLikeStemFolder && audioFiles.length >= 2) || (audioFiles.length >= 4 && stemTypes.size >= 2 && stemLikeRatio >= 0.5)) {
       projectDirs.add(dir);
     }
   }
@@ -616,6 +849,7 @@ module.exports = {
   getSongFolder,
   loadIndex,
   normalizeText,
+  organizeLibraryIntake,
   prepareChartWorkspace,
   safeSegment,
   saveIndex,

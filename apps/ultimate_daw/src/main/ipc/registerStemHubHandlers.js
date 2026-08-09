@@ -15,6 +15,7 @@ const {
   findLibraryMatch,
   getSongFolder,
   loadIndex,
+  organizeLibraryIntake,
   prepareChartWorkspace,
   safeSegment,
   saveIndex,
@@ -68,6 +69,7 @@ function defaultConfig() {
     desktopName: identity.name ? `${identity.name} Desktop` : '',
     workerMode: 'account_desktop',
     libraryRoots: [defaultHubDir()],
+    intakeRoots: [],
     indexPath: defaultIndexPath(),
     folderFormat: 'artist_album_song',
     autoOrganize: true,
@@ -201,6 +203,28 @@ function registerStemHubHandlers({ ipcMain, dialog }) {
     saveIndex(indexPath, index);
     writeConfig({ libraryRoots: index.roots, indexPath });
     return index;
+  });
+
+  ipcMain.handle('stemHub:organize-intake', (_event, options = {}) => {
+    const config = readConfig();
+    const targetRoot = options.targetRoot || config.libraryRoots?.[0] || defaultHubDir();
+    const intakeRoots = options.intakeRoots || config.intakeRoots || [];
+    const result = organizeLibraryIntake({
+      ...options,
+      targetRoot,
+      intakeRoots,
+      indexPath: options.indexPath || config.indexPath || defaultIndexPath(),
+    });
+    const nextRoots = Array.from(new Set([
+      targetRoot,
+      ...((config.libraryRoots || []).filter((root) => root !== targetRoot && !(intakeRoots || []).includes(root))),
+    ]));
+    writeConfig({
+      libraryRoots: result.index?.roots || nextRoots,
+      intakeRoots,
+      indexPath: options.indexPath || config.indexPath || defaultIndexPath(),
+    });
+    return result;
   });
 
   ipcMain.handle('stemHub:get-index', (_event, indexPath) => {
