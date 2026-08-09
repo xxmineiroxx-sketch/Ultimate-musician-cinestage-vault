@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.4.9-assignment-tracking';
+const WORKER_VERSION = '2.5.0-source-registry';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -45,6 +45,7 @@ function defaultStore() {
     assignmentEvents: {},
     assignmentHistory: [],
     songLibrary: {},
+    sourceRegistry: {},
     sourceUploads: {},
     stemJobs: [],
     desktopWorkers: {},
@@ -1733,6 +1734,110 @@ function activeDesktopWorkerFor(store, account = {}) {
   }) || null;
 }
 
+function sourceKeyForSong(song = {}) {
+  const title = normalizeIdentifier(song.title || song.songTitle || song.name);
+  const artist = normalizeIdentifier(song.artist || song.songArtist || song.author);
+  const librarySongId = normalizeIdentifier(song.librarySongId || song.songId);
+  if (librarySongId) return `song:${librarySongId}`;
+  return `song:${title || 'untitled'}::${artist || 'unknown'}`;
+}
+
+function registerSourceFromStemJob(store, job = {}) {
+  store.sourceRegistry ||= {};
+  const key = sourceKeyForSong(job);
+  const current = store.sourceRegistry[key] || {};
+  const source = {
+    ...current,
+    key,
+    librarySongId: job.librarySongId || job.songId || current.librarySongId || '',
+    title: job.title || current.title || '',
+    artist: job.artist || current.artist || '',
+    album: job.album || current.album || '',
+    ownerEmail: normalizeIdentifier(job.ownerEmail || current.ownerEmail),
+    serviceId: job.serviceId || current.serviceId || '',
+    stems: Object.keys(job.stems || {}).length ? job.stems : (current.stems || {}),
+    charts: job.charts || current.charts || {},
+    analysis: job.analysis || current.analysis || {},
+    roleStemMap: job.roleStemMap || current.roleStemMap || {},
+    localCache: job.localCache || current.localCache || {},
+    deliveryMode: job.analysis?.deliveryMode || job.deliveryMode || current.deliveryMode || '',
+    updatedAt: nowIso(),
+  };
+  store.sourceRegistry[key] = source;
+  return source;
+}
+
+function buildSourceDecision(store = {}, payload = {}) {
+  store.sourceRegistry ||= {};
+  const key = sourceKeyForSong(payload);
+  const source = store.sourceRegistry[key] || null;
+  const ownerEmail = normalizeIdentifier(payload.ownerEmail || payload.accountEmail || payload.requestedBy?.email);
+  const desktop = activeDesktopWorkerFor(store, {
+    email: ownerEmail,
+    id: payload.accountId,
+  });
+  const fallbackEligible = payload.fallbackEligible !== false;
+  const hasSource = Boolean(source?.stems && Object.keys(source.stems).length);
+  const route = hasSource
+    ? 'source_registry'
+    : desktop
+      ? 'desktop'
+      : fallbackEligible
+        ? 'cloudflare_fallback'
+        : 'waiting_for_desktop';
+  const onlineDesktopCount = collectionItems(store.desktopWorkers)
+    .filter((worker) => activeDesktopWorkerFor({ desktopWorkers: { [worker.id]: worker } }, { email: ownerEmail, id: payload.accountId }))
+    .length;
+
+  return {
+    ok: true,
+    key,
+    route,
+    hasSource,
+    source,
+    desktop,
+    onlineDesktopCount,
+    fallbackEligible,
+    reason: hasSource
+      ? 'Song already exists in CineStage source registry.'
+      : desktop
+        ? 'Account desktop is online; route heavy processing to CineStage Hub.'
+        : fallbackEligible
+          ? 'No account desktop online; eligible for Cloudflare fallback.'
+          : 'No account desktop online and cloud fallback disabled.',
+  };
+}
+
+async function handleSourceCheck(request, store) {
+  const body = await readJson(request);
+  return json(buildSourceDecision(store, body));
+}
+
+async function handleSourceRegistry(request, env, store, url) {
+  store.sourceRegistry ||= {};
+  if (request.method === 'POST') {
+    const body = await readJson(request);
+    const key = sourceKeyForSong(body);
+    store.sourceRegistry[key] = {
+      ...(store.sourceRegistry[key] || {}),
+      ...body,
+      key,
+      ownerEmail: normalizeIdentifier(body.ownerEmail || body.accountEmail || store.sourceRegistry[key]?.ownerEmail),
+      updatedAt: nowIso(),
+      createdAt: store.sourceRegistry[key]?.createdAt || nowIso(),
+    };
+    await saveStore(env, store);
+    return json({ ok: true, source: store.sourceRegistry[key] });
+  }
+  const key = sourceKeyForSong(Object.fromEntries(url.searchParams.entries()));
+  return json({
+    ok: true,
+    key,
+    source: store.sourceRegistry[key] || null,
+    decision: buildSourceDecision(store, Object.fromEntries(url.searchParams.entries())),
+  });
+}
+
 function buildBrainSnapshot(store = {}, account = {}) {
   const workers = collectionItems(store.desktopWorkers);
   const selectedDesktop = activeDesktopWorkerFor(store, account);
@@ -2159,8 +2264,30 @@ async function handleDesktopHeartbeat(request, env, store) {
 
 async function handleCreateStemJob(request, env, store) {
   const body = await readJson(request);
+  const decision = buildSourceDecision(store, body);
   const job = normalizeStemJob(body, store);
-  if (!job.sourceUrl) return json({ ok: false, error: 'sourceUrl or YouTube URL is required' }, 400);
+  if (!job.sourceUrl && decision.route !== 'source_registry') {
+    return json({ ok: false, error: 'sourceUrl or YouTube URL is required' }, 400);
+  }
+  job.routeDecision = decision;
+  if (decision.route === 'source_registry') {
+    job.status = 'ready_for_review';
+    job.processor = 'source_registry';
+    job.progress = 100;
+    job.stems = normalizeStemMap(decision.source?.stems || {});
+    job.charts = decision.source?.charts || {};
+    job.analysis = decision.source?.analysis || {};
+    job.roleStemMap = normalizeRoleStemMap(decision.source?.roleStemMap || {});
+    job.localCache = decision.source?.localCache || job.localCache;
+    job.readiness = {
+      downloaded: true,
+      separated: Object.keys(job.stems || {}).length > 0,
+      analyzed: Boolean(job.analysis && Object.keys(job.analysis).length),
+      mappedToRoles: Boolean(job.roleStemMap && Object.keys(job.roleStemMap).length),
+      approved: false,
+      published: false,
+    };
+  }
   store.stemJobs = stemJobItems(store);
   store.stemJobs.unshift(job);
 
@@ -2257,6 +2384,9 @@ async function handleUpdateStemJob(request, env, store, url) {
     analyzed: body.readiness?.analyzed ?? job.readiness?.analyzed ?? Boolean(job.analysis && Object.keys(job.analysis).length),
     mappedToRoles: body.readiness?.mappedToRoles ?? job.readiness?.mappedToRoles ?? Boolean(job.roleStemMap && Object.keys(job.roleStemMap).length),
   };
+  if (['ready_for_review', 'completed', 'approved', 'published'].includes(job.status)) {
+    registerSourceFromStemJob(store, job);
+  }
 
   await saveStore(env, store);
   return json({ ok: true, job: stemJobPublicPayload(job) });
@@ -2330,8 +2460,9 @@ async function handleApproveStemJob(request, env, store, url) {
     ...(job.readiness || {}),
     approved: true,
   };
+  const source = registerSourceFromStemJob(store, job);
   await saveStore(env, store);
-  return json({ ok: true, job: stemJobPublicPayload(job) });
+  return json({ ok: true, job: stemJobPublicPayload(job), source });
 }
 
 async function handlePublishStemJob(request, env, store, url) {
@@ -2380,6 +2511,7 @@ async function handlePublishStemJob(request, env, store, url) {
     approved: true,
     published: true,
   };
+  const source = registerSourceFromStemJob(store, job);
 
   const recipients = teamMessageRecipients(plan?.team || []);
   if (job.serviceId && recipients.length) {
@@ -2402,7 +2534,7 @@ async function handlePublishStemJob(request, env, store, url) {
   }
 
   await saveStore(env, store);
-  return json({ ok: true, job: stemJobPublicPayload(job), song: librarySong });
+  return json({ ok: true, job: stemJobPublicPayload(job), song: librarySong, source });
 }
 
 async function handleCleanupStemJobs(request, env, store) {
@@ -2978,6 +3110,8 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/cinestage/desktop-heartbeat' || path === '/sync/desktop/heartbeat') {
     return handleDesktopHeartbeat(request, env, store);
   }
+  if (path === '/sync/cinestage/source-check') return handleSourceCheck(request, store);
+  if (path === '/sync/cinestage/source-registry') return handleSourceRegistry(request, env, store, url);
   if (path === '/sync/desktop/access') return handleDesktopAccess(request, store, url);
   if (path === '/api/brain/query' || path === '/sync/cinestage/brain/query' || path === '/sync/brain/query') {
     return handleBrainQuery(request, env, store);
@@ -3333,8 +3467,10 @@ async function handleGet(request, env, store, path, url) {
     });
   }
   if (path === '/sync/cinestage/desktops' || path === '/sync/desktop/workers') {
-    return json(Object.values(store.desktopWorkers || {}));
+    const desktops = Object.values(store.desktopWorkers || {});
+    return json({ ok: true, desktops, online: desktops.filter((worker) => activeDesktopWorkerFor({ desktopWorkers: { [worker.id]: worker } }, {})) });
   }
+  if (path === '/sync/cinestage/source-registry') return handleSourceRegistry(request, env, store, url);
   if (path === '/sync/live-status') {
     return json(store.liveStatus || {
       ok: true,
