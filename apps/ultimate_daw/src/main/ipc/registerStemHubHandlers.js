@@ -64,6 +64,9 @@ function defaultConfig() {
   const brain = findBrainInstallation();
   return {
     syncUrl: 'https://ultimate-playback-sync.studio-cinestage.workers.dev',
+    syncOrgId: process.env.UM_SYNC_ORG_ID || process.env.SYNC_ORG_ID || 'zpneef0a5ov732c0',
+    syncSecretKey: process.env.UM_SYNC_SECRET_KEY || process.env.SYNC_SECRET_KEY || 'erflpo0e4pg33h85v58v7cfvpd6eoycv',
+    syncJwt: process.env.UM_SYNC_JWT || '',
     accountEmail: identity.email,
     accountId: identity.accountId,
     desktopName: identity.name ? `${identity.name} Desktop` : '',
@@ -115,6 +118,9 @@ function workerEnvFromConfig(config) {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     UM_SYNC_URL: config.syncUrl,
+    UM_SYNC_ORG_ID: config.syncOrgId,
+    UM_SYNC_SECRET_KEY: config.syncSecretKey,
+    UM_SYNC_JWT: config.syncJwt,
     UM_ACCOUNT_EMAIL: config.accountEmail,
     UM_ACCOUNT_ID: config.accountId,
     UM_DESKTOP_NAME: config.desktopName,

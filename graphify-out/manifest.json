@@ -1932,8 +1932,8 @@
     "hash": "9a462a035c622687fbef360535eefc9a"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/CineStageHubScreen.jsx": {
-    "mtime": 1786228452.5269966,
-    "hash": "8f462503048eccad45e62a4b7ef29c3a"
+    "mtime": 1786234635.6523871,
+    "hash": "a9f9b2bfa3cf0a7b03aeca9ab16b2f53"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/renderer/screens/DAWWorkspaceScreen.jsx": {
     "mtime": 1786209565.364076,
@@ -2008,8 +2008,8 @@
     "hash": "d6b1f1f298413f14de1d5914b0702d09"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/preload.js": {
-    "mtime": 1786228429.4745872,
-    "hash": "1525ef6ca92dea9300452dd27c08951a"
+    "mtime": 1786233959.0206172,
+    "hash": "6207c0c20376d170b9997bfbce162a21"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/preload 2.js": {
     "mtime": 1786209565.3620832,
@@ -2028,24 +2028,24 @@
     "hash": "04016f9d08197370cdfe13ce7ce84781"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/stemHub/libraryOrganizer.js": {
-    "mtime": 1786230866.9866216,
-    "hash": "48ad9f2dec254119127eca758055e3dd"
+    "mtime": 1786234644.4469428,
+    "hash": "38f40372b2025da67f90ee111758d3f7"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/stemHub/audioAnalyzer.py": {
     "mtime": 1786212219.0159945,
     "hash": "05b4befb9f19874c3c9b164d6a1a29f2"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/workers/stemJobWorker.js": {
-    "mtime": 1786222412.408847,
-    "hash": "450d0c12e904d6d009e81c85ad4ebd25"
+    "mtime": 1786236825.9598532,
+    "hash": "2634ab9430c5c70920102200f6ededdd"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStoreHandlers.js": {
     "mtime": 1786209565.3618119,
     "hash": "fce3dafd858b633c5e4a448b3bdb3ca0"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStemHubHandlers.js": {
-    "mtime": 1786228424.5620637,
-    "hash": "ac2b3e1848af152511b261b1b4377236"
+    "mtime": 1786236814.5573416,
+    "hash": "0d7ee21e88ae8d9b7530aa176a5de56c"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/src/main/ipc/registerStemHandlers.js": {
     "mtime": 1786209565.361761,
@@ -2120,8 +2120,8 @@
     "hash": "78328903f4fdee1bd2c97847d259a3e2"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/src/api/cinestage.js": {
-    "mtime": 1786209566.2385066,
-    "hash": "41631c79b2af70dd9b5b80508cd03ab0"
+    "mtime": 1786236838.7758465,
+    "hash": "e460b1039532811be742b632fb9a936d"
   },
   "/Users/studio/Ultimate-musician-cinestage-vault/src/data/models.js": {
     "mtime": 1786209566.2388885,

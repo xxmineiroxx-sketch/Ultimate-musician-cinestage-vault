@@ -242,6 +242,9 @@ async function resolveSourceAudio(job, outputDir, options = {}) {
 class DesktopStemJobWorker {
   constructor(options = {}) {
     this.syncUrl = cleanUrl(options.syncUrl || process.env.UM_SYNC_URL || process.env.SYNC_URL || DEFAULT_SYNC_URL);
+    this.syncOrgId = String(options.syncOrgId || process.env.UM_SYNC_ORG_ID || process.env.SYNC_ORG_ID || '').trim();
+    this.syncSecretKey = String(options.syncSecretKey || process.env.UM_SYNC_SECRET_KEY || process.env.SYNC_SECRET_KEY || '').trim();
+    this.syncJwt = String(options.syncJwt || process.env.UM_SYNC_JWT || process.env.SYNC_JWT || '').trim();
     this.accountEmail = normalizeIdentifier(options.accountEmail || process.env.UM_ACCOUNT_EMAIL || process.env.ACCOUNT_EMAIL);
     this.accountId = String(options.accountId || process.env.UM_ACCOUNT_ID || '').trim();
     this.desktopId = String(options.desktopId || process.env.UM_DESKTOP_ID || `desktop_${os.hostname()}`).trim();
@@ -268,9 +271,15 @@ class DesktopStemJobWorker {
 
   async fetchSync(endpoint, { method = 'GET', body } = {}) {
     if (!this.syncUrl) throw new Error('UM_SYNC_URL is required');
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.syncJwt) headers.Authorization = `Bearer ${this.syncJwt}`;
+    else if (this.syncOrgId && this.syncSecretKey) {
+      headers['x-org-id'] = this.syncOrgId;
+      headers['x-secret-key'] = this.syncSecretKey;
+    }
     const response = await fetch(`${this.syncUrl}${endpoint}`, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await response.json().catch(() => null);
@@ -366,9 +375,15 @@ class DesktopStemJobWorker {
       type,
       filename: path.basename(filePath),
     });
+    const headers = { 'Content-Type': contentTypeForFile(filePath) };
+    if (this.syncJwt) headers.Authorization = `Bearer ${this.syncJwt}`;
+    else if (this.syncOrgId && this.syncSecretKey) {
+      headers['x-org-id'] = this.syncOrgId;
+      headers['x-secret-key'] = this.syncSecretKey;
+    }
     const response = await fetch(`${this.syncUrl}/sync/stem-assets/upload?${params.toString()}`, {
       method: 'POST',
-      headers: { 'Content-Type': contentTypeForFile(filePath) },
+      headers,
       body: fs.readFileSync(filePath),
     });
     const data = await response.json().catch(() => null);

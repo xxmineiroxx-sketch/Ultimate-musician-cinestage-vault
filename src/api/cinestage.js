@@ -4,7 +4,7 @@
  */
 
 import { getSettings } from '../data/storage';
-import { SYNC_URL } from '../../config/syncConfig';
+import { SYNC_URL, syncHeaders } from '../../config/syncConfig';
 
 export class CineStageAPI {
   static normalizeBaseUrl(value) {
@@ -17,9 +17,10 @@ export class CineStageAPI {
   }
 
   static async fetchSyncJson(path, init = {}) {
+    const { headers: initHeaders = {}, ...rest } = init;
     const response = await fetch(`${this.normalizeBaseUrl(SYNC_URL)}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
-      ...init,
+      ...rest,
+      headers: { ...syncHeaders(), ...initHeaders },
     });
 
     const payload = await response.json().catch(() => null);
@@ -146,6 +147,31 @@ export class CineStageAPI {
 
   static async sendDesktopHeartbeat(payload = {}) {
     return this.fetchSyncJson('/sync/cinestage/desktop-heartbeat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async listCineStageDesktops(filters = {}) {
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        params.set(key, String(value));
+      }
+    });
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.fetchSyncJson(`/sync/cinestage/desktops${suffix}`);
+  }
+
+  static async checkCineStageSource(payload = {}) {
+    return this.fetchSyncJson('/sync/cinestage/source-check', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static async registerCineStageSource(payload = {}) {
+    return this.fetchSyncJson('/sync/cinestage/source-registry', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
