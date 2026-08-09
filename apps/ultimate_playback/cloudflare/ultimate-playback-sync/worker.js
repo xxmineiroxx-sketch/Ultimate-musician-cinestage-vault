@@ -1408,6 +1408,49 @@ function enrichSetlistSongForPlayback(store = {}, song = {}, serviceId = '', req
   };
 }
 
+function stemResultFor(store = {}, url, request = null) {
+  const songId = String(url.searchParams.get('songId') || url.searchParams.get('id') || '').trim();
+  const serviceId = String(url.searchParams.get('serviceId') || '').trim();
+  const title = String(url.searchParams.get('title') || '').trim();
+  const artist = String(url.searchParams.get('artist') || '').trim();
+  const source = publishedSourceForSong(store, {
+    id: songId,
+    songId,
+    librarySongId: songId,
+    title,
+    artist,
+  }, serviceId);
+
+  if (!source) {
+    return {
+      ok: true,
+      songId,
+      serviceId,
+      status: 'missing',
+      stems: {},
+      harmonies: {},
+      roleStemMap: {},
+      analysis: {},
+      hasStems: false,
+    };
+  }
+
+  const stems = absolutizeStemMap(source.stems || {}, request);
+  return {
+    ok: true,
+    songId: source.librarySongId || songId,
+    serviceId: source.serviceId || serviceId,
+    stemJobId: source.jobId || '',
+    status: source.status || 'published',
+    stems,
+    harmonies: source.harmonies || {},
+    roleStemMap: normalizeRoleStemMap(source.roleStemMap || {}),
+    analysis: source.analysis || {},
+    hasStems: Object.keys(stems).length > 0,
+    deliveryMode: source.deliveryMode || '',
+  };
+}
+
 function parseLiveSections(song = {}, body = {}) {
   if (Array.isArray(body.sections)) return body.sections;
   if (Array.isArray(song.sections)) return song.sections;
@@ -3876,6 +3919,9 @@ async function handleGet(request, env, store, path, url) {
     const job = findStemJob(store, url);
     if (!job) return json({ ok: false, error: 'stem job not found' }, 404);
     return json(stemJobPublicPayload(job));
+  }
+  if (path === '/sync/stems-result' || path === '/sync/stems') {
+    return json(stemResultFor(store, url, request));
   }
   if (path === '/sync/stem-assets/download') return handleDownloadStemAsset(env, store, url);
   if (path === '/sync/stem-sources/download') return handleDownloadStemSource(env, store, url);

@@ -360,6 +360,14 @@ function detectPrimaryRole(roles = []) {
   return normalizedRoles[0] || 'lead_vocal';
 }
 
+function hasPlayablePracticeStems(song = {}) {
+  return [
+    ...Object.values(song?.stems || {}),
+    ...Object.values(song?.assets?.stems || {}),
+    ...Object.values(song?.harmonies || {}),
+  ].some((value) => !!extractPlayableStemUri(value));
+}
+
 function buildPersonalTracks(role, song) {
   // ─── Rules ────────────────────────────────────────────────────────────────
   // Track A ("Full Song"):  every stem EXCEPT the player's assigned part.
@@ -689,28 +697,42 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       setRole(r);
       roleRef.current = r;
 
-      // Resolve serviceId + role: use params, else fall back to nearest accepted assignment
+      // Resolve serviceId + role: use params, else prefer the nearest assignment
+      // that already has published Playback stems.
       let resolvedServiceId = paramsRef.current.serviceId;
       let resolvedAssignmentRole = paramRole;
       if (!resolvedServiceId) {
         const assignments = await getAssignments();
         const today = new Date(); today.setHours(0, 0, 0, 0);
-        const accepted = assignments.filter((a) => {
-          if (a.status !== 'accepted') return false;
+        const candidates = assignments.filter((a) => {
+          if (!['accepted', 'pending'].includes(String(a.status || '').toLowerCase())) return false;
           const d = new Date(String(a.service_date || a.date || '').includes('T')
             ? (a.service_date || a.date) : (a.service_date || a.date || '') + 'T00:00:00');
           return d >= today; // only upcoming/today
         });
-        if (accepted.length > 0) {
-          accepted.sort((a, b) => {
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => {
             const da = new Date(a.service_date || a.date || 0).getTime();
             const db = new Date(b.service_date || b.date || 0).getTime();
-            return da - db; // nearest first
+            const byDate = da - db;
+            if (byDate !== 0) return byDate;
+            const sa = String(a.status || '').toLowerCase() === 'accepted' ? 0 : 1;
+            const sb = String(b.status || '').toLowerCase() === 'accepted' ? 0 : 1;
+            return sa - sb;
           });
-          resolvedServiceId = accepted[0].service_id;
+          let preferred = candidates[0];
+          for (const candidate of candidates.slice(0, 4)) {
+            // eslint-disable-next-line no-await-in-loop
+            const candidateSongs = await fetchSetlist(candidate.service_id);
+            if (candidateSongs.some(hasPlayablePracticeStems)) {
+              preferred = candidate;
+              break;
+            }
+          }
+          resolvedServiceId = preferred.service_id;
           // Use the assignment's role if no explicit role was passed
-          if (!paramRole && accepted[0].role) {
-            resolvedAssignmentRole = normalizeRole(accepted[0].role);
+          if (!paramRole && preferred.role) {
+            resolvedAssignmentRole = normalizeRole(preferred.role);
           }
         }
       }
@@ -793,6 +815,12 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   // Fetch stems separately — library-pull doesn't include them
   async function fetchSongStems(song) {
+    if (hasPlayablePracticeStems(song)) {
+      return {
+        stems: song?.stems || song?.assets?.stems || {},
+        harmonies: song?.harmonies || {},
+      };
+    }
     const lookupId = typeof song === 'string' ? song : getSongLookupId(song);
     if (!lookupId) return {};
     try {
@@ -968,7 +996,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     let defs = buildPersonalTracks(r, enriched);
     applySongSelection(enriched, defs);
 
-    // Second pass — fetch stems from KV (library-pull doesn't include them)
+    // Second pass — use setlist-published stems first, then fall back to legacy KV.
     const lookupId = getSongLookupId(song);
     if (lookupId) {
       let { stems, harmonies } = await fetchSongStems(song);
