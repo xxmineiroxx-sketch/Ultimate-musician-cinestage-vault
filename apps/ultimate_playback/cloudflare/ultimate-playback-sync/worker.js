@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.5.1-song-revisions';
+const WORKER_VERSION = '2.5.2-profile-revisions';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -336,8 +336,67 @@ function upsertPerson(store, profile) {
     (person.phone && normalizePhone(candidate.phone) === normalizePhone(person.phone))
   ));
 
-  if (idx >= 0) store.people[idx] = { ...store.people[idx], ...person };
-  else store.people.push(person);
+  if (idx >= 0) {
+    const merged = { ...store.people[idx], ...person };
+    store.people[idx] = person.profileHash || person.contentHash
+      ? merged
+      : markProfileChanged(merged, store.people[idx]);
+  } else {
+    store.people.push((person.profileHash || person.contentHash) ? person : markProfileChanged(person, null));
+  }
+}
+
+function stableProfileContentHash(profile = {}) {
+  const payload = JSON.stringify({
+    name: profile.name || '',
+    firstName: profile.firstName || profile.first_name || '',
+    lastName: profile.lastName || profile.last_name || '',
+    email: normalizeIdentifier(profile.email),
+    phone: normalizePhone(profile.phone),
+    dob: profile.dob || profile.dateOfBirth || profile.birthDate || '',
+    photoUrl: profile.photoUrl || profile.photo_url || profile.avatar || '',
+    role: profile.role || '',
+    grantedRole: profile.grantedRole || '',
+    orgRole: profile.orgRole || '',
+    roleAssignments: profile.roleAssignments || '',
+    roles: Array.isArray(profile.roles) ? profile.roles : [],
+    notification_preferences: profile.notification_preferences || {},
+    instruments: profile.instruments || [],
+    vocalRange: profile.vocalRange || '',
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function markProfileChanged(profile = {}, previous = null, { source = 'profile_update', actor = '' } = {}) {
+  const next = { ...(previous || {}), ...profile };
+  const previousHash = previous?.profileHash || previous?.contentHash || '';
+  const nextHash = stableProfileContentHash(next);
+  const changed = previous ? previousHash !== nextHash : true;
+  const now = nowIso();
+  const revision = Math.max(0, Number(previous?.profileRevision || previous?.revision || next.profileRevision || 0) || 0) + (changed ? 1 : 0);
+  return {
+    ...next,
+    profileHash: nextHash,
+    contentHash: nextHash,
+    profileRevision: revision,
+    revision,
+    updatedAt: now,
+    updated_at: now,
+    lastProfileEditedAt: now,
+    lastChange: {
+      source,
+      actor: normalizeIdentifier(actor || next.email),
+      changed,
+      previousHash,
+      contentHash: nextHash,
+      at: now,
+    },
+  };
 }
 
 function upsertService(store, service = {}) {
@@ -2083,6 +2142,63 @@ async function handleDesktopAccess(request, store, url) {
   return json(desktopAccessFor(store, url.searchParams.get('email') || url.searchParams.get('identifier') || ''));
 }
 
+async function handleProfile(request, env, store, url) {
+  if (request.method === 'POST') {
+    const body = await readJson(request);
+    const email = normalizeIdentifier(body.email || body.identifier || body.user?.email || body.profile?.email || '');
+    const phone = normalizePhone(body.phone || body.profile?.phone || '');
+    const id = String(body.id || body.personId || body.profile?.id || '').trim();
+    const previous = findPerson(store, { id, email, phone, identifier: email }) || null;
+    const fullName = String(
+      body.name ||
+      body.displayName ||
+      [body.firstName || body.first_name, body.lastName || body.last_name].filter(Boolean).join(' ') ||
+      previous?.name ||
+      email ||
+      phone ||
+      'Team Member',
+    ).trim();
+    const profile = markProfileChanged({
+      ...(previous || {}),
+      ...(body.profile && typeof body.profile === 'object' ? body.profile : {}),
+      ...body,
+      id: id || previous?.id || `person_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      name: fullName,
+      email: email || previous?.email || '',
+      phone: phone || previous?.phone || '',
+      firstName: body.firstName || body.first_name || previous?.firstName || previous?.first_name || '',
+      lastName: body.lastName || body.last_name || previous?.lastName || previous?.last_name || '',
+      roles: Array.isArray(body.roles) ? body.roles : (previous?.roles || []),
+      roleAssignments: body.roleAssignments || previous?.roleAssignments || '',
+      playbackRegistered: previous?.playbackRegistered ?? true,
+      playbackRegisteredAt: previous?.playbackRegisteredAt || nowIso(),
+      roleSyncSource: body.roleSyncSource || previous?.roleSyncSource || 'profile_update',
+    }, previous, {
+      source: body.source || 'profile_update',
+      actor: body.actorEmail || email,
+    });
+    delete profile.profile;
+    delete profile.user;
+    upsertPerson(store, profile);
+    const saved = findPerson(store, { id: profile.id, email: profile.email, phone: profile.phone }) || profile;
+    await saveStore(env, store);
+    return json({
+      ok: true,
+      profile: saved,
+      person: saved,
+      revision: saved.profileRevision || saved.revision || 0,
+      contentHash: saved.profileHash || saved.contentHash || '',
+    });
+  }
+
+  const email = normalizeIdentifier(url.searchParams.get('email') || url.searchParams.get('identifier') || '');
+  const phone = normalizePhone(url.searchParams.get('phone') || '');
+  const id = String(url.searchParams.get('id') || url.searchParams.get('personId') || '').trim();
+  const profile = findPerson(store, { id, email, phone, identifier: email });
+  if (!profile) return json({ ok: false, error: 'profile not found' }, 404);
+  return json({ ok: true, profile, person: profile });
+}
+
 function serviceEndDateForStemJob(job = {}, store = {}) {
   const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
   const date = String(job.serviceDate || service?.date || '').trim();
@@ -3203,6 +3319,7 @@ async function handlePost(request, env, store, path, url) {
   if (path === '/sync/cinestage/source-check') return handleSourceCheck(request, store);
   if (path === '/sync/cinestage/source-registry') return handleSourceRegistry(request, env, store, url);
   if (path === '/sync/desktop/access') return handleDesktopAccess(request, store, url);
+  if (path === '/sync/profile') return handleProfile(request, env, store, url);
   if (path === '/api/brain/query' || path === '/sync/cinestage/brain/query' || path === '/sync/brain/query') {
     return handleBrainQuery(request, env, store);
   }
@@ -3538,6 +3655,7 @@ async function handleGet(request, env, store, path, url) {
     }));
   }
   if (path === '/sync/desktop/access') return handleDesktopAccess(request, store, url);
+  if (path === '/sync/profile') return handleProfile(request, env, store, url);
 
   if (path === '/sync/people') return json(store.people);
   if (path === '/sync/role') {

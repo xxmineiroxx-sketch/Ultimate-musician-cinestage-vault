@@ -15,13 +15,63 @@ const KEYS = {
   SONGS: '@up_songs',
 };
 
+const nowIso = () => new Date().toISOString();
+
+const normalizePhone = (value) => String(value || '').replace(/\D+/g, '');
+
+const stableProfileContentHash = (profile = {}) => {
+  const payload = JSON.stringify({
+    name: profile.name || '',
+    firstName: profile.firstName || profile.first_name || '',
+    lastName: profile.lastName || profile.last_name || '',
+    email: String(profile.email || '').trim().toLowerCase(),
+    phone: normalizePhone(profile.phone),
+    dob: profile.dob || profile.dateOfBirth || profile.birthDate || '',
+    photoUrl: profile.photoUrl || profile.photo_url || profile.avatar || '',
+    role: profile.role || '',
+    grantedRole: profile.grantedRole || '',
+    roleAssignments: profile.roleAssignments || '',
+    roles: Array.isArray(profile.roles) ? profile.roles : [],
+    notification_preferences: profile.notification_preferences || {},
+    instruments: profile.instruments || [],
+    vocalRange: profile.vocalRange || '',
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+};
+
+const withProfileRevision = async (profile = {}) => {
+  const previous = await getUserProfile().catch(() => null);
+  const merged = { ...(previous || {}), ...profile };
+  const contentHash = stableProfileContentHash(merged);
+  const previousHash = previous?.profileHash || previous?.contentHash || '';
+  const changed = previous ? previousHash !== contentHash : true;
+  const revision = Math.max(0, Number(previous?.profileRevision || previous?.revision || profile.profileRevision || 0) || 0) + (changed ? 1 : 0);
+  const stamp = nowIso();
+  return {
+    ...merged,
+    profileHash: contentHash,
+    contentHash,
+    profileRevision: revision,
+    revision,
+    updatedAt: stamp,
+    updated_at: stamp,
+    lastProfileEditedAt: stamp,
+  };
+};
+
 /**
  * User Profile
  */
 export const saveUserProfile = async (profile) => {
   try {
-    await AsyncStorage.setItem(KEYS.USER_PROFILE, JSON.stringify(profile));
-    return profile;
+    const next = await withProfileRevision(profile);
+    await AsyncStorage.setItem(KEYS.USER_PROFILE, JSON.stringify(next));
+    return next;
   } catch (error) {
     console.error('Error saving user profile:', error);
     throw error;
