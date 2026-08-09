@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.5.2-profile-revisions';
+const WORKER_VERSION = '2.5.3-stem-setlist-delivery';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1225,30 +1225,187 @@ function assignmentsFor(store, email) {
   return assignments;
 }
 
-function setlistFor(store, serviceId) {
+function setlistFor(store, serviceId, request = null) {
   const plan = store.plans?.[serviceId] || { songs: [] };
-  return (plan.songs || []).map((song, index) => ({
+  return (plan.songs || []).map((song, index) => enrichSetlistSongForPlayback(store, {
     id: song.id || `song_${index}`,
+    songId: song.songId || song.librarySongId || song.id || `song_${index}`,
+    librarySongId: song.librarySongId || song.songId || '',
     order: index + 1,
     title: song.title || song.songTitle || 'Unknown',
     artist: song.artist || '',
     key: song.key || song.originalKey || '',
     tempo: song.tempo || song.bpm || '',
+    bpm: song.bpm || song.tempo || '',
     duration: song.duration || '',
     lyrics: song.lyrics || '',
     chordChart: song.chordChart || song.chordSheet || '',
+    chordSheet: song.chordSheet || song.chordChart || '',
     audioUrl: song.audioUrl || song.mediaUrl || song.referenceUrl || '',
     mediaUrl: song.mediaUrl || song.audioUrl || song.youtubeUrl || '',
+    youtubeUrl: song.youtubeUrl || '',
     stemsUrl: song.stemsUrl || '',
+    stems: song.stems || song.assets?.stems || {},
+    harmonies: song.harmonies || {},
     assets: song.assets || {},
+    analysis: song.analysis || {},
     waveformPeaks: song.waveformPeaks || null,
     cueMarkers: song.cueMarkers || song.markers || [],
+    roleStemMap: song.roleStemMap || song.analysis?.roleStemMap || {},
     roleCues: song.roleCues || {},
     instrumentNotes: song.instrumentNotes || {},
+    keyboardRigs: song.keyboardRigs || [],
     notes: song.notes || song.hint || '',
-    hasLyrics: Boolean(song.lyrics),
-    hasChordChart: Boolean(song.chordChart || song.chordSheet),
-  }));
+  }, serviceId, request));
+}
+
+function requestOrigin(request = null) {
+  if (!request?.url) return '';
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return '';
+  }
+}
+
+function isPlayableStemUrl(value = '') {
+  const raw = String(value || '').trim();
+  return /^https?:\/\//i.test(raw) || raw.startsWith('/sync/stem-assets/download');
+}
+
+function absolutizeStemUrl(value = '', request = null) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.startsWith('file://')) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const origin = requestOrigin(request);
+  if (origin && raw.startsWith('/sync/stem-assets/download')) return `${origin}${raw}`;
+  return '';
+}
+
+function absolutizeStemAsset(stem = {}, request = null) {
+  if (!stem || typeof stem !== 'object') return null;
+  const next = { ...stem };
+  for (const key of ['url', 'downloadUrl', 'audioUrl', 'fileUrl', 'file_url', 'path']) {
+    if (next[key]) next[key] = absolutizeStemUrl(next[key], request);
+  }
+  const playable = next.url || next.downloadUrl || next.audioUrl || next.fileUrl || next.file_url || '';
+  if (!isPlayableStemUrl(playable)) return null;
+  next.url = playable;
+  next.downloadUrl ||= playable;
+  next.playable = true;
+  return next;
+}
+
+function absolutizeStemMap(stems = {}, request = null) {
+  if (!stems || typeof stems !== 'object' || Array.isArray(stems)) return {};
+  return Object.fromEntries(
+    Object.entries(stems)
+      .map(([type, stem]) => {
+        const normalizedType = normalizeRole(type);
+        const normalizedStem = typeof stem === 'string'
+          ? absolutizeStemAsset({ type: normalizedType, url: stem }, request)
+          : absolutizeStemAsset({ type: stem?.type || normalizedType, ...(stem || {}) }, request);
+        return normalizedType && normalizedStem ? [normalizedType, normalizedStem] : null;
+      })
+      .filter(Boolean),
+  );
+}
+
+function matchingPublishedStemJobForSong(store = {}, song = {}, serviceId = '') {
+  const songKeys = [
+    song.id,
+    song.songId,
+    song.librarySongId,
+    song.title,
+  ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+  const title = String(song.title || '').trim().toLowerCase();
+  const artist = String(song.artist || '').trim().toLowerCase();
+
+  return stemJobItems(store).find((job) => {
+    if (!['approved', 'published'].includes(job.status)) return false;
+    if (serviceId && job.serviceId && job.serviceId !== serviceId) return false;
+    const jobKeys = [
+      job.id,
+      job.songId,
+      job.librarySongId,
+      job.title,
+    ].filter(Boolean).map((value) => String(value).trim().toLowerCase());
+    const idMatch = songKeys.some((key) => jobKeys.includes(key));
+    const titleMatch = title && String(job.title || '').trim().toLowerCase() === title;
+    const artistMatch = !artist || !job.artist || String(job.artist || '').trim().toLowerCase() === artist;
+    return (idMatch || titleMatch) && artistMatch && Object.keys(job.stems || {}).length > 0;
+  }) || null;
+}
+
+function publishedSourceForSong(store = {}, song = {}, serviceId = '') {
+  const job = matchingPublishedStemJobForSong(store, song, serviceId);
+  if (job) {
+    return {
+      key: sourceKeyForSong(job),
+      jobId: job.id,
+      status: job.status,
+      serviceId: job.serviceId || serviceId,
+      librarySongId: job.librarySongId || job.songId || song.librarySongId || song.songId || '',
+      title: job.title || song.title || '',
+      artist: job.artist || song.artist || '',
+      stems: job.stems || {},
+      harmonies: job.harmonies || {},
+      charts: job.charts || {},
+      analysis: job.analysis || {},
+      roleStemMap: job.roleStemMap || {},
+      localCache: job.localCache || {},
+      deliveryMode: job.analysis?.deliveryMode || job.deliveryMode || '',
+    };
+  }
+
+  const source = store.sourceRegistry?.[sourceKeyForSong(song)] || null;
+  if (
+    source &&
+    ['approved', 'published'].includes(source.status) &&
+    Object.keys(source.stems || {}).length > 0 &&
+    (!serviceId || !source.serviceId || source.serviceId === serviceId)
+  ) {
+    return source;
+  }
+  return null;
+}
+
+function enrichSetlistSongForPlayback(store = {}, song = {}, serviceId = '', request = null) {
+  const source = publishedSourceForSong(store, song, serviceId);
+  const sourceStems = absolutizeStemMap(source?.stems || {}, request);
+  const songStems = absolutizeStemMap(song.stems || song.assets?.stems || {}, request);
+  const stems = Object.keys(sourceStems).length ? sourceStems : songStems;
+  const charts = source?.charts || {};
+  const analysis = {
+    ...(song.analysis || {}),
+    ...(source?.analysis || {}),
+  };
+  const roleStemMap = normalizeRoleStemMap(source?.roleStemMap || song.roleStemMap || analysis.roleStemMap || {});
+
+  return {
+    ...song,
+    songId: source?.librarySongId || song.songId || song.librarySongId || song.id,
+    librarySongId: source?.librarySongId || song.librarySongId || song.songId || '',
+    lyrics: song.lyrics || charts.lyrics || '',
+    chordChart: song.chordChart || charts.chordChart || charts.chordSheet || '',
+    chordSheet: song.chordSheet || charts.chordSheet || charts.chordChart || '',
+    stems,
+    harmonies: source?.harmonies || song.harmonies || {},
+    assets: {
+      ...(song.assets || {}),
+      stems,
+    },
+    analysis,
+    waveformPeaks: analysis.waveformPeaks || song.waveformPeaks || null,
+    cueMarkers: analysis.cueMarkers || song.cueMarkers || [],
+    roleStemMap,
+    stemJobId: source?.jobId || song.stemJobId || '',
+    stemStatus: source?.status || song.stemStatus || '',
+    stemDeliveryMode: source?.deliveryMode || song.stemDeliveryMode || '',
+    hasStems: Object.keys(stems || {}).length > 0,
+    hasLyrics: Boolean(song.lyrics || charts.lyrics),
+    hasChordChart: Boolean(song.chordChart || song.chordSheet || charts.chordChart || charts.chordSheet),
+  };
 }
 
 function parseLiveSections(song = {}, body = {}) {
@@ -1862,11 +2019,15 @@ function registerSourceFromStemJob(store, job = {}) {
     ownerEmail: normalizeIdentifier(job.ownerEmail || current.ownerEmail),
     serviceId: job.serviceId || current.serviceId || '',
     stems: Object.keys(job.stems || {}).length ? job.stems : (current.stems || {}),
+    harmonies: job.harmonies || current.harmonies || {},
     charts: job.charts || current.charts || {},
     analysis: job.analysis || current.analysis || {},
     roleStemMap: job.roleStemMap || current.roleStemMap || {},
     localCache: job.localCache || current.localCache || {},
     deliveryMode: job.analysis?.deliveryMode || job.deliveryMode || current.deliveryMode || '',
+    jobId: job.id || current.jobId || '',
+    status: job.status || current.status || '',
+    readyForPlayback: ['approved', 'published'].includes(job.status),
     updatedAt: nowIso(),
   };
   store.sourceRegistry[key] = source;
@@ -3792,7 +3953,7 @@ async function handleGet(request, env, store, path, url) {
       month: url.searchParams.get('month') || '',
     }));
   }
-  if (path === '/sync/setlist') return json(setlistFor(store, url.searchParams.get('serviceId') || ''));
+  if (path === '/sync/setlist') return json(setlistFor(store, url.searchParams.get('serviceId') || '', request));
   if (path.includes('/blockouts')) return json(store.blockouts || []);
   if (path.includes('/proposals')) return json(store.proposals || []);
   if (path.includes('/song-library') || path.includes('/library-pull')) {

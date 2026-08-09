@@ -200,17 +200,19 @@ Current worker behavior:
 
 The sync Worker now supports optional R2-backed temporary delivery. Add an R2 bucket binding named `STEM_ASSETS` to the deployed Cloudflare Worker.
 
-Example `wrangler.toml` binding:
+Current production `wrangler.toml` binding:
 
 ```toml
 [[r2_buckets]]
 binding = "STEM_ASSETS"
-bucket_name = "ultimate-stem-assets"
+bucket_name = "cinestage-stems"
 ```
 
 If R2 is not configured, the upload endpoints return `501` and the desktop worker falls back to `delivery: local_cache_only` with `downloadable: false`. That fallback is deliberate so Playback does not pretend a local desktop path can be downloaded by an iPad.
 
 When R2 is configured:
+
+- Published stem jobs are attached to `GET /sync/setlist?serviceId=...` as HTTPS `stems` entries. Playback only receives downloadable Worker URLs, never desktop `file://` paths.
 
 - iPhone/iPad local source uploads go to R2 through `/sync/stems/upload`.
 - Desktop downloads the source URL and processes stems.
