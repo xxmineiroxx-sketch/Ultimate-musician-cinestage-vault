@@ -44,8 +44,14 @@ flowchart TD
   - Desktop app announces it is online and capable of stem processing.
 - `GET /sync/cinestage/desktops`
   - Diagnostic list of known desktop workers. App UX should prefer `/sync/cinestage/brain` for route decisions.
+- `POST /sync/cinestage/source-check`
+  - Checks whether a song already exists in CineStage source registry before creating new processing work.
+- `GET /sync/cinestage/source-registry`
+  - Reads the known stems/charts/analysis source record for a requested song.
+- `POST /sync/cinestage/source-registry`
+  - Registers a known song source from organized desktop storage, approved stems, charts, or analysis.
 - `POST /sync/stem-jobs`
-  - Creates a desktop-primary stem job from a YouTube/audio link. If a capable desktop is online, the job becomes `queued_for_desktop`; if no capable desktop is online and fallback is allowed, it becomes `cloudflare_fallback`.
+  - Creates a desktop-primary stem job from a YouTube/audio link. If the source registry already has the song, the job becomes `ready_for_review`; if a capable desktop is online, the job becomes `queued_for_desktop`; if no capable desktop is online and fallback is allowed, it becomes `cloudflare_fallback`.
 - `POST /sync/stem-job/claim?id=...`
   - Desktop claims one queued job before processing. Claims include a lease so only one desktop processes a job at a time, and stale claims can be reclaimed.
 - `GET /sync/stem-jobs?status=&processor=&ownerEmail=&serviceId=`
@@ -73,6 +79,7 @@ flowchart TD
 
 ## Job States
 
+- `source_registry`: the requested song already has known stems/charts/analysis and can skip heavy processing.
 - `queued_for_desktop`: desktop is online and should process.
 - `waiting_for_desktop`: no desktop processor is online and fallback was explicitly disabled.
 - `waiting_for_source`: desktop is online, but the job needs licensed/local source audio or a compliant YouTube preparation step.
