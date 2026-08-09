@@ -1,5 +1,5 @@
 const STORE_KEY = 'ultimate-playback-sync:v2';
-const WORKER_VERSION = '2.5.0-source-registry';
+const WORKER_VERSION = '2.5.1-song-revisions';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 const STEM_JOB_CLAIM_TTL_MS = 10 * 60 * 1000;
 const jsonHeaders = {
@@ -1410,6 +1410,53 @@ function buildLibrarySongSeed(id, { title = '', artist = '', planSong = null } =
   };
 }
 
+function stableSongContentHash(song = {}) {
+  const payload = JSON.stringify({
+    title: song.title || '',
+    artist: song.artist || '',
+    key: song.key || '',
+    bpm: song.bpm || song.tempo || '',
+    timeSig: song.timeSig || '',
+    lyrics: song.lyrics || '',
+    chordChart: song.chordChart || '',
+    chordSheet: song.chordSheet || '',
+    instrumentNotes: song.instrumentNotes || {},
+    keyboardRigs: song.keyboardRigs || [],
+    roleStemMap: song.roleStemMap || {},
+    assets: song.assets || {},
+    analysis: song.analysis || {},
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function markSongChanged(song, { source = 'song_patch', actor = '' } = {}) {
+  if (!song) return null;
+  const previousHash = song.contentHash || '';
+  const nextHash = stableSongContentHash(song);
+  const now = nowIso();
+  const changed = previousHash !== nextHash;
+  song.contentHash = nextHash;
+  song.updatedAt = now;
+  song.updated_at = now;
+  song.lastEditedAt = now;
+  song.revision = Math.max(0, Number(song.revision || song.songRevision || 0) || 0) + (changed ? 1 : 0);
+  song.songRevision = song.revision;
+  song.lastChange = {
+    source,
+    actor: normalizeIdentifier(actor),
+    changed,
+    previousHash,
+    contentHash: nextHash,
+    at: now,
+  };
+  return song.lastChange;
+}
+
 function applyChartToSong(song, { field, value, instrument, keyboardRigs = [], isPrivileged = false } = {}) {
   if (!song) return;
   const noteKey = instrument === 'Synth/Pad' ? 'Keys' : instrument;
@@ -1432,7 +1479,7 @@ function applyChartToSong(song, { field, value, instrument, keyboardRigs = [], i
     song.chordChart = content;
     song.chordSheet = content;
   }
-  song.updatedAt = nowIso();
+  markSongChanged(song, { source: 'chart_patch' });
 }
 
 function normalizePendingSong(body = {}) {
@@ -1761,6 +1808,49 @@ function registerSourceFromStemJob(store, job = {}) {
     roleStemMap: job.roleStemMap || current.roleStemMap || {},
     localCache: job.localCache || current.localCache || {},
     deliveryMode: job.analysis?.deliveryMode || job.deliveryMode || current.deliveryMode || '',
+    updatedAt: nowIso(),
+  };
+  store.sourceRegistry[key] = source;
+  return source;
+}
+
+function registerSourceFromSong(store, song = {}, context = {}) {
+  if (!song) return null;
+  store.sourceRegistry ||= {};
+  const key = sourceKeyForSong({
+    librarySongId: context.librarySongId || song.songId || song.id,
+    songId: context.librarySongId || song.songId || song.id,
+    title: song.title,
+    artist: song.artist,
+  });
+  const current = store.sourceRegistry[key] || {};
+  const source = {
+    ...current,
+    key,
+    librarySongId: context.librarySongId || song.songId || song.id || current.librarySongId || '',
+    title: song.title || current.title || '',
+    artist: song.artist || current.artist || '',
+    ownerEmail: normalizeIdentifier(context.ownerEmail || current.ownerEmail),
+    serviceId: context.serviceId || current.serviceId || '',
+    charts: {
+      ...(current.charts || {}),
+      lyrics: song.lyrics || '',
+      chordChart: song.chordChart || song.chordSheet || '',
+      chordSheet: song.chordSheet || song.chordChart || '',
+      instrumentNotes: song.instrumentNotes || {},
+      keyboardRigs: song.keyboardRigs || [],
+    },
+    stems: current.stems || song.assets?.stems || {},
+    analysis: {
+      ...(current.analysis || {}),
+      ...(song.analysis || {}),
+      key: song.key || current.analysis?.key || '',
+      bpm: song.bpm || song.tempo || current.analysis?.bpm || '',
+      timeSig: song.timeSig || current.analysis?.timeSig || '',
+    },
+    revision: song.revision || current.revision || 0,
+    contentHash: song.contentHash || current.contentHash || '',
+    songUpdatedAt: song.updatedAt || song.updated_at || current.songUpdatedAt || '',
     updatedAt: nowIso(),
   };
   store.sourceRegistry[key] = source;
@@ -3231,11 +3321,19 @@ async function handlePost(request, env, store, path, url) {
     };
     applyChartToSong(planSong, patch);
     applyChartToSong(librarySong, patch);
+    const source = registerSourceFromSong(store, librarySong || planSong, {
+      librarySongId: resolvedLibrarySongId,
+      serviceId,
+      ownerEmail: body.ownerEmail || body.accountEmail || body.from_email || body.email,
+    });
     await saveStore(env, store);
     return json({
       ok: true,
       songId: resolvedLibrarySongId,
       planItemId: planSong?.id || ids.planItemId || '',
+      revision: (librarySong || planSong)?.revision || 0,
+      contentHash: (librarySong || planSong)?.contentHash || '',
+      source,
     });
   }
 
@@ -3308,8 +3406,19 @@ async function handlePost(request, env, store, path, url) {
     };
     applyChartToSong(planSong, patch);
     applyChartToSong(librarySong, patch);
+    const source = registerSourceFromSong(store, librarySong || planSong, {
+      librarySongId: resolvedLibrarySongId,
+      serviceId: proposal.serviceId,
+      ownerEmail: proposal.from_email,
+    });
     await saveStore(env, store);
-    return json({ ok: true });
+    return json({
+      ok: true,
+      songId: resolvedLibrarySongId,
+      revision: (librarySong || planSong)?.revision || 0,
+      contentHash: (librarySong || planSong)?.contentHash || '',
+      source,
+    });
   }
 
   if (path === '/sync/proposal/reject') {

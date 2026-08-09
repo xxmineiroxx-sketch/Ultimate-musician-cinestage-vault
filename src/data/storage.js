@@ -18,6 +18,48 @@ const safeJsonParse = (value, fallback) => {
 
 const nowIso = () => new Date().toISOString();
 
+const stableSongContentHash = (song = {}) => {
+  const payload = JSON.stringify({
+    title: song.title || '',
+    artist: song.artist || '',
+    key: song.key || '',
+    bpm: song.bpm || song.tempo || '',
+    timeSig: song.timeSig || '',
+    lyrics: song.lyrics || '',
+    chordChart: song.chordChart || '',
+    chordSheet: song.chordSheet || '',
+    instrumentNotes: song.instrumentNotes || {},
+    keyboardRigs: song.keyboardRigs || [],
+    midiPresets: song.midiPresets || {},
+    sectionMapping: song.sectionMapping || song.sections || [],
+    deviceConfigs: song.deviceConfigs || {},
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+};
+
+const withSongRevision = (song = {}, previous = null) => {
+  const merged = { ...(previous || {}), ...song };
+  const contentHash = stableSongContentHash(merged);
+  const changed = previous ? previous.contentHash !== contentHash : true;
+  const stamp = nowIso();
+  const revision = Math.max(0, Number(previous?.revision || previous?.songRevision || song.revision || 0) || 0) + (changed ? 1 : 0);
+  return {
+    ...merged,
+    contentHash,
+    revision,
+    songRevision: revision,
+    updated_at: stamp,
+    updatedAt: stamp,
+    lastEditedAt: stamp,
+    created_at: previous?.created_at || song.created_at || stamp,
+  };
+};
+
 /**
  * Settings
  */
@@ -49,12 +91,7 @@ export const saveSongs = async (songs) => {
 export const addOrUpdateSong = async (song) => {
   const songs = await getSongs();
   const index = songs.findIndex(s => s.id === song.id);
-
-  const next = {
-    ...song,
-    updated_at: nowIso(),
-    created_at: song.created_at || nowIso(),
-  };
+  const next = withSongRevision(song, index >= 0 ? songs[index] : null);
 
   if (index >= 0) {
     songs[index] = next;
