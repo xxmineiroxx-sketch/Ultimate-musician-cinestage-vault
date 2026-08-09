@@ -22,12 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import audioEngine from '../services/audioEngine';
 import {
-  GRID_MODES,
-  LAUNCH_QUANTIZATION_MODES,
-  TRANSITION_MODES,
   buildAdvancedWavePipeline,
-  getAdjacentSection,
-  getCurrentSection,
 } from '../services/advancedWavePipeline';
 import { getUserProfile, getAssignments } from '../services/storage';
 import { SYNC_URL, SYNC_ORG_ID, SYNC_SECRET_KEY, CINESTAGE_URL } from '../../config/syncConfig';
@@ -525,11 +520,10 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [autoAdvanceEnabled, setAutoAdvanceEnabled] = useState(true);
   const [repeatCurrentSong, setRepeatCurrentSong] = useState(false);
-  const [gridMode, setGridMode] = useState('BAR');
-  const [launchQuantization, setLaunchQuantization] = useState('BAR');
-  const [transitionMode, setTransitionMode] = useState('CROSSFADE');
-  const [latencyOffsetMs, setLatencyOffsetMs] = useState(0);
-  const [pipelineStatus, setPipelineStatus] = useState(null);
+  const gridMode = 'BAR';
+  const launchQuantization = 'BAR';
+  const transitionMode = 'CROSSFADE';
+  const latencyOffsetMs = 0;
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -585,7 +579,7 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   ]);
 
   useEffect(() => {
-    const state = audioEngine.setPipelineConfig({
+    audioEngine.setPipelineConfig({
       bpm: wavePipeline.bpm,
       beatsPerBar: wavePipeline.beatsPerBar,
       gridMode,
@@ -596,7 +590,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       sections: wavePipeline.sections,
       transientMarkers: wavePipeline.transientMarkers,
     });
-    setPipelineStatus(state);
   }, [wavePipeline, gridMode, launchQuantization, transitionMode, latencyOffsetMs]);
 
   function mergeSongIntoLocalState(updatedSong, defs = trackDefsRef.current) {
@@ -616,10 +609,9 @@ export default function PersonalPracticeScreen({ route, navigation }) {
 
   useEffect(() => {
     audioEngine.initialize().catch(() => {});
-    audioEngine.onProgressUpdate = ({ position: pos, duration: dur, pipeline }) => {
+    audioEngine.onProgressUpdate = ({ position: pos, duration: dur }) => {
       setPosition(pos || 0);
       if (dur) setDuration(dur);
-      if (pipeline) setPipelineStatus(pipeline);
     };
     audioEngine.onPlaybackStatusChange = ({ isPlaying: p }) => setIsPlaying(!!p);
     audioEngine.onPlaybackEnded = () => {
@@ -1135,17 +1127,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
     }
   }
 
-  function jumpAdjacentSection(direction) {
-    if (!stemsReady) return;
-    const posSec = duration > 0 ? position / 1000 : 0;
-    const target = getAdjacentSection(wavePipeline.sections, posSec, direction);
-    if (target) jumpToPipelineMarker(target).catch(() => {});
-  }
-
-  function adjustLatency(deltaMs) {
-    setLatencyOffsetMs((prev) => Math.max(-250, Math.min(250, prev + deltaMs)));
-  }
-
   async function toggleMuteA() {
     const next = !muteA;
     setMuteA(next);
@@ -1220,10 +1201,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
   const selectedSongIndex = findSongIndex(songs, selectedSong);
   const hasPrevSong = selectedSongIndex > 0;
   const hasNextSong = selectedSongIndex >= 0 && selectedSongIndex < songs.length - 1;
-  const currentPipelineSection = pipelineStatus?.currentSection
-    || getCurrentSection(wavePipeline.sections, duration > 0 ? position / 1000 : 0);
-  const hasPrevSection = !!getAdjacentSection(wavePipeline.sections, duration > 0 ? position / 1000 : 0, -1);
-  const hasNextSection = !!getAdjacentSection(wavePipeline.sections, duration > 0 ? position / 1000 : 0, 1);
 
   // ── render ────────────────────────────────────────────────────────────────
 
@@ -1335,69 +1312,6 @@ export default function PersonalPracticeScreen({ route, navigation }) {
               loopEnabled={loopEnabled}
               loopSection={loopSection}
             />
-
-            <View style={styles.pipelinePanel}>
-              <View style={styles.pipelineHeader}>
-                <View>
-                  <Text style={styles.pipelineTitle}>WavePipeline</Text>
-                  <Text style={styles.pipelineMeta}>
-                    {currentPipelineSection?.label || 'No section'} · {wavePipeline.sections.length} sections · {wavePipeline.transientMarkers.length} hits
-                  </Text>
-                </View>
-                <View style={styles.pipelineBadge}>
-                  <Text style={styles.pipelineBadgeText}>{wavePipeline.hasRealPeaks ? 'REAL PEAKS' : 'CHART PEAKS'}</Text>
-                </View>
-              </View>
-
-              <View style={styles.sectionJumpRow}>
-                <TouchableOpacity
-                  style={[styles.sectionJumpBtn, !hasPrevSection && styles.sectionJumpBtnDisabled]}
-                  onPress={() => jumpAdjacentSection(-1)}
-                  disabled={!stemsReady || !hasPrevSection}
-                >
-                  <Text style={[styles.sectionJumpText, (!stemsReady || !hasPrevSection) && styles.transpDisabled]}>Prev Section</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.sectionJumpBtn, !hasNextSection && styles.sectionJumpBtnDisabled]}
-                  onPress={() => jumpAdjacentSection(1)}
-                  disabled={!stemsReady || !hasNextSection}
-                >
-                  <Text style={[styles.sectionJumpText, (!stemsReady || !hasNextSection) && styles.transpDisabled]}>Next Section</Text>
-                </TouchableOpacity>
-              </View>
-
-              <PipelineSegmented
-                label="Grid"
-                values={GRID_MODES}
-                value={gridMode}
-                onChange={setGridMode}
-              />
-              <PipelineSegmented
-                label="Launch"
-                values={LAUNCH_QUANTIZATION_MODES}
-                value={launchQuantization}
-                onChange={setLaunchQuantization}
-              />
-              <PipelineSegmented
-                label="Transition"
-                values={TRANSITION_MODES}
-                value={transitionMode}
-                onChange={setTransitionMode}
-              />
-
-              <View style={styles.latencyRow}>
-                <Text style={styles.pipelineLabel}>Latency</Text>
-                <View style={styles.latencyControls}>
-                  <TouchableOpacity style={styles.latencyBtn} onPress={() => adjustLatency(-10)}>
-                    <Text style={styles.latencyBtnText}>-10</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.latencyValue}>{latencyOffsetMs > 0 ? '+' : ''}{latencyOffsetMs} ms</Text>
-                  <TouchableOpacity style={styles.latencyBtn} onPress={() => adjustLatency(10)}>
-                    <Text style={styles.latencyBtnText}>+10</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
 
             {/* 2-Track Mixer — always shown; mute buttons disabled until loaded */}
             <ModernDashboardCard variant="default" style={styles.mixerCard}>
@@ -1580,31 +1494,6 @@ function TrackStrip({ def, muted, onMuteToggle, isLoaded, isPlaying, isMine }) {
   );
 }
 
-function PipelineSegmented({ label, values, value, onChange }) {
-  return (
-    <View style={styles.pipelineRow}>
-      <Text style={styles.pipelineLabel}>{label}</Text>
-      <View style={styles.pipelineSegments}>
-        {values.map((item) => {
-          const active = item === value;
-          return (
-            <TouchableOpacity
-              key={item}
-              style={[styles.pipelineSegment, active && styles.pipelineSegmentActive]}
-              onPress={() => onChange(item)}
-            >
-              <Text style={[styles.pipelineSegmentText, active && styles.pipelineSegmentTextActive]}>
-                {item === 'IMMEDIATE' ? 'NOW' : item}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-
 // ─── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -1709,142 +1598,6 @@ const styles = StyleSheet.create({
   },
   tipText: { color: '#94A3B8', fontSize: 12, lineHeight: 18 },
   tipBold: { color: '#C4B5FD', fontWeight: '700' },
-  pipelinePanel: {
-    backgroundColor: '#07111F',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-    padding: 12,
-    gap: 10,
-  },
-  pipelineHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  pipelineTitle: {
-    color: '#E2E8F0',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  pipelineMeta: {
-    color: '#64748B',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  pipelineBadge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#334155',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#0F172A',
-  },
-  pipelineBadgeText: {
-    color: '#93C5FD',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  sectionJumpRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  sectionJumpBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#334155',
-    backgroundColor: '#0F172A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionJumpBtnDisabled: {
-    opacity: 0.5,
-  },
-  sectionJumpText: {
-    color: '#CBD5E1',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  pipelineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  pipelineLabel: {
-    color: '#64748B',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    width: 68,
-  },
-  pipelineSegments: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#020617',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-    padding: 2,
-  },
-  pipelineSegment: {
-    flex: 1,
-    minHeight: 30,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  pipelineSegmentActive: {
-    backgroundColor: '#312E81',
-  },
-  pipelineSegmentText: {
-    color: '#64748B',
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  pipelineSegmentTextActive: {
-    color: '#EDE9FE',
-  },
-  latencyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  latencyControls: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  latencyBtn: {
-    minWidth: 48,
-    minHeight: 30,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#334155',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0F172A',
-  },
-  latencyBtnText: {
-    color: '#CBD5E1',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  latencyValue: {
-    color: '#A5B4FC',
-    fontSize: 12,
-    fontWeight: '800',
-    minWidth: 58,
-    textAlign: 'center',
-  },
   // Transport
   transport: {
     flexDirection: 'row',

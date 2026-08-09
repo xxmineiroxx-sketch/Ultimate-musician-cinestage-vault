@@ -12,4 +12,6 @@ Member home keeps the important field actions visible: next service, setlist, pr
 
 Hidden from regular members: Admin panel, leadership stats, CineStage Brain status card, Service Command Center, and dense command quick actions.
 
+My Practice should show the song playback surface, waveform, personal mix, chart/stem readiness, and service actions. WavePipeline configuration controls belong in leadership, desktop, or live-production tooling, not the regular Playback member view.
+
 Product rule: Playback stays simple for the worship team. Ultimate Musician and elevated Playback roles carry the operational complexity.
