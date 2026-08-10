@@ -13,6 +13,86 @@ import {
 
 const REMOTE_AUDIO_RE = /^https?:\/\//i;
 const AUDIO_CACHE_DIR = `${FileSystem?.cacheDirectory ?? ''}up_practice_audio/`;
+// Bump when the cache naming/validation rules change so stale entries are dropped.
+const AUDIO_CACHE_SCHEME = 'v2_';
+// An HTTP error body is a few dozen bytes; no real stem is anywhere near this small.
+const MIN_CACHED_AUDIO_BYTES = 4096;
+
+const AUDIO_EXTENSION_BY_CONTENT_TYPE = {
+  'audio/mp4': '.m4a',
+  'audio/m4a': '.m4a',
+  'audio/x-m4a': '.m4a',
+  'audio/aac': '.m4a',
+  'audio/mpeg': '.mp3',
+  'audio/mp3': '.mp3',
+  'audio/wav': '.wav',
+  'audio/wave': '.wav',
+  'audio/x-wav': '.wav',
+  'audio/vnd.wave': '.wav',
+  'audio/flac': '.flac',
+  'audio/x-flac': '.flac',
+  'audio/aiff': '.aiff',
+  'audio/x-aiff': '.aiff',
+  'audio/ogg': '.ogg',
+};
+
+function headerValue(headers = {}, name) {
+  const key = Object.keys(headers || {}).find((k) => k.toLowerCase() === name);
+  return key ? String(headers[key] || '') : '';
+}
+
+function fileExtension(value = '') {
+  const match = String(value).split('?')[0].split('#')[0].match(/\.([a-z0-9]{2,8})$/i);
+  return match ? `.${match[1].toLowerCase()}` : '';
+}
+
+/**
+ * Pick the on-disk extension for a downloaded stem. expo-av on iOS leans on the
+ * file extension to choose a decoder, so an AAC file named ".wav" fails to load.
+ * Content-Disposition is the most reliable signal (the Worker sends the real
+ * stem filename), then Content-Type, then the URL.
+ */
+function audioExtensionFromResponse(result = {}, uri = '') {
+  const headers = result.headers || {};
+  const disposition = headerValue(headers, 'content-disposition');
+  const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  const fromDisposition = filenameMatch ? fileExtension(filenameMatch[1]) : '';
+  if (fromDisposition) return fromDisposition;
+
+  const contentType = headerValue(headers, 'content-type').split(';')[0].trim().toLowerCase();
+  if (AUDIO_EXTENSION_BY_CONTENT_TYPE[contentType]) return AUDIO_EXTENSION_BY_CONTENT_TYPE[contentType];
+
+  return fileExtension(uri) || '.mp3';
+}
+
+/**
+ * Returns a reason string when a download must not be cached, or null when the
+ * response looks like real audio.
+ */
+async function describeAudioDownloadFailure(result, localUri) {
+  const status = Number(result?.status || 0);
+  if (status && (status < 200 || status >= 300)) {
+    const body = await FileSystem.readAsStringAsync(localUri).catch(() => '');
+    let detail = body.slice(0, 200);
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed?.error) detail = parsed.error;
+    } catch (_) { /* not JSON — keep the raw snippet */ }
+    return `HTTP ${status}${detail ? `: ${detail}` : ''}`;
+  }
+
+  const contentType = headerValue(result?.headers, 'content-type').split(';')[0].trim().toLowerCase();
+  if (contentType && !contentType.startsWith('audio/') && contentType !== 'application/octet-stream') {
+    return `unexpected content-type "${contentType}"`;
+  }
+
+  const info = await FileSystem.getInfoAsync(localUri).catch(() => null);
+  if (!info?.exists || !(info.size > MIN_CACHED_AUDIO_BYTES)) {
+    return `download was empty or truncated (${info?.size || 0} bytes)`;
+  }
+
+  return null;
+}
 
 class AudioEngine {
   constructor() {
@@ -35,6 +115,8 @@ class AudioEngine {
     this.onPlaybackStatusChange = null;
     this.onPlaybackEnded = null;
     this.cachedAudioUris = {};
+    this.lastLoadError = null;
+    this._legacyCachePurged = false;
     this.loopRegion = null;
     this.lastLoopJumpAt = 0;
     this.progressListeners = new Set();
@@ -300,9 +382,15 @@ class AudioEngine {
       console.log(`Loaded ${trackType}: ${trackId}`);
       return true;
     } catch (error) {
-      console.warn(`[AudioEngine] loadStem failed for "${trackId}": ${error?.message || error}`);
+      const reason = error?.message || String(error);
+      this.lastLoadError = { trackId, uri, reason, status: error?.downloadStatus || null, at: Date.now() };
+      console.warn(`[AudioEngine] loadStem failed for "${trackId}": ${reason}`);
       return false;
     }
+  }
+
+  getLastLoadError() {
+    return this.lastLoadError;
   }
 
   /**
@@ -859,6 +947,24 @@ class AudioEngine {
     return nextPosition;
   }
 
+  /**
+   * Delete cache entries written by an older cache scheme. Pre-v2 entries were
+   * named from the URL alone with a guessed extension, so a failed download
+   * (an HTTP error page written to disk) stayed cached forever and a stem whose
+   * real format changed kept its stale extension.
+   */
+  async _purgeLegacyAudioCache() {
+    if (this._legacyCachePurged) return;
+    this._legacyCachePurged = true;
+    const names = await FileSystem.readDirectoryAsync(AUDIO_CACHE_DIR).catch(() => null);
+    if (!names?.length) return;
+    await Promise.all(
+      names
+        .filter((name) => !name.startsWith(AUDIO_CACHE_SCHEME))
+        .map((name) => FileSystem.deleteAsync(`${AUDIO_CACHE_DIR}${name}`, { idempotent: true }).catch(() => {})),
+    );
+  }
+
   async _resolvePlayableUri(uri) {
     const trimmed = String(uri || '').trim();
     if (!REMOTE_AUDIO_RE.test(trimmed) || !FileSystem.cacheDirectory) {
@@ -870,23 +976,60 @@ class AudioEngine {
       if (cachedInfo?.exists && cachedInfo.size > 0) {
         return this.cachedAudioUris[trimmed];
       }
+      delete this.cachedAudioUris[trimmed];
     }
 
     await FileSystem.makeDirectoryAsync(AUDIO_CACHE_DIR, { intermediates: true }).catch(() => {});
+    await this._purgeLegacyAudioCache();
 
-    const extensionMatch = trimmed.split('?')[0].match(/\.([a-z0-9]{2,8})$/i);
-    const extension = extensionMatch
-      ? `.${extensionMatch[1].toLowerCase()}`
-      : (trimmed.includes('/sync/stem-assets/download') ? '.wav' : '.mp3');
-    const cacheKey = encodeURIComponent(trimmed).replace(/%/g, '_');
-    const localUri = `${AUDIO_CACHE_DIR}${cacheKey}${extension}`;
-    const info = await FileSystem.getInfoAsync(localUri).catch(() => null);
-    if (!info?.exists || !info.size) {
-      await FileSystem.downloadAsync(trimmed, localUri);
+    // The extension is not known until the server responds — the same stem URL
+    // can serve .wav or .m4a depending on how it was published — so the cache
+    // entry is found by prefix rather than by a guessed filename.
+    const cacheKey = `${AUDIO_CACHE_SCHEME}${encodeURIComponent(trimmed).replace(/%/g, '_')}`;
+    const existing = await this._findCachedFile(cacheKey);
+    if (existing) {
+      this.cachedAudioUris[trimmed] = existing;
+      return existing;
     }
+
+    const partialUri = `${AUDIO_CACHE_DIR}${cacheKey}.part`;
+    await FileSystem.deleteAsync(partialUri, { idempotent: true }).catch(() => {});
+
+    let result;
+    try {
+      result = await FileSystem.downloadAsync(trimmed, partialUri);
+    } catch (error) {
+      await FileSystem.deleteAsync(partialUri, { idempotent: true }).catch(() => {});
+      throw error;
+    }
+
+    // downloadAsync resolves for any status code and writes the error body to
+    // disk, so the response has to be validated before it is cached.
+    const failure = await describeAudioDownloadFailure(result, partialUri);
+    if (failure) {
+      await FileSystem.deleteAsync(partialUri, { idempotent: true }).catch(() => {});
+      const error = new Error(failure);
+      error.downloadStatus = result?.status;
+      throw error;
+    }
+
+    const localUri = `${AUDIO_CACHE_DIR}${cacheKey}${audioExtensionFromResponse(result, trimmed)}`;
+    await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
+    await FileSystem.moveAsync({ from: partialUri, to: localUri });
 
     this.cachedAudioUris[trimmed] = localUri;
     return localUri;
+  }
+
+  async _findCachedFile(cacheKey) {
+    const names = await FileSystem.readDirectoryAsync(AUDIO_CACHE_DIR).catch(() => null);
+    const match = (names || []).find((name) => name.startsWith(`${cacheKey}.`) && !name.endsWith('.part'));
+    if (!match) return null;
+    const localUri = `${AUDIO_CACHE_DIR}${match}`;
+    const info = await FileSystem.getInfoAsync(localUri).catch(() => null);
+    if (info?.exists && info.size > MIN_CACHED_AUDIO_BYTES) return localUri;
+    await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
+    return null;
   }
 }
 

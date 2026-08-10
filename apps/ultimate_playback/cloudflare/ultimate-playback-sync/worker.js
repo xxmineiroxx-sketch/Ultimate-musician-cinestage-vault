@@ -2403,16 +2403,101 @@ async function handleProfile(request, env, store, url) {
   return json({ ok: true, profile, person: profile });
 }
 
+// Services store wall-clock date/time with no offset ("2026-08-09", "09:00").
+// The Worker runs in UTC, so parsing those directly reads 9 AM local as 9 AM UTC
+// and closes the delivery window before the service starts.
+const DEFAULT_SERVICE_TIMEZONE = 'America/New_York';
+// Used only when a service has a start time but no explicit end time.
+const DEFAULT_SERVICE_DURATION_HOURS = 3;
+
+function serviceTimeZone(store = {}, service = null) {
+  return String(
+    service?.timezone
+    || service?.timeZone
+    || store?.settings?.timezone
+    || DEFAULT_SERVICE_TIMEZONE,
+  ).trim() || DEFAULT_SERVICE_TIMEZONE;
+}
+
+/** Minutes that `timeZone` is offset from UTC at the given instant (DST aware). */
+function zoneOffsetMinutes(instant, timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(instant).reduce((acc, part) => {
+      if (part.type !== 'literal') acc[part.type] = part.value;
+      return acc;
+    }, {});
+    const asUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour) % 24,
+      Number(parts.minute),
+      Number(parts.second),
+    );
+    return (asUtc - instant.getTime()) / 60000;
+  } catch (_) {
+    return 0;
+  }
+}
+
+/** Parse "YYYY-MM-DD" + "HH:MM" as wall-clock time in `timeZone`. */
+function parseZonedDateTime(date, time, timeZone) {
+  const day = String(date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+
+  let hours = 23;
+  let minutes = 59;
+  const raw = String(time || '').trim();
+  if (raw) {
+    const match = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+    if (!match) return null;
+    hours = Number(match[1]);
+    minutes = Number(match[2]);
+    const meridiem = match[3]?.toLowerCase();
+    if (meridiem === 'pm' && hours < 12) hours += 12;
+    if (meridiem === 'am' && hours === 12) hours = 0;
+    if (hours > 23 || minutes > 59) return null;
+  }
+
+  const naive = Date.parse(`${day}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00Z`);
+  if (Number.isNaN(naive)) return null;
+  // Resolve twice so an instant near a DST boundary settles on the right offset.
+  let utc = naive - zoneOffsetMinutes(new Date(naive), timeZone) * 60000;
+  utc = naive - zoneOffsetMinutes(new Date(utc), timeZone) * 60000;
+  return new Date(utc);
+}
+
 function serviceEndDateForStemJob(job = {}, store = {}) {
   const service = job.serviceId ? serviceMapFromStore(store)[job.serviceId] : null;
   const date = String(job.serviceDate || service?.date || '').trim();
-  const time = String(job.serviceEndTime || job.serviceTime || service?.endTime || service?.time || '').trim();
-  const parsed = Date.parse(`${date}T${time || '23:59'}`);
-  if (!Number.isNaN(parsed)) return new Date(parsed);
-  const serviceDate = Date.parse(date);
-  if (!Number.isNaN(serviceDate)) {
-    return new Date(serviceDate + (23 * 60 + 59) * 60 * 1000);
+  const timeZone = serviceTimeZone(store, service);
+
+  const endTime = String(job.serviceEndTime || service?.endTime || '').trim();
+  if (endTime) {
+    const parsed = parseZonedDateTime(date, endTime, timeZone);
+    if (parsed) return parsed;
   }
+
+  // No explicit end time: the start time is a start, not an end, so assume a
+  // normal service length rather than expiring the moment the service begins.
+  const startTime = String(job.serviceTime || service?.time || '').trim();
+  if (startTime) {
+    const parsed = parseZonedDateTime(date, startTime, timeZone);
+    if (parsed) return new Date(parsed.getTime() + DEFAULT_SERVICE_DURATION_HOURS * 60 * 60 * 1000);
+  }
+
+  const endOfDay = parseZonedDateTime(date, '', timeZone);
+  if (endOfDay) return endOfDay;
+
   return new Date(Date.now() + 2 * 60 * 60 * 1000);
 }
 
@@ -2903,17 +2988,31 @@ async function handlePublishStemJob(request, env, store, url) {
   applyStemJobToSong(librarySong, { ...job, librarySongId });
   applyStemJobToSong(planSong, { ...job, librarySongId });
 
+  const publishBody = await readJson(request);
   job.status = 'published';
   job.publishedAt = nowIso();
   job.librarySongId = librarySongId;
   const serviceEnd = serviceEndDateForStemJob(job, store);
-  const deleteAfterHours = Number(job.retention?.deleteAfterServiceHours || 2) || 2;
+  const deleteAfterHours = Number(
+    publishBody.deleteAfterServiceHours
+    ?? publishBody.retention?.deleteAfterServiceHours
+    ?? job.retention?.deleteAfterServiceHours
+    ?? 2,
+  ) || 2;
+  // An admin re-publishing after the window closed (extra rehearsal, moved
+  // service) can pass extendHours to re-open delivery without touching policy.
+  const extendHours = Math.max(0, Number(publishBody.extendHours ?? publishBody.retention?.extendHours ?? 0) || 0);
+  const scheduledExpiry = new Date(serviceEnd.getTime() + deleteAfterHours * 60 * 60 * 1000);
+  const extendedExpiry = extendHours ? new Date(Date.now() + extendHours * 60 * 60 * 1000) : null;
+  const expiresAt = extendedExpiry && extendedExpiry > scheduledExpiry ? extendedExpiry : scheduledExpiry;
   job.retention = {
     ...stemRetentionPolicy({ retention: job.retention || {} }, store),
     ...(job.retention || {}),
     cleanupStatus: 'scheduled',
+    deleteAfterServiceHours: deleteAfterHours,
     serviceEndedAt: serviceEnd.toISOString(),
-    expiresAt: new Date(serviceEnd.getTime() + deleteAfterHours * 60 * 60 * 1000).toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    extendedUntil: extendedExpiry && extendedExpiry > scheduledExpiry ? extendedExpiry.toISOString() : '',
     websiteCatalogEligible: false,
   };
   job.readiness = {

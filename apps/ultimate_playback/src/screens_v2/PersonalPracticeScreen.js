@@ -954,10 +954,24 @@ export default function PersonalPracticeScreen({ route, navigation }) {
       await audioEngine.stop().catch(() => {});
       await audioEngine.unloadAll();
       let loaded = 0;
+      let attempted = 0;
       for (const source of getInitialPracticeSources(trackA, trackB)) {
+        attempted++;
         // eslint-disable-next-line no-await-in-loop
         const ok = await audioEngine.loadStem(source.id, source.uri);
         if (ok) loaded++;
+      }
+      if (!loaded && attempted && !suppressMissingAlert) {
+        // Without this the screen just sits on "loading" forever when the
+        // delivery link has expired or the download returned an error body.
+        const failure = audioEngine.getLastLoadError?.();
+        Alert.alert(
+          'Stems Unavailable',
+          failure?.status === 403
+            ? 'These practice stems have passed their delivery window. Ask your worship leader to re-publish them.'
+            : `Could not load the practice stems.${failure?.reason ? `\n\n${failure.reason}` : ''}`,
+          [{ text: 'OK' }],
+        );
       }
       setStemsReady(loaded > 0);
       setMuteA(false);
