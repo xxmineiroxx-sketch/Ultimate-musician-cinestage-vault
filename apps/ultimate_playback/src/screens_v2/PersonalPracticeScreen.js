@@ -39,7 +39,6 @@ import {
 } from '../utils/songMedia';
 
 const { width } = Dimensions.get('window');
-const MAX_INITIAL_TRACK_SOURCES = 2;
 
 // ─── Role classification ────────────────────────────────────────────────────
 
@@ -290,19 +289,23 @@ function getTrackSources(def) {
   return def.uri ? [{ id: def.id, uri: def.uri }] : [];
 }
 
+/**
+ * Every source for both tracks, with the musician's own part first so it is
+ * ready soonest. Do not cap this list — trackA is the whole rest of the band
+ * (bass, drums, click, guitars, guide...), so dropping entries silently plays
+ * a partial mix while the UI still reports "Full Song".
+ */
 function getInitialPracticeSources(trackA, trackB) {
   const sources = [
     ...getTrackSources(trackB),
     ...getTrackSources(trackA),
   ];
   const seenUris = new Set();
-  return sources
-    .filter((source) => {
-      if (!source?.uri || seenUris.has(source.uri)) return false;
-      seenUris.add(source.uri);
-      return true;
-    })
-    .slice(0, MAX_INITIAL_TRACK_SOURCES);
+  return sources.filter((source) => {
+    if (!source?.uri || seenUris.has(source.uri)) return false;
+    seenUris.add(source.uri);
+    return true;
+  });
 }
 
 function isPlaybackOnlyRole(role) {
