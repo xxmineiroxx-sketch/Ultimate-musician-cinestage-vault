@@ -603,6 +603,36 @@ function teamMessageRecipients(team = []) {
     .filter(Boolean))];
 }
 
+/**
+ * Admins, worship leaders (manager) and music directors (md) — the people who
+ * need operational notices such as "stems finished processing". Ordinary team
+ * members must not receive these: they are pipeline status, not a call to act,
+ * and broadcasting them puts every song's activity in every musician's inbox.
+ *
+ * Grants are the authoritative permission record; person roles are a fallback
+ * so an org that has not issued grants still notifies its leadership.
+ */
+function leadershipRecipients(store = {}) {
+  const emails = new Set();
+
+  for (const [email, grant] of Object.entries(store.grants || {})) {
+    const roles = [grant?.role, grant?.grantedRole, grant?.orgRole].filter(Boolean);
+    if (roles.some(isElevatedGrantRole)) {
+      const normalized = normalizeIdentifier(email);
+      if (normalized) emails.add(normalized);
+    }
+  }
+
+  for (const person of (store.people || [])) {
+    if (personRoleKeys(person).some(isElevatedGrantRole)) {
+      const normalized = normalizeIdentifier(person.email);
+      if (normalized) emails.add(normalized);
+    }
+  }
+
+  return [...emails];
+}
+
 function addSystemMessage(store, {
   from_email = 'system@ultimate-musician.local',
   from_name = 'Ultimate Musician',
@@ -3022,15 +3052,21 @@ async function handlePublishStemJob(request, env, store, url) {
   };
   const source = registerSourceFromStemJob(store, job);
 
-  const recipients = teamMessageRecipients(plan?.team || []);
+  // Stem completion is an operational notice for leadership only. It used to go
+  // to the whole assigned team, which put every song's pipeline activity in
+  // every musician's inbox.
+  const recipients = leadershipRecipients(store);
+  const teamSize = teamMessageRecipients(plan?.team || []).length;
   if (job.serviceId && recipients.length) {
     addSystemMessage(store, {
       subject: `Practice stems ready: ${job.title}`,
       message: [
-        `CineStage stems are ready for "${job.title}".`,
-        'Open Playback to practice the part assigned to your role.',
+        `CineStage stems finished processing for "${job.title}".`,
+        teamSize
+          ? `They are now available to the ${teamSize} assigned team member${teamSize === 1 ? '' : 's'} in Playback.`
+          : 'No team members are assigned to this service yet.',
       ].join('\n'),
-      to: 'assigned_team',
+      to: 'leadership',
       recipients,
       metadata: {
         type: 'stem_job_published',
@@ -3038,6 +3074,7 @@ async function handlePublishStemJob(request, env, store, url) {
         serviceId: job.serviceId,
         songId: librarySongId,
         recipientCount: recipients.length,
+        teamSize,
       },
     });
   }
