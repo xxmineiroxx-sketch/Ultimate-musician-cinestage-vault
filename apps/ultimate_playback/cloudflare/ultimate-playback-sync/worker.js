@@ -169,6 +169,50 @@ function leadSingerAssignedForService(store, submitter = {}, serviceId = '', pla
   ));
 }
 
+/** Admin, org owner, and worship leader (grant role `manager`) may approve. */
+function isSetlistApproverRole(value) {
+  return ['org_owner', 'admin', 'manager'].includes(normalizeGrantRole(value));
+}
+
+/**
+ * Identify the caller of a privileged endpoint.
+ *
+ * Prefers a session token, which is trustworthy. Falls back to a caller-supplied
+ * email, which is NOT trustworthy — it only stops the wrong *app user* from
+ * acting, not a forged request. The fallback exists because no client sends
+ * tokens yet; once they do, `verified` becomes true and the same call sites
+ * start enforcing real authentication with no further changes here.
+ */
+function resolveActor(request, body = {}, store = {}) {
+  const token = tokenFromRequest(request, body);
+  const session = token ? store.sessions?.[token] : null;
+  const sessionValid = session && (!session.expiresAt || session.expiresAt > Date.now());
+
+  const email = normalizeIdentifier(
+    (sessionValid && session.identifier)
+    || body.actorEmail
+    || body.approvedBy
+    || body.rejectedBy
+    || request.headers.get('x-actor-email')
+    || '',
+  );
+  if (!email) return null;
+
+  return {
+    email,
+    verified: Boolean(sessionValid),
+    person: findPerson(store, { email, identifier: email }) || null,
+    grant: store.grants?.[email] || null,
+  };
+}
+
+function actorCanApproveSetlist(actor) {
+  if (!actor) return false;
+  const grantRoles = [actor.grant?.role, actor.grant?.grantedRole, actor.grant?.orgRole].filter(Boolean);
+  if (grantRoles.some(isSetlistApproverRole)) return true;
+  return personRoleKeys(actor.person || {}).some(isSetlistApproverRole);
+}
+
 function canCreateSetlist(store, submitter = {}, serviceId = '', plan = {}) {
   const email = normalizeIdentifier(submitter.email || submitter.identifier);
   const grant = email ? store.grants?.[email] : null;
@@ -3551,6 +3595,21 @@ async function handleSubmitSetlist(request, env, store) {
 async function handleApproveSetlist(request, env, store, url) {
   const id = String(url.searchParams.get('id') || '').trim();
   const body = await readJson(request);
+
+  // Approval is the control that makes setlist delegation safe: a vocal leader
+  // may build a setlist, but only an admin or worship leader may publish it.
+  // This endpoint previously performed no caller check at all.
+  const actor = resolveActor(request, body, store);
+  if (!actor) {
+    return json({ ok: false, error: 'approver identity is required' }, 401);
+  }
+  if (!actorCanApproveSetlist(actor)) {
+    return json({
+      ok: false,
+      error: 'only an admin or worship leader may approve a setlist',
+    }, 403);
+  }
+
   store.pendingSetlists ||= [];
   const entry = store.pendingSetlists.find((item) => item.id === id);
   if (!entry) return json({ ok: false, error: 'setlist submission not found' }, 404);
@@ -3571,13 +3630,16 @@ async function handleApproveSetlist(request, env, store, url) {
     ...(entry.plan || {}),
     status: 'published',
     approvedAt: nowIso(),
-    approvedBy: body.approvedBy || null,
+    approvedBy: actor.email,
   };
   store.plans[entry.serviceId] = approvedPlan;
 
   entry.status = 'approved';
   entry.approvedAt = nowIso();
-  entry.approvedBy = body.approvedBy || null;
+  // Recorded from the resolved actor, not from a caller-supplied field, so the
+  // audit trail cannot disagree with the permission that was actually checked.
+  entry.approvedBy = actor.email;
+  entry.approvedByVerified = actor.verified;
 
   const recordedAssignments = recordAssignmentHistory(store, {
     serviceId: entry.serviceId,
@@ -3618,6 +3680,18 @@ async function handleApproveSetlist(request, env, store, url) {
 async function handleRejectSetlist(request, env, store, url) {
   const id = String(url.searchParams.get('id') || '').trim();
   const body = await readJson(request);
+
+  const actor = resolveActor(request, body, store);
+  if (!actor) {
+    return json({ ok: false, error: 'reviewer identity is required' }, 401);
+  }
+  if (!actorCanApproveSetlist(actor)) {
+    return json({
+      ok: false,
+      error: 'only an admin or worship leader may reject a setlist',
+    }, 403);
+  }
+
   store.pendingSetlists ||= [];
   const entry = store.pendingSetlists.find((item) => item.id === id);
   if (!entry) return json({ ok: false, error: 'setlist submission not found' }, 404);
@@ -3625,7 +3699,8 @@ async function handleRejectSetlist(request, env, store, url) {
   entry.status = 'rejected';
   entry.rejectedAt = nowIso();
   entry.reviewNote = String(body.note || body.reason || '').trim();
-  entry.rejectedBy = body.rejectedBy || null;
+  entry.rejectedBy = actor.email;
+  entry.rejectedByVerified = actor.verified;
 
   await saveStore(env, store);
   return json({ ok: true });

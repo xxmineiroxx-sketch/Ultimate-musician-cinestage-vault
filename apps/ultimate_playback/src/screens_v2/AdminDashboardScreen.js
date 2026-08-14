@@ -1502,8 +1502,12 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
   const handleApproveSetlist = async (setlist) => {
     setApprovingSetlistId(setlist.id);
     try {
+      // actorEmail identifies the approver; the Worker verifies it grants
+      // admin/worship-leader rights before publishing.
       await fetchJson(`${SYNC_URL}/sync/setlist/approve?id=${encodeURIComponent(setlist.id)}`, {
-        method: 'POST', headers: syncHeaders(),
+        method: 'POST',
+        headers: syncHeaders(),
+        body: JSON.stringify({ actorEmail: profile?.email || profile?.identifier || '' }),
       });
       // Also broadcast to team via regular publish
       const plan = normalizePlan(setlist.plan);
@@ -1533,7 +1537,10 @@ export default function AdminDashboardScreen({ navigation, route = {} }) {
     try {
       await fetchJson(`${SYNC_URL}/sync/setlist/reject?id=${encodeURIComponent(setlist.id)}`, {
         method: 'POST', headers: syncHeaders(),
-        body: JSON.stringify({ note: rejectNoteText.trim() }),
+        body: JSON.stringify({
+          note: rejectNoteText.trim(),
+          actorEmail: profile?.email || profile?.identifier || '',
+        }),
       });
       setPendingSetlists(prev => prev.filter(s => s.id !== setlist.id));
       setRejectNoteTarget(null);
