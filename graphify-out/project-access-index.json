@@ -1,0 +1,1081 @@
+{
+  "generatedAt": "2026-08-22T16:28:45.373Z",
+  "projects": [
+    {
+      "name": "@cinestage/sdk",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/cinestage-terminal-main/sdk/javascript",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/cinestage-terminal-main/sdk/javascript/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "lint",
+        "prepare",
+        "test"
+      ]
+    },
+    {
+      "name": "cinestage",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "CineStage_Music_AI",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStage_Music_AI",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "CineStage_Music_AI",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage/CineStage_Music_AI",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "cinestage-assistant-ios",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStageAssistant-iOS",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStageAssistant-iOS/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "eject",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "cinestage-assistant-ios",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage/CineStageAssistant-iOS",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage/CineStageAssistant-iOS/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "eject",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "cinestage-worker",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/AGENTS.md",
+      "scripts": []
+    },
+    {
+      "name": "CineStageAssistant",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStageAssistant",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "CineStageAssistant",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/CineStage_Music_AI/CineStageAssistant",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "CineStageAssistant",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage/CineStageAssistant",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "ultimate-stem-cloud-frontend",
+      "kind": "cinestage",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/ecosystem/ultimate-stem-cloud/frontend",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/ecosystem/ultimate-stem-cloud/frontend/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-musician-api",
+      "kind": "cloudflare-api",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop/cloudflare-api",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop/cloudflare-api/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "db:create",
+        "db:migrate",
+        "deploy",
+        "dev"
+      ]
+    },
+    {
+      "name": "dnl-autopost",
+      "kind": "dnl_autopost",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/dnl_autopost",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/dnl_autopost/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "post-now",
+        "refresh-token",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-mixer-mobile",
+      "kind": "expo-app",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Mixer controller/umixer_v7/expo-app",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Mixer controller/umixer_v7/expo-app/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-stem-cloud-frontend",
+      "kind": "frontend",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate-Stem-Cloud/frontend",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate-Stem-Cloud/frontend/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "start"
+      ]
+    },
+    {
+      "name": "Obsidian Vault",
+      "kind": "Obsidian Vault",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Ecosystem/Obsidian Vault",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Ecosystem/Obsidian Vault",
+      "git": false,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "@upt/design",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/packages/design",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/packages/design/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "cloudflare",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/cloudflare",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/cloudflare/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "test"
+      ]
+    },
+    {
+      "name": "pool_ultimatelabs_co_handoff",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff",
+      "packageJson": null,
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/graphify-out/GRAPH_REPORT.md",
+        "files": "9657",
+        "nodes": "29852",
+        "edges": "40607",
+        "communities": "10705",
+        "commit": "363cc53f"
+      },
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "pool-ultimatelabs-platform",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/web",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/web/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "analyze",
+        "build",
+        "dev",
+        "health",
+        "lint",
+        "start",
+        "test",
+        "test:coverage",
+        "test:watch",
+        "type-check"
+      ]
+    },
+    {
+      "name": "pooltech-expo",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/pooltech-expo",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/pooltech-expo/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-pool-tech-docs",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/_archive/ultimate-pool-tech-docs",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/_archive/ultimate-pool-tech-docs",
+      "git": false,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "upt-mobile",
+      "kind": "pool_tech",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/_archive/mobile-legacy-screens",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/pool_ultimatelabs_co_handoff/_archive/mobile-legacy-screens/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start"
+      ]
+    },
+    {
+      "name": "shared_charts_ts",
+      "kind": "shared_charts_ts",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusician_MasterPack/starter/shared_charts_ts",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusician_MasterPack/starter/shared_charts_ts/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "test"
+      ]
+    },
+    {
+      "name": "ultimate-mixer-desktop",
+      "kind": "tauri-app",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Mixer controller/umixer_v7/tauri-app",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Mixer controller/umixer_v7/tauri-app/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "preview",
+        "tauri",
+        "tauri:build",
+        "tauri:dev"
+      ]
+    },
+    {
+      "name": "temp_repo",
+      "kind": "temp_repo",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/temp_repo",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "ultimate-musician-daw",
+      "kind": "ultimate_daw",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_daw/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "brain",
+        "brain:status",
+        "build",
+        "build:renderer",
+        "dev",
+        "dist",
+        "dist:win",
+        "electron",
+        "electron:dev",
+        "knowledge:projects",
+        "knowledge:update",
+        "knowledge:update:note-only",
+        "preview",
+        "worker:stems",
+        "worker:stems:once"
+      ]
+    },
+    {
+      "name": "ultimate-musician-daw",
+      "kind": "ultimate_daw",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_daw",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_daw/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "build:renderer",
+        "dev",
+        "dist",
+        "dist:win",
+        "electron",
+        "electron:dev",
+        "preview"
+      ]
+    },
+    {
+      "name": "@cinestage/terminal",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/packages/cinestage-terminal",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/packages/cinestage-terminal/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "ask",
+        "doctor",
+        "projects",
+        "status"
+      ]
+    },
+    {
+      "name": "ultimate_musician_full_project",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Ultimate Dev-app/Ultimate_Dev_app_CONSOLIDATED/ultimate_musician_full_project_DEV/ultimate_musician_full_project",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "Ultimate-musician-cinestage-vault",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Cinestage/Ultimate-musician-cinestage-vault",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "Ultimate-musician-cinestage-vault",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Music_Director_Engine/cinestage/Ultimate-musician-cinestage-vault",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "android:dev",
+        "ios",
+        "ios:dev",
+        "lint",
+        "start",
+        "start:dev",
+        "start:go",
+        "test",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_backup_before_consolidated_restore_2026-02-21/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_before_restore_2026-02-13/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/primary_app/ultimate_musician_full_project_v3/mobile_sdk55_canary_backup_2026-02-21/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/package.json",
+      "graphifyReport": "/Users/studio/Ultimate-musician-cinestage-vault/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Ultimate-musician-cinestage-vault/graphify-out/GRAPH_REPORT.md",
+        "files": "17914",
+        "nodes": "31130",
+        "edges": "42136",
+        "communities": "12242",
+        "commit": "0daea249"
+      },
+      "obsidian": "/Users/studio/Ultimate-musician-cinestage-vault/docs/obsidian",
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "check:release-urls",
+        "check:spine",
+        "cinestage",
+        "cinestage:ask",
+        "cinestage:doctor",
+        "cinestage:projects",
+        "cinestage:status",
+        "cinestage:voice",
+        "ios",
+        "knowledge:projects",
+        "knowledge:update",
+        "knowledge:update:note-only",
+        "postinstall",
+        "smoke:worker",
+        "start",
+        "testflight:beta-lane",
+        "testflight:install-monitor",
+        "testflight:share-latest",
+        "testflight:status",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_musician",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/Ultimate-musician-cinestage-vault",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/Ultimate-musician-cinestage-vault/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "postinstall",
+        "start",
+        "testflight:beta-lane",
+        "testflight:install-monitor",
+        "testflight:share-latest",
+        "testflight:status",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_playback",
+      "root": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback",
+      "packageJson": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/package.json",
+      "graphifyReport": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Ultimate-musician-cinestage-vault/apps/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+        "files": "16249",
+        "nodes": "16566",
+        "edges": "18258",
+        "communities": "6546",
+        "commit": "c08d0aa2"
+      },
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "build:web",
+        "deploy:cloudflare",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_playback",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/ultimate_playback",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/apps/ultimate_playback/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_playback",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/ultimate_playback",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/ultimate_playback/package.json",
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+        "files": "8162",
+        "nodes": "11719",
+        "edges": "11922",
+        "communities": "3288",
+        "commit": "0fe92043"
+      },
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "ultimate_playback",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_playback",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_playback/package.json",
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/apps/ultimate_playback/graphify-out/GRAPH_REPORT.md",
+        "files": "16249",
+        "nodes": "16566",
+        "edges": "18258",
+        "communities": "6546",
+        "commit": "c08d0aa2"
+      },
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "build:web",
+        "deploy:cloudflare",
+        "ios",
+        "smoke:assignments",
+        "smoke:auth",
+        "smoke:auth-errors",
+        "smoke:auth-lifecycle",
+        "smoke:blockouts",
+        "smoke:content",
+        "smoke:deleted-refs",
+        "smoke:export-urls",
+        "smoke:live-cues",
+        "smoke:live-performance",
+        "smoke:offline-pack",
+        "smoke:practice",
+        "smoke:queue",
+        "smoke:release-source",
+        "smoke:roles",
+        "smoke:routes",
+        "smoke:stems",
+        "smoke:sync",
+        "start",
+        "verify:eas-ready",
+        "verify:pre-eas",
+        "verify:pre-eas:auth",
+        "web"
+      ]
+    },
+    {
+      "name": "Ultimate_Workspace",
+      "kind": "Ultimate_Workspace",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace",
+      "packageJson": null,
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/graphify-out/GRAPH_REPORT.md",
+        "files": "18852",
+        "nodes": "21469",
+        "edges": "28738",
+        "communities": "7445"
+      },
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "ultimate-sync-server",
+      "kind": "ultimate-sync-server",
+      "root": "/Users/studio/ultimate-sync-server",
+      "packageJson": "/Users/studio/ultimate-sync-server/package.json",
+      "graphifyReport": "/Users/studio/ultimate-sync-server/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/ultimate-sync-server/graphify-out/GRAPH_REPORT.md",
+        "files": "3",
+        "nodes": "94",
+        "edges": "173",
+        "communities": "14",
+        "commit": "bfec7bec"
+      },
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "dev",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-auth-server",
+      "kind": "UltimateAuth_Server",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateAuth_Server",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateAuth_Server/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "dev",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimatelab",
+      "kind": "UltimateMusician_BEST",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST/package.json",
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST/graphify-out/GRAPH_REPORT.md",
+        "files": "31",
+        "nodes": "303",
+        "edges": "672",
+        "communities": "40",
+        "commit": "11178ac0"
+      },
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "lint",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "UltimateMusician_BEST_recovery",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST_recovery",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_BEST_recovery/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimatelab",
+      "kind": "UltimateMusician_CLEAN",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_CLEAN",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_CLEAN/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "lint",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "UltimateMusician_Feb12",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_Feb12",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_Feb12/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "UltimateMusician_ORIGINAL",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_ORIGINAL",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusician_ORIGINAL/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-musician-mobile",
+      "kind": "UltimateMusicianApp_structure",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusicianApp_structure",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusicianApp_structure/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "android:dev",
+        "ios",
+        "ios:dev",
+        "lint",
+        "start",
+        "start:dev",
+        "start:go",
+        "test",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-musician-daw",
+      "kind": "UltimateMusicianDAW",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusicianDAW",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimateMusicianDAW/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "dev",
+        "package",
+        "preview",
+        "typecheck",
+        "waveform"
+      ]
+    },
+    {
+      "name": "ultimate-musician",
+      "kind": "UltimateMusicianDesktop",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "build:all",
+        "build:mac",
+        "build:win",
+        "copy-web",
+        "start"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "UltimatePlatform_MONOREPO_MASTER",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/UltimatePlatform_MONOREPO_MASTER/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "postinstall",
+        "start",
+        "testflight:beta-lane",
+        "testflight:install-monitor",
+        "testflight:share-latest",
+        "testflight:status",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "UltimatePlatform_MONOREPO_MASTER.nosync",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/package.json",
+      "graphifyReport": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/graphify-out/GRAPH_REPORT.md",
+      "graphify": {
+        "report": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Desktop/UltimatePlatform_MONOREPO_MASTER.nosync/graphify-out/GRAPH_REPORT.md",
+        "files": "35063",
+        "nodes": "29390",
+        "edges": "38504",
+        "communities": "12119",
+        "commit": "e5ceab96"
+      },
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "postinstall",
+        "start",
+        "testflight:beta-lane",
+        "testflight:install-monitor",
+        "testflight:share-latest",
+        "testflight:status",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-playback",
+      "kind": "UltimatePlayback_RUN",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimatePlayback_RUN",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimatePlayback_RUN/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "android",
+        "ios",
+        "postinstall",
+        "start",
+        "testflight:beta-lane",
+        "testflight:install-monitor",
+        "testflight:share-latest",
+        "testflight:status",
+        "web"
+      ]
+    },
+    {
+      "name": "ultimate-sync-server",
+      "kind": "UltimateSyncServer",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateSyncServer",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateSyncServer/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": [
+        "dev",
+        "start"
+      ]
+    },
+    {
+      "name": "um-reminders-cron",
+      "kind": "um-reminders-cron",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/um-reminders-cron",
+      "packageJson": null,
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": true,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "Utimate Musician app",
+      "kind": "Utimate Musician app",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": []
+    },
+    {
+      "name": "ultimate-musician-web",
+      "kind": "web-deploy",
+      "root": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop/web-deploy",
+      "packageJson": "/Users/studio/Library/Mobile Documents/com~apple~CloudDocs/Ultimate Ecosystem /Utimate Musician app/Ultimate_Workspace/UltimateMusicianDesktop/web-deploy/package.json",
+      "graphifyReport": null,
+      "graphify": null,
+      "obsidian": null,
+      "git": false,
+      "agents": null,
+      "scripts": [
+        "build",
+        "deploy"
+      ]
+    }
+  ]
+}

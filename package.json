@@ -12,7 +12,21 @@
     "testflight:status": "node scripts/sync-testflight-groups.js --check --warning-days 21",
     "testflight:share-latest": "node scripts/sync-testflight-groups.js --warning-days 21",
     "testflight:beta-lane": "node scripts/sync-testflight-groups.js --warning-days 21 --notify --text",
-    "testflight:install-monitor": "node scripts/install-testflight-beta-lane.js --hour 9 --minute 0 --warning-days 21"
+    "testflight:install-monitor": "node scripts/install-testflight-beta-lane.js --hour 9 --minute 0 --warning-days 21",
+    "check:release-urls": "node scripts/check-release-urls.mjs",
+    "smoke:worker": "node scripts/smoke-worker-sync.mjs",
+    "check:spine": "npm run check:release-urls && npm run smoke:worker",
+    "knowledge:update": "node scripts/cinestage-knowledge-refresh.mjs",
+    "knowledge:update:note-only": "node scripts/cinestage-knowledge-refresh.mjs --skip-graph",
+    "knowledge:projects": "node scripts/cinestage-project-index.mjs",
+    "cinestage": "node packages/cinestage-terminal/bin/cinestage.js",
+    "cinestage:status": "node packages/cinestage-terminal/bin/cinestage.js status",
+    "cinestage:doctor": "node packages/cinestage-terminal/bin/cinestage.js doctor",
+    "cinestage:projects": "node packages/cinestage-terminal/bin/cinestage.js projects",
+    "cinestage:ask": "node packages/cinestage-terminal/bin/cinestage.js ask",
+    "cinestage:voice": "node packages/cinestage-terminal/bin/cinestage.js voice",
+    "cinestage:voice:clap": "python3 packages/cinestage-terminal/voice/cinestage_voice_trigger.py",
+    "cinestage:install-local": "bash packages/cinestage-terminal/install-local.sh"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
