@@ -8,6 +8,7 @@ This is intentionally separate from the embedded Ultimate DAW CineStage Brain. T
 
 ```bash
 npm run cinestage:install-local
+source ~/.zshrc
 cinestage status
 cinestage projects cinestage-terminal
 cinestage ask "what should I inspect next?" --project cinestage-terminal
